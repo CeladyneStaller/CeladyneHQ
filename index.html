@@ -1553,6 +1553,7 @@ function renderHubChrome() {
 // configured trackers and the current user's assigned objectives.
 //
 // Per-tracker Gantt tiles:
+//   - Admins always see every configured Gantt
 //   - Always shown if tracker.alwaysShowGantt is true (org-wide default)
 //   - Otherwise shown only for users with at least one assignment in that tracker
 //
@@ -1571,12 +1572,14 @@ function buildToolList(session) {
   });
 
   // Per-tracker Gantt tiles. Visibility rule:
+  //   - Admins always see every Gantt (oversight role)
   //   - Always show if tracker.alwaysShowGantt is true (org-wide default)
   //   - Otherwise show only if the user has an assignment in that tracker
+  const isAdmin = !!(session && session.role === 'admin');
   trackers.forEach(t => {
     const url = ganttUrlFor(t);
     if (!url) return;
-    const visible = t.alwaysShowGantt || assignedTrackerIds.has(t.id);
+    const visible = isAdmin || t.alwaysShowGantt || assignedTrackerIds.has(t.id);
     if (!visible) return;
     list.push({
       id: `gantt__${t.id}`,
