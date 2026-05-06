@@ -509,6 +509,39 @@
     border-radius: var(--radius);
     margin-bottom: 14px;
   }
+
+  /* Objective picker */
+  .obj-picker {
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    max-height: 180px;
+    overflow-y: auto;
+    background: var(--surface);
+  }
+  .obj-picker .obj-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 0.5px solid var(--border);
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .obj-picker .obj-row:last-child { border-bottom: none; }
+  .obj-picker .obj-row:hover { background: var(--surface-alt); }
+  .obj-picker .obj-row input { margin: 0; flex-shrink: 0; }
+  .obj-picker .obj-empty {
+    padding: 12px;
+    font-size: 13px;
+    color: var(--text-subtle);
+    text-align: center;
+  }
+  .obj-picker-meta {
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin-top: 4px;
+  }
  
   /* Footer note (login) */
   .auth-footnote {
@@ -569,6 +602,10 @@
       <label class="field">
         <span class="label-row">JSONBin users bin ID</span>
         <input type="text" id="setup-bin-id" autocomplete="off" placeholder="e.g. 65a1b2c3d4e5f6...">
+      </label>
+      <label class="field">
+        <span class="label-row">JSONBin Q Tracker bin ID <span class="subtle">(optional)</span></span>
+        <input type="text" id="setup-tracker-id" autocomplete="off" placeholder="leave blank to set later">
       </label>
       <label class="field">
         <span class="label-row">Master key</span>
@@ -712,9 +749,13 @@
     <!-- Hub config -->
     <div class="drawer-section">
       <div class="drawer-section-head">Hub configuration</div>
-      <div class="tiny muted" style="margin-bottom: 8px;">
-        Bin ID: <span class="mono" id="drawer-bin-id">&mdash;</span>
+      <div class="tiny muted" style="margin-bottom: 4px;">
+        Users bin: <span class="mono" id="drawer-bin-id">&mdash;</span>
       </div>
+      <div class="tiny muted" style="margin-bottom: 12px;">
+        Tracker bin: <span class="mono" id="drawer-tracker-id">&mdash;</span>
+      </div>
+      <button class="btn btn-block btn-sm" id="drawer-set-tracker" style="margin-bottom: 8px;">Set tracker bin ID</button>
       <button class="btn btn-block btn-sm" id="drawer-reset-config">Reset device configuration</button>
     </div>
  
@@ -748,8 +789,9 @@
 //  Per project convention: do NOT commit usersBinId or masterKey here.
 const CONFIG_DEFAULTS = {
   usersBinId: '',
+  trackerBinId: '',         // Q Tracker bin (objectives live here)
   masterKey: '',
-  logoPath: 'logo.svg',     // drop a logo.svg or logo.png next to hub.html
+  logoPath: 'logo.png',     // drop a logo.png or logo.png next to hub.html
   sessionDays: 30,
   pinMinLength: 6,
   pbkdf2Iterations: 200000,
@@ -765,6 +807,15 @@ const CONFIG_DEFAULTS = {
 //
 //  Wire fetchStatus to real bins as those tools settle. For now,
 //  most return placeholder text that matches the mockup.
+
+// Build a tracker URL filtered to the user's assigned objectives.
+// Empty assignment list → unfiltered (per design decision).
+function buildTrackerUrl(basePath, session) {
+  const ids = (session && session.assignedObjectives) || [];
+  if (!ids.length) return basePath;
+  const csv = ids.map(encodeURIComponent).join(',');
+  return `${basePath}?objective=${csv}`;
+}
 
 const TOOLS = [
    {
@@ -805,7 +856,7 @@ const TOOLS = [
     name: 'Q tracker',
     description: 'Quarterly objectives and key results',
     icon: 'target-arrow',
-    url: 'q-tracker.html',
+    url: (session) => buildTrackerUrl('q-tracker.html', session),
     fetchStatus: async () => {
       // TODO: wire to q-tracker bin — count KRs with stale updates
       return { text: '3 KRs need updates', severity: 'subtle' };
@@ -816,7 +867,7 @@ const TOOLS = [
     name: 'Stage-gate health',
     description: 'TRL/MRL progress and gate readiness',
     icon: 'stack-2',
-    url: 'stage-gate-health.html',
+    url: (session) => buildTrackerUrl('stage-gate-health.html', session),
     fetchStatus: async () => {
       // TODO: wire to gantt bin — derive gate health from stages
       return { text: '4 green &middot; 1 amber', severity: 'success' };
@@ -978,6 +1029,10 @@ async function jbFetchUsers() {
   if (!data || typeof data !== 'object') return { users: [], schemaVersion: SCHEMA_VERSION };
   if (!Array.isArray(data.users)) data.users = [];
   if (!data.schemaVersion) data.schemaVersion = SCHEMA_VERSION;
+  // Backfill any user records missing the assignedObjectives field.
+  data.users.forEach(u => {
+    if (!Array.isArray(u.assignedObjectives)) u.assignedObjectives = [];
+  });
   return data;
 }
 async function jbSaveUsers(record) {
@@ -996,6 +1051,57 @@ async function jbSaveUsers(record) {
     throw new Error(`Bin save failed: ${r.status} ${txt}`);
   }
   return r.json();
+}
+
+// ---- Q Tracker bin ----
+// Best-effort: hub will function without the tracker bin configured, but
+// the objective picker and cascade-cleanup features will be disabled.
+function trackerConfigured() {
+  return !!(STATE.config && STATE.config.trackerBinId && STATE.config.masterKey);
+}
+async function jbFetchTracker() {
+  const cfg = STATE.config;
+  if (!trackerConfigured()) throw new Error('Q Tracker bin is not configured.');
+  const r = await fetch(`${JSONBIN_BASE}/${cfg.trackerBinId}/latest`, {
+    headers: { 'X-Master-Key': cfg.masterKey, 'X-Bin-Meta': 'false' },
+    cache: 'no-store'
+  });
+  if (!r.ok) {
+    if (r.status === 401 || r.status === 403) throw new Error('Invalid tracker bin or key.');
+    if (r.status === 404) return { objectives: [] };
+    throw new Error(`Tracker fetch failed: ${r.status}`);
+  }
+  const data = await r.json();
+  if (!data || typeof data !== 'object') return { objectives: [] };
+  // The tracker bin owns its own schema. We only touch `objectives` here.
+  if (!Array.isArray(data.objectives)) data.objectives = [];
+  return data;
+}
+async function jbSaveTracker(record) {
+  const cfg = STATE.config;
+  const r = await fetch(`${JSONBIN_BASE}/${cfg.trackerBinId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Master-Key': cfg.masterKey },
+    body: JSON.stringify(record)
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`Tracker save failed: ${r.status} ${txt}`);
+  }
+  return r.json();
+}
+
+// Read the canonical objective ID. Different tracker schemas use different
+// fields; check the most common ones in order. Returns null if no usable id.
+function objectiveId(obj) {
+  return obj && (obj.id || obj.code || obj.objectiveId || obj.key) || null;
+}
+function objectiveLabel(obj) {
+  if (!obj) return '';
+  const id = objectiveId(obj);
+  const name = obj.name || obj.title || obj.description || '';
+  if (id && name) return `${id} — ${name}`;
+  return name || id || '(unnamed)';
 }
  
 // ============================================================
@@ -1017,6 +1123,7 @@ async function createUserRecord(email, pin, role) {
     pinHash,
     salt,
     iterations: STATE.config.pbkdf2Iterations,
+    assignedObjectives: [],
     createdAt: Date.now(),
     lastLogin: null,
     disabled: false
@@ -1034,6 +1141,7 @@ function makeSession(user, days) {
   return {
     email: user.email,
     role: user.role || 'user',
+    assignedObjectives: Array.isArray(user.assignedObjectives) ? user.assignedObjectives.slice() : [],
     issuedAt: now,
     expiresAt: now + sessionDays * 24 * 60 * 60 * 1000,
     tokenId: (crypto.randomUUID && crypto.randomUUID()) || generateSalt(8)
@@ -1116,13 +1224,14 @@ function relativeTime(ts) {
 function bindSetupView() {
   document.getElementById('setup-save').addEventListener('click', async () => {
     const binId = document.getElementById('setup-bin-id').value.trim();
+    const trackerId = document.getElementById('setup-tracker-id').value.trim();
     const masterKey = document.getElementById('setup-master-key').value.trim();
     if (!binId || !masterKey) {
-      showError('setup-error', 'Both fields are required.');
+      showError('setup-error', 'Users bin ID and master key are required.');
       return;
     }
     showError('setup-error', '');
-    saveConfig({ usersBinId: binId, masterKey });
+    saveConfig({ usersBinId: binId, trackerBinId: trackerId, masterKey });
     setLogoSrc();
     // Validate by attempting a fetch
     try {
@@ -1321,6 +1430,8 @@ function renderHubChrome() {
   // Drawer config display
   document.getElementById('drawer-bin-id').textContent =
     (STATE.config && STATE.config.usersBinId) ? STATE.config.usersBinId : '—';
+  document.getElementById('drawer-tracker-id').textContent =
+    (STATE.config && STATE.config.trackerBinId) ? STATE.config.trackerBinId : 'not set';
   // Admin section
   document.getElementById('drawer-admin-section').style.display =
     s.role === 'admin' ? 'block' : 'none';
@@ -1331,7 +1442,7 @@ function renderTiles() {
   TOOLS.forEach(tool => {
     const a = document.createElement('a');
     a.className = 'tile';
-    a.href = tool.url;
+    a.href = typeof tool.url === 'function' ? tool.url(STATE.session) : tool.url;
     a.dataset.toolId = tool.id;
     a.innerHTML = `
       <div class="tile-head">
@@ -1421,6 +1532,50 @@ function bindDrawer() {
       }
     });
   });
+
+  document.getElementById('drawer-set-tracker').addEventListener('click', () => {
+    openSetTrackerBinModal();
+  });
+}
+
+function openSetTrackerBinModal() {
+  const current = (STATE.config && STATE.config.trackerBinId) || '';
+  openModal(`
+    <h3>Q Tracker bin ID</h3>
+    <p class="intro">Connects the hub to the tracker so admins can assign objectives to users. Stored on this device only.</p>
+    <div id="set-tracker-error" class="inline-error" style="display: none;"></div>
+    <label class="field">
+      <span class="label-row">Bin ID</span>
+      <input type="text" id="set-tracker-input" autocomplete="off" value="${current}" placeholder="paste tracker bin ID">
+    </label>
+    <div class="modal-actions">
+      <button class="btn" data-act="cancel">Cancel</button>
+      <button class="btn btn-primary" data-act="save">Save</button>
+    </div>
+  `);
+  document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
+  document.querySelector('[data-act="save"]').addEventListener('click', async () => {
+    const val = document.getElementById('set-tracker-input').value.trim();
+    const btn = document.querySelector('[data-act="save"]');
+    btn.disabled = true;
+    btn.textContent = 'Verifying…';
+    saveConfig({ trackerBinId: val });
+    if (val) {
+      try {
+        await jbFetchTracker(); // verify it works
+        toast('Tracker bin connected', 'success');
+      } catch (e) {
+        showError('set-tracker-error', e.message || 'Could not reach the tracker bin.');
+        btn.disabled = false;
+        btn.textContent = 'Save';
+        return;
+      }
+    } else {
+      toast('Tracker bin cleared', 'success');
+    }
+    closeModal();
+    renderHubChrome();
+  });
 }
  
 // ============================================================
@@ -1442,9 +1597,12 @@ async function renderUserList() {
       <span class="avatar" style="width: 30px; height: 30px;">${initialsFor(user.email)}</span>
       <div class="user-info">
         <div class="email">${user.email}${isMe ? ' <span class="tiny subtle">(you)</span>' : ''}</div>
-        <div class="meta">${user.role || 'user'} &middot; last sign-in ${last}</div>
+        <div class="meta">${user.role || 'user'} &middot; ${(user.assignedObjectives || []).length} objective${(user.assignedObjectives || []).length === 1 ? '' : 's'} &middot; last sign-in ${last}</div>
       </div>
       <div class="user-actions">
+        <button class="btn btn-sm" data-act="edit" data-email="${user.email}" title="Edit">
+          <i class="ti ti-edit" aria-hidden="true"></i>
+        </button>
         <button class="btn btn-sm" data-act="reset" data-email="${user.email}" title="Reset PIN">
           <i class="ti ti-key" aria-hidden="true"></i>
         </button>
@@ -1466,12 +1624,16 @@ async function handleUserAction(action, email) {
   const record = STATE.usersRecord;
   const user = findUser(record, email);
   if (!user) return;
-  if (action === 'reset') {
+  if (action === 'edit') {
+    openEditUserModal(user);
+  } else if (action === 'reset') {
     openResetPinModal(user);
   } else if (action === 'toggle') {
     user.disabled = !user.disabled;
     try {
       await jbSaveUsers(record);
+      // Disabling a user changes who appears in objective.assignedTo arrays.
+      syncTrackerAssignments(record).catch(err => console.warn('Tracker sync failed:', err));
       toast(`${email} ${user.disabled ? 'disabled' : 'enabled'}`, 'success');
       renderUserList();
     } catch (e) {
@@ -1481,13 +1643,18 @@ async function handleUserAction(action, email) {
   } else if (action === 'delete') {
     confirmModal({
       title: `Remove ${email}?`,
-      body: 'This deletes the user permanently. Their existing session will keep working until it expires.',
+      body: 'This deletes the user permanently and removes their email from all objective assignments. Their existing session will keep working until it expires.',
       confirmText: 'Remove',
       danger: true,
       onConfirm: async () => {
         record.users = record.users.filter(u => normaliseEmail(u.email) !== normaliseEmail(email));
         try {
           await jbSaveUsers(record);
+          // Cascade cleanup: rewrite objectives' assignedTo arrays.
+          syncTrackerAssignments(record).catch(err => {
+            console.warn('Tracker sync failed:', err);
+            toast('User removed, but tracker cleanup failed: ' + (err.message || ''), 'error');
+          });
           toast(`${email} removed`, 'success');
           renderUserList();
         } catch (e) {
@@ -1530,6 +1697,89 @@ function confirmModal({ title, body, confirmText, danger, onConfirm }) {
   });
 }
  
+// ---------- Objective picker helpers ----------
+// Renders a checkbox list of objectives from the tracker bin into a container.
+// Returns { getSelected(): string[] }. If tracker isn't configured or fetch fails,
+// renders a graceful fallback message and getSelected returns [].
+async function mountObjectivePicker(containerId, preselectedIds) {
+  const el = document.getElementById(containerId);
+  if (!el) return { getSelected: () => [] };
+  preselectedIds = preselectedIds || [];
+
+  if (!trackerConfigured()) {
+    el.outerHTML = `<div class="obj-empty" style="border: 0.5px solid var(--border-strong); border-radius: var(--radius);">Q Tracker bin not configured. Set it in Settings → Hub configuration to assign objectives.</div>`;
+    return { getSelected: () => [] };
+  }
+
+  el.innerHTML = '<div class="obj-empty">Loading objectives…</div>';
+  let objectives = [];
+  try {
+    const tracker = await jbFetchTracker();
+    objectives = tracker.objectives || [];
+  } catch (e) {
+    el.innerHTML = `<div class="obj-empty" style="color: var(--danger);">Could not load objectives: ${e.message || 'fetch failed'}</div>`;
+    return { getSelected: () => [] };
+  }
+
+  if (!objectives.length) {
+    el.innerHTML = '<div class="obj-empty">No objectives in the tracker yet.</div>';
+    return { getSelected: () => [] };
+  }
+
+  const selected = new Set(preselectedIds);
+  el.innerHTML = '';
+  objectives.forEach(obj => {
+    const id = objectiveId(obj);
+    if (!id) return; // skip malformed
+    const row = document.createElement('label');
+    row.className = 'obj-row';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = id;
+    cb.checked = selected.has(id);
+    cb.addEventListener('change', () => {
+      if (cb.checked) selected.add(id); else selected.delete(id);
+    });
+    const text = document.createElement('span');
+    text.textContent = objectiveLabel(obj);
+    row.appendChild(cb);
+    row.appendChild(text);
+    el.appendChild(row);
+  });
+
+  return { getSelected: () => Array.from(selected) };
+}
+
+// Sync writer: update the tracker bin so each objective's assignedTo array
+// reflects which users have it in their assignedObjectives. Receives the full
+// users record so we can fully reconcile.
+// Use sparingly — one extra fetch + write per call.
+async function syncTrackerAssignments(usersRecord) {
+  if (!trackerConfigured()) return;
+  const tracker = await jbFetchTracker();
+  const objectives = tracker.objectives || [];
+  // Build the inverse map: objectiveId -> [emails]
+  const inverse = {};
+  (usersRecord.users || []).forEach(u => {
+    if (u.disabled) return; // disabled users shouldn't appear as assignees
+    (u.assignedObjectives || []).forEach(id => {
+      (inverse[id] = inverse[id] || []).push(normaliseEmail(u.email));
+    });
+  });
+  let changed = false;
+  objectives.forEach(obj => {
+    const id = objectiveId(obj);
+    if (!id) return;
+    const next = (inverse[id] || []).slice().sort();
+    const prev = (Array.isArray(obj.assignedTo) ? obj.assignedTo : []).map(normaliseEmail).sort();
+    if (next.length !== prev.length || next.some((v, i) => v !== prev[i])) {
+      obj.assignedTo = next;
+      changed = true;
+    }
+  });
+  if (changed) await jbSaveTracker(tracker);
+}
+
 function openAddUserModal() {
   openModal(`
     <h3>Add user</h3>
@@ -1543,15 +1793,21 @@ function openAddUserModal() {
       <span class="label-row">Initial PIN (6+ digits)</span>
       <input type="text" id="adduser-pin" class="pin" inputmode="numeric" maxlength="12">
     </label>
-    <label class="checkbox-row" style="margin-bottom: 8px;">
+    <label class="checkbox-row" style="margin-bottom: 14px;">
       <input type="checkbox" id="adduser-admin">
       <span>Grant admin role</span>
+    </label>
+    <label class="field">
+      <span class="label-row">Assigned objectives</span>
+      <div id="adduser-objectives" class="obj-picker"></div>
+      <div class="obj-picker-meta">Stage-gate and Q Tracker tiles will deep-link to these objectives.</div>
     </label>
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">Add user</button>
     </div>
   `);
+  const pickerPromise = mountObjectivePicker('adduser-objectives', []);
   document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
   document.querySelector('[data-act="save"]').addEventListener('click', async () => {
     const email = document.getElementById('adduser-email').value;
@@ -1570,10 +1826,17 @@ function openAddUserModal() {
     btn.disabled = true;
     btn.textContent = 'Saving…';
     try {
+      const picker = await pickerPromise;
       const user = await createUserRecord(email, pin, isAdmin ? 'admin' : 'user');
+      user.assignedObjectives = picker.getSelected();
       record.users.push(user);
       await jbSaveUsers(record);
       STATE.usersRecord = record;
+      // Best-effort inverse sync; surface failure but don't block UX.
+      syncTrackerAssignments(record).catch(err => {
+        console.warn('Tracker sync failed:', err);
+        toast('User added, but tracker sync failed: ' + (err.message || ''), 'error');
+      });
       toast(`${user.email} added`, 'success');
       closeModal();
       renderUserList();
@@ -1581,6 +1844,65 @@ function openAddUserModal() {
       showError('add-user-error', e.message || 'Save failed.');
       btn.disabled = false;
       btn.textContent = 'Add user';
+    }
+  });
+}
+
+function openEditUserModal(user) {
+  openModal(`
+    <h3>Edit ${user.email}</h3>
+    <p class="intro">Update role and assigned objectives. Use Reset PIN for credential changes.</p>
+    <div id="edit-user-error" class="inline-error" style="display: none;"></div>
+    <label class="checkbox-row" style="margin-bottom: 14px;">
+      <input type="checkbox" id="edituser-admin" ${user.role === 'admin' ? 'checked' : ''}>
+      <span>Admin role</span>
+    </label>
+    <label class="field">
+      <span class="label-row">Assigned objectives</span>
+      <div id="edituser-objectives" class="obj-picker"></div>
+      <div class="obj-picker-meta">Stage-gate and Q Tracker tiles will deep-link to these objectives.</div>
+    </label>
+    <div class="modal-actions">
+      <button class="btn" data-act="cancel">Cancel</button>
+      <button class="btn btn-primary" data-act="save">Save changes</button>
+    </div>
+  `);
+  const pickerPromise = mountObjectivePicker('edituser-objectives', user.assignedObjectives || []);
+  document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
+  document.querySelector('[data-act="save"]').addEventListener('click', async () => {
+    const isAdmin = document.getElementById('edituser-admin').checked;
+    const btn = document.querySelector('[data-act="save"]');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const picker = await pickerPromise;
+      const record = STATE.usersRecord || await jbFetchUsers();
+      const target = findUser(record, user.email);
+      if (!target) throw new Error('User no longer exists.');
+      target.role = isAdmin ? 'admin' : 'user';
+      target.assignedObjectives = picker.getSelected();
+      await jbSaveUsers(record);
+      STATE.usersRecord = record;
+      // If the edited user is the current user, refresh the session so the
+      // new objectives take effect immediately on tile clicks.
+      if (STATE.session && normaliseEmail(STATE.session.email) === normaliseEmail(target.email)) {
+        STATE.session.assignedObjectives = target.assignedObjectives.slice();
+        STATE.session.role = target.role;
+        saveSession(STATE.session);
+        renderHubChrome();
+        renderTiles();
+      }
+      syncTrackerAssignments(record).catch(err => {
+        console.warn('Tracker sync failed:', err);
+        toast('User updated, but tracker sync failed: ' + (err.message || ''), 'error');
+      });
+      toast(`${target.email} updated`, 'success');
+      closeModal();
+      renderUserList();
+    } catch (e) {
+      showError('edit-user-error', e.message || 'Save failed.');
+      btn.disabled = false;
+      btn.textContent = 'Save changes';
     }
   });
 }
