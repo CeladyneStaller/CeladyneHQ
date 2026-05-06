@@ -858,6 +858,28 @@ const TOOLS = [
     }
   },
   {
+    id: 'celadyne-confluence',
+    name: 'Celadyne Confluence',
+    description: 'Team wiki and project documentation',
+    icon: 'brand-confluence',
+    url: 'https://celadyne.atlassian.net/wiki/',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open workspace', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'profit-co',
+    name: 'Profit.co',
+    description: 'OKR platform for company-level objectives',
+    icon: 'flag-3',
+    url: 'https://app.profit.co/',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open OKR dashboard', severity: 'subtle' };
+    }
+  },
+  {
     id: 'safety-checkin',
     name: 'Safety check-in',
     description: 'Lab and field activity logging',
