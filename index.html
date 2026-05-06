@@ -604,10 +604,6 @@
         <input type="text" id="setup-bin-id" autocomplete="off" placeholder="e.g. 65a1b2c3d4e5f6...">
       </label>
       <label class="field">
-        <span class="label-row">JSONBin Q Tracker bin ID <span class="subtle">(optional)</span></span>
-        <input type="text" id="setup-tracker-id" autocomplete="off" placeholder="leave blank to set later">
-      </label>
-      <label class="field">
         <span class="label-row">Master key</span>
         <input type="password" id="setup-master-key" autocomplete="off">
       </label>
@@ -753,9 +749,9 @@
         Users bin: <span class="mono" id="drawer-bin-id">&mdash;</span>
       </div>
       <div class="tiny muted" style="margin-bottom: 12px;">
-        Tracker bin: <span class="mono" id="drawer-tracker-id">&mdash;</span>
+        Trackers: <span id="drawer-tracker-summary">&mdash;</span>
       </div>
-      <button class="btn btn-block btn-sm" id="drawer-set-tracker" style="margin-bottom: 8px;">Set tracker bin ID</button>
+      <button class="btn btn-block btn-sm" id="drawer-manage-trackers" style="margin-bottom: 8px;">Manage tracker bins</button>
       <button class="btn btn-block btn-sm" id="drawer-reset-config">Reset device configuration</button>
     </div>
  
@@ -789,9 +785,10 @@
 //  Per project convention: do NOT commit usersBinId or masterKey here.
 const CONFIG_DEFAULTS = {
   usersBinId: '',
-  trackerBinId: '',         // Q Tracker bin (objectives live here)
+  trackerBinId: '',         // LEGACY: single-tracker config (auto-migrated to trackers[0])
+  trackers: [],             // [{ id: 'celadyne', name: 'Celadyne', binId: '...' }, ...]
   masterKey: '',
-  logoPath: 'logo.png',     // drop a logo.png or logo.png next to hub.html
+  logoPath: 'logo.png',     // drop a logo.png or logo.svg next to index.html
   sessionDays: 30,
   pinMinLength: 6,
   pbkdf2Iterations: 200000,
@@ -808,13 +805,22 @@ const CONFIG_DEFAULTS = {
 //  Wire fetchStatus to real bins as those tools settle. For now,
 //  most return placeholder text that matches the mockup.
 
-// Build a tracker URL filtered to the user's assigned objectives.
-// Empty assignment list → unfiltered (per design decision).
-function buildTrackerUrl(basePath, session) {
-  const ids = (session && session.assignedObjectives) || [];
-  if (!ids.length) return basePath;
-  const csv = ids.map(encodeURIComponent).join(',');
-  return `${basePath}?objective=${csv}`;
+// URL builders for the dynamically-generated tiles.
+// Each tracker's tile points at the same q-tracker.html / stage-gate-health.html
+// page, identifying which bin to load via ?tracker=<id> and which objective(s)
+// to filter to via ?objective=<csv>. Sub-tools must read those params on load.
+function qTrackerUrlFor(trackerId, objectiveIds) {
+  const csv = (objectiveIds || []).map(encodeURIComponent).join(',');
+  const params = new URLSearchParams();
+  params.set('tracker', trackerId);
+  if (csv) params.set('objective', csv);
+  return `q-tracker.html?${params.toString()}`;
+}
+function stageGateUrlFor(trackerId, objectiveId) {
+  const params = new URLSearchParams();
+  params.set('tracker', trackerId);
+  params.set('objective', objectiveId);
+  return `stage-gate-health.html?${params.toString()}`;
 }
 
 const TOOLS = [
@@ -849,28 +855,6 @@ const TOOLS = [
     fetchStatus: async () => {
       // TODO: wire to gantt bin — count gates with end date in next 7 days
       return { text: '2 gates due this week', severity: 'warning' };
-    }
-  },
-  {
-    id: 'q-tracker',
-    name: 'Q tracker',
-    description: 'Quarterly objectives and key results',
-    icon: 'target-arrow',
-    url: (session) => buildTrackerUrl('q-tracker.html', session),
-    fetchStatus: async () => {
-      // TODO: wire to q-tracker bin — count KRs with stale updates
-      return { text: '3 KRs need updates', severity: 'subtle' };
-    }
-  },
-  {
-    id: 'stage-gate-health',
-    name: 'Stage-gate health',
-    description: 'TRL/MRL progress and gate readiness',
-    icon: 'stack-2',
-    url: (session) => buildTrackerUrl('stage-gate-health.html', session),
-    fetchStatus: async () => {
-      // TODO: wire to gantt bin — derive gate health from stages
-      return { text: '4 green &middot; 1 amber', severity: 'success' };
     }
   },
   {
@@ -1029,9 +1013,24 @@ async function jbFetchUsers() {
   if (!data || typeof data !== 'object') return { users: [], schemaVersion: SCHEMA_VERSION };
   if (!Array.isArray(data.users)) data.users = [];
   if (!data.schemaVersion) data.schemaVersion = SCHEMA_VERSION;
-  // Backfill any user records missing the assignedObjectives field.
+  // Backfill / migrate assignedObjectives.
+  // Old shape: ['Tera-01', 'Mega-03']
+  // New shape: [{ tracker: 'celadyne', id: 'Tera-01' }, ...]
+  // If the legacy single-tracker config is present, migrate strings to that tracker.
+  // Otherwise use 'default' as a placeholder so admins can re-route via Edit User.
+  const legacyTrackerId = (getConfiguredTrackers()[0] || {}).id || 'default';
   data.users.forEach(u => {
-    if (!Array.isArray(u.assignedObjectives)) u.assignedObjectives = [];
+    if (!Array.isArray(u.assignedObjectives)) {
+      u.assignedObjectives = [];
+      return;
+    }
+    u.assignedObjectives = u.assignedObjectives.map(item => {
+      if (typeof item === 'string') return { tracker: legacyTrackerId, id: item };
+      if (item && typeof item === 'object' && item.id) {
+        return { tracker: item.tracker || legacyTrackerId, id: item.id };
+      }
+      return null;
+    }).filter(Boolean);
   });
   return data;
 }
@@ -1053,40 +1052,59 @@ async function jbSaveUsers(record) {
   return r.json();
 }
 
-// ---- Q Tracker bin ----
-// Best-effort: hub will function without the tracker bin configured, but
-// the objective picker and cascade-cleanup features will be disabled.
-function trackerConfigured() {
-  return !!(STATE.config && STATE.config.trackerBinId && STATE.config.masterKey);
+// ---- Q Trackers (multi-bin) ----
+// Trackers are configured as { id, name, binId } in STATE.config.trackers.
+// Legacy: if STATE.config.trackerBinId is set and trackers[] is empty, treat
+// it as a single default tracker.
+
+function getConfiguredTrackers() {
+  const cfg = STATE.config || {};
+  const list = Array.isArray(cfg.trackers) ? cfg.trackers.filter(t => t && t.id && t.binId) : [];
+  if (list.length) return list;
+  if (cfg.trackerBinId) {
+    return [{ id: 'default', name: 'Tracker', binId: cfg.trackerBinId }];
+  }
+  return [];
 }
-async function jbFetchTracker() {
+function findTracker(trackerId) {
+  return getConfiguredTrackers().find(t => t.id === trackerId) || null;
+}
+function trackersConfigured() {
+  return getConfiguredTrackers().length > 0;
+}
+// Backwards-compatible name retained for any callers that pre-date the rename.
+function trackerConfigured() { return trackersConfigured(); }
+
+async function jbFetchTracker(trackerId) {
   const cfg = STATE.config;
-  if (!trackerConfigured()) throw new Error('Q Tracker bin is not configured.');
-  const r = await fetch(`${JSONBIN_BASE}/${cfg.trackerBinId}/latest`, {
+  const tracker = findTracker(trackerId);
+  if (!tracker) throw new Error(`Tracker "${trackerId}" is not configured.`);
+  const r = await fetch(`${JSONBIN_BASE}/${tracker.binId}/latest`, {
     headers: { 'X-Master-Key': cfg.masterKey, 'X-Bin-Meta': 'false' },
     cache: 'no-store'
   });
   if (!r.ok) {
-    if (r.status === 401 || r.status === 403) throw new Error('Invalid tracker bin or key.');
+    if (r.status === 401 || r.status === 403) throw new Error(`Invalid bin or key for tracker "${tracker.name}".`);
     if (r.status === 404) return { objectives: [] };
-    throw new Error(`Tracker fetch failed: ${r.status}`);
+    throw new Error(`Tracker fetch failed (${tracker.name}): ${r.status}`);
   }
   const data = await r.json();
   if (!data || typeof data !== 'object') return { objectives: [] };
-  // The tracker bin owns its own schema. We only touch `objectives` here.
   if (!Array.isArray(data.objectives)) data.objectives = [];
   return data;
 }
-async function jbSaveTracker(record) {
+async function jbSaveTracker(trackerId, record) {
   const cfg = STATE.config;
-  const r = await fetch(`${JSONBIN_BASE}/${cfg.trackerBinId}`, {
+  const tracker = findTracker(trackerId);
+  if (!tracker) throw new Error(`Tracker "${trackerId}" is not configured.`);
+  const r = await fetch(`${JSONBIN_BASE}/${tracker.binId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'X-Master-Key': cfg.masterKey },
     body: JSON.stringify(record)
   });
   if (!r.ok) {
     const txt = await r.text().catch(() => '');
-    throw new Error(`Tracker save failed: ${r.status} ${txt}`);
+    throw new Error(`Tracker save failed (${tracker.name}): ${r.status} ${txt}`);
   }
   return r.json();
 }
@@ -1102,6 +1120,16 @@ function objectiveLabel(obj) {
   const name = obj.name || obj.title || obj.description || '';
   if (id && name) return `${id} — ${name}`;
   return name || id || '(unnamed)';
+}
+
+// Stable string key for an assignment, used as checkbox value in the picker.
+function assignmentKey(a) {
+  return `${a.tracker}::${a.id}`;
+}
+function parseAssignmentKey(k) {
+  const i = k.indexOf('::');
+  if (i < 0) return null;
+  return { tracker: k.slice(0, i), id: k.slice(i + 2) };
 }
  
 // ============================================================
@@ -1224,14 +1252,13 @@ function relativeTime(ts) {
 function bindSetupView() {
   document.getElementById('setup-save').addEventListener('click', async () => {
     const binId = document.getElementById('setup-bin-id').value.trim();
-    const trackerId = document.getElementById('setup-tracker-id').value.trim();
     const masterKey = document.getElementById('setup-master-key').value.trim();
     if (!binId || !masterKey) {
       showError('setup-error', 'Users bin ID and master key are required.');
       return;
     }
     showError('setup-error', '');
-    saveConfig({ usersBinId: binId, trackerBinId: trackerId, masterKey });
+    saveConfig({ usersBinId: binId, masterKey });
     setLogoSrc();
     // Validate by attempting a fetch
     try {
@@ -1430,16 +1457,68 @@ function renderHubChrome() {
   // Drawer config display
   document.getElementById('drawer-bin-id').textContent =
     (STATE.config && STATE.config.usersBinId) ? STATE.config.usersBinId : '—';
-  document.getElementById('drawer-tracker-id').textContent =
-    (STATE.config && STATE.config.trackerBinId) ? STATE.config.trackerBinId : 'not set';
+  const trackers = getConfiguredTrackers();
+  document.getElementById('drawer-tracker-summary').textContent = trackers.length
+    ? trackers.map(t => t.name).join(', ')
+    : 'none configured';
   // Admin section
   document.getElementById('drawer-admin-section').style.display =
     s.role === 'admin' ? 'block' : 'none';
 }
+// Build the full tile list: static TOOLS plus dynamic tiles generated from
+// the current user's assigned objectives. Dynamic tiles are:
+//   - One Q tracker tile per tracker the user has any assignments in
+//   - One Stage-gate tile per assigned objective
+function buildToolList(session) {
+  const list = TOOLS.slice();
+  const assignments = (session && session.assignedObjectives) || [];
+  if (!assignments.length) return list;
+
+  // Group assignments by tracker
+  const byTracker = {};
+  assignments.forEach(a => {
+    if (!a || !a.id || !a.tracker) return;
+    (byTracker[a.tracker] = byTracker[a.tracker] || []).push(a.id);
+  });
+
+  // Q tracker tiles: one per tracker
+  Object.keys(byTracker).forEach(trackerId => {
+    const tracker = findTracker(trackerId);
+    const trackerName = tracker ? tracker.name : trackerId;
+    const ids = byTracker[trackerId];
+    list.push({
+      id: `q-tracker__${trackerId}`,
+      name: `${trackerName} Q tracker`,
+      description: `${ids.length} objective${ids.length === 1 ? '' : 's'} assigned to you`,
+      icon: 'target-arrow',
+      url: qTrackerUrlFor(trackerId, ids),
+      fetchStatus: async () => ({ text: `${ids.length} assigned`, severity: 'subtle' })
+    });
+  });
+
+  // Stage-gate tiles: one per assigned objective
+  assignments.forEach(a => {
+    const tracker = findTracker(a.tracker);
+    const trackerName = tracker ? tracker.name : a.tracker;
+    list.push({
+      id: `stage-gate__${a.tracker}__${a.id}`,
+      name: `Stage-gate · ${a.id}`,
+      description: `${trackerName} · TRL/MRL progress`,
+      icon: 'stack-2',
+      url: stageGateUrlFor(a.tracker, a.id),
+      fetchStatus: async () => ({ text: 'View progress', severity: 'subtle' })
+    });
+  });
+
+  return list;
+}
+
 function renderTiles() {
   const grid = document.getElementById('tile-grid');
   grid.innerHTML = '';
-  TOOLS.forEach(tool => {
+  const tools = buildToolList(STATE.session);
+  STATE._currentTools = tools; // expose to fetchTileStatuses
+  tools.forEach(tool => {
     const a = document.createElement('a');
     a.className = 'tile';
     a.href = typeof tool.url === 'function' ? tool.url(STATE.session) : tool.url;
@@ -1460,7 +1539,8 @@ function renderTiles() {
 }
 async function fetchTileStatuses() {
   let urgentCount = 0;
-  await Promise.all(TOOLS.map(async (tool) => {
+  const tools = STATE._currentTools || TOOLS;
+  await Promise.all(tools.map(async (tool) => {
     const el = document.querySelector(`[data-status="${tool.id}"]`);
     if (!el) return;
     try {
@@ -1533,48 +1613,170 @@ function bindDrawer() {
     });
   });
 
-  document.getElementById('drawer-set-tracker').addEventListener('click', () => {
-    openSetTrackerBinModal();
+  document.getElementById('drawer-manage-trackers').addEventListener('click', () => {
+    openManageTrackersModal();
   });
 }
 
-function openSetTrackerBinModal() {
-  const current = (STATE.config && STATE.config.trackerBinId) || '';
+// Stable slug from a name. Strips non-alphanum, lowercases, collapses dashes.
+function slugify(s) {
+  return (s || '').toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function openManageTrackersModal() {
+  const renderBody = () => {
+    const trackers = getConfiguredTrackers();
+    const rows = trackers.map((t, i) => `
+      <div class="user-row">
+        <div class="user-info">
+          <div class="email">${t.name}</div>
+          <div class="meta mono">${t.binId}</div>
+        </div>
+        <div class="user-actions">
+          <button class="btn btn-sm" data-act="edit-tracker" data-idx="${i}" title="Edit">
+            <i class="ti ti-edit" aria-hidden="true"></i>
+          </button>
+          <button class="btn btn-sm btn-danger" data-act="remove-tracker" data-idx="${i}" title="Remove">
+            <i class="ti ti-trash" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+    `).join('');
+    return `
+      <h3>Tracker bins</h3>
+      <p class="intro">Each tracker bin holds the objectives for one division. Users can be assigned objectives from any of these.</p>
+      <div id="manage-trackers-list" style="margin-bottom: 14px;">
+        ${trackers.length ? rows : '<div class="obj-empty">No trackers configured yet.</div>'}
+      </div>
+      <button class="btn btn-block btn-sm" data-act="add-tracker">
+        <i class="ti ti-plus" aria-hidden="true"></i>
+        Add tracker
+      </button>
+      <div class="modal-actions">
+        <button class="btn" data-act="close">Done</button>
+      </div>
+    `;
+  };
+
+  const wireBody = () => {
+    document.querySelector('[data-act="close"]').addEventListener('click', () => {
+      closeModal();
+      renderHubChrome();
+      renderTiles();
+      fetchTileStatuses();
+    });
+    document.querySelector('[data-act="add-tracker"]').addEventListener('click', () => {
+      openTrackerEditModal(null, () => {
+        document.getElementById('modal-content').innerHTML = renderBody();
+        wireBody();
+      });
+    });
+    document.querySelectorAll('[data-act="edit-tracker"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        const trackers = getConfiguredTrackers();
+        openTrackerEditModal(trackers[idx], () => {
+          document.getElementById('modal-content').innerHTML = renderBody();
+          wireBody();
+        });
+      });
+    });
+    document.querySelectorAll('[data-act="remove-tracker"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        const trackers = getConfiguredTrackers();
+        const t = trackers[idx];
+        if (!confirm(`Remove tracker "${t.name}"? Existing user assignments referencing it will become unrouted.`)) return;
+        const next = trackers.filter((_, i) => i !== idx);
+        saveConfig({ trackers: next, trackerBinId: '' });
+        document.getElementById('modal-content').innerHTML = renderBody();
+        wireBody();
+        toast(`Removed ${t.name}`, 'success');
+      });
+    });
+  };
+
+  openModal(renderBody());
+  wireBody();
+}
+
+// Add or edit a single tracker. onDone() is called after save/cancel.
+function openTrackerEditModal(existing, onDone) {
+  const isEdit = !!existing;
   openModal(`
-    <h3>Q Tracker bin ID</h3>
-    <p class="intro">Connects the hub to the tracker so admins can assign objectives to users. Stored on this device only.</p>
-    <div id="set-tracker-error" class="inline-error" style="display: none;"></div>
+    <h3>${isEdit ? 'Edit' : 'Add'} tracker</h3>
+    <p class="intro">A tracker bin holds the objectives for one division. The internal ID is used in URLs and shouldn't change after first use.</p>
+    <div id="tracker-edit-error" class="inline-error" style="display: none;"></div>
     <label class="field">
-      <span class="label-row">Bin ID</span>
-      <input type="text" id="set-tracker-input" autocomplete="off" value="${current}" placeholder="paste tracker bin ID">
+      <span class="label-row">Display name</span>
+      <input type="text" id="tracker-name" autocomplete="off" value="${existing ? existing.name.replace(/"/g, '&quot;') : ''}" placeholder="e.g. Celadyne">
+    </label>
+    <label class="field">
+      <span class="label-row">Internal ID <span class="subtle">(slug, used in URLs)</span></span>
+      <input type="text" id="tracker-id" autocomplete="off" value="${existing ? existing.id : ''}" placeholder="auto from name" ${isEdit ? 'readonly' : ''}>
+    </label>
+    <label class="field">
+      <span class="label-row">JSONBin bin ID</span>
+      <input type="text" id="tracker-bin-id" autocomplete="off" value="${existing ? existing.binId : ''}" placeholder="paste bin ID">
     </label>
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">Save</button>
     </div>
   `);
-  document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
+
+  // Auto-fill the slug as the user types the name (only for new trackers)
+  if (!isEdit) {
+    const nameEl = document.getElementById('tracker-name');
+    const idEl = document.getElementById('tracker-id');
+    let userTypedId = false;
+    idEl.addEventListener('input', () => { userTypedId = true; });
+    nameEl.addEventListener('input', () => {
+      if (!userTypedId) idEl.value = slugify(nameEl.value);
+    });
+  }
+
+  document.querySelector('[data-act="cancel"]').addEventListener('click', () => {
+    closeModal();
+    if (onDone) onDone();
+  });
   document.querySelector('[data-act="save"]').addEventListener('click', async () => {
-    const val = document.getElementById('set-tracker-input').value.trim();
+    const name = document.getElementById('tracker-name').value.trim();
+    const id = document.getElementById('tracker-id').value.trim();
+    const binId = document.getElementById('tracker-bin-id').value.trim();
+    if (!name) return showError('tracker-edit-error', 'Display name is required.');
+    if (!id || !/^[a-z0-9-]+$/.test(id)) return showError('tracker-edit-error', 'ID must be lowercase letters, numbers, and dashes only.');
+    if (!binId) return showError('tracker-edit-error', 'Bin ID is required.');
+    showError('tracker-edit-error', '');
+
+    // Verify the bin is reachable before saving
     const btn = document.querySelector('[data-act="save"]');
     btn.disabled = true;
     btn.textContent = 'Verifying…';
-    saveConfig({ trackerBinId: val });
-    if (val) {
-      try {
-        await jbFetchTracker(); // verify it works
-        toast('Tracker bin connected', 'success');
-      } catch (e) {
-        showError('set-tracker-error', e.message || 'Could not reach the tracker bin.');
-        btn.disabled = false;
-        btn.textContent = 'Save';
-        return;
-      }
-    } else {
-      toast('Tracker bin cleared', 'success');
+
+    // Save provisionally so jbFetchTracker can find the new entry
+    const trackers = getConfiguredTrackers().slice();
+    const idx = trackers.findIndex(t => t.id === id);
+    const updated = { id, name, binId };
+    if (idx >= 0) trackers[idx] = updated; else trackers.push(updated);
+    saveConfig({ trackers, trackerBinId: '' });
+
+    try {
+      await jbFetchTracker(id);
+      toast(`Saved ${name}`, 'success');
+      closeModal();
+      if (onDone) onDone();
+    } catch (e) {
+      // Roll back the config change
+      const reverted = getConfiguredTrackers().filter(t => t.id !== id);
+      if (existing) reverted.push(existing);
+      saveConfig({ trackers: reverted });
+      showError('tracker-edit-error', e.message || 'Could not reach the tracker bin.');
+      btn.disabled = false;
+      btn.textContent = 'Save';
     }
-    closeModal();
-    renderHubChrome();
   });
 }
  
@@ -1698,86 +1900,119 @@ function confirmModal({ title, body, confirmText, danger, onConfirm }) {
 }
  
 // ---------- Objective picker helpers ----------
-// Renders a checkbox list of objectives from the tracker bin into a container.
-// Returns { getSelected(): string[] }. If tracker isn't configured or fetch fails,
-// renders a graceful fallback message and getSelected returns [].
-async function mountObjectivePicker(containerId, preselectedIds) {
+// Renders a checkbox list of objectives from ALL configured tracker bins.
+// preselected: array of {tracker, id} pairs.
+// Returns { getSelected(): [{tracker, id}, ...] }.
+async function mountObjectivePicker(containerId, preselected) {
   const el = document.getElementById(containerId);
   if (!el) return { getSelected: () => [] };
-  preselectedIds = preselectedIds || [];
+  preselected = preselected || [];
 
-  if (!trackerConfigured()) {
-    el.outerHTML = `<div class="obj-empty" style="border: 0.5px solid var(--border-strong); border-radius: var(--radius);">Q Tracker bin not configured. Set it in Settings → Hub configuration to assign objectives.</div>`;
+  const trackers = getConfiguredTrackers();
+  if (!trackers.length) {
+    el.outerHTML = `<div class="obj-empty" style="border: 0.5px solid var(--border-strong); border-radius: var(--radius);">No tracker bins configured. Add one in Settings → Hub configuration to assign objectives.</div>`;
     return { getSelected: () => [] };
   }
 
   el.innerHTML = '<div class="obj-empty">Loading objectives…</div>';
-  let objectives = [];
-  try {
-    const tracker = await jbFetchTracker();
-    objectives = tracker.objectives || [];
-  } catch (e) {
-    el.innerHTML = `<div class="obj-empty" style="color: var(--danger);">Could not load objectives: ${e.message || 'fetch failed'}</div>`;
+
+  // Fetch all trackers in parallel; degrade gracefully if some fail.
+  const results = await Promise.all(trackers.map(async t => {
+    try {
+      const data = await jbFetchTracker(t.id);
+      return { tracker: t, objectives: data.objectives || [], error: null };
+    } catch (e) {
+      return { tracker: t, objectives: [], error: e.message || 'fetch failed' };
+    }
+  }));
+
+  const total = results.reduce((n, r) => n + r.objectives.length, 0);
+  if (total === 0 && results.every(r => !r.error)) {
+    el.innerHTML = '<div class="obj-empty">No objectives in any tracker yet.</div>';
     return { getSelected: () => [] };
   }
 
-  if (!objectives.length) {
-    el.innerHTML = '<div class="obj-empty">No objectives in the tracker yet.</div>';
-    return { getSelected: () => [] };
-  }
-
-  const selected = new Set(preselectedIds);
+  // Selected set keyed by `${tracker}::${id}` so checkboxes hold a single string.
+  const selected = new Set(preselected.map(assignmentKey));
   el.innerHTML = '';
-  objectives.forEach(obj => {
-    const id = objectiveId(obj);
-    if (!id) return; // skip malformed
-    const row = document.createElement('label');
-    row.className = 'obj-row';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.value = id;
-    cb.checked = selected.has(id);
-    cb.addEventListener('change', () => {
-      if (cb.checked) selected.add(id); else selected.delete(id);
+
+  results.forEach(({ tracker, objectives, error }) => {
+    if (error) {
+      const errRow = document.createElement('div');
+      errRow.className = 'obj-row';
+      errRow.style.color = 'var(--danger)';
+      errRow.style.cursor = 'default';
+      errRow.textContent = `${tracker.name}: ${error}`;
+      el.appendChild(errRow);
+      return;
+    }
+    objectives.forEach(obj => {
+      const id = objectiveId(obj);
+      if (!id) return;
+      const key = assignmentKey({ tracker: tracker.id, id });
+      const row = document.createElement('label');
+      row.className = 'obj-row';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = key;
+      cb.checked = selected.has(key);
+      cb.addEventListener('change', () => {
+        if (cb.checked) selected.add(key); else selected.delete(key);
+      });
+      const text = document.createElement('span');
+      text.textContent = `${tracker.name} / ${objectiveLabel(obj)}`;
+      row.appendChild(cb);
+      row.appendChild(text);
+      el.appendChild(row);
     });
-    const text = document.createElement('span');
-    text.textContent = objectiveLabel(obj);
-    row.appendChild(cb);
-    row.appendChild(text);
-    el.appendChild(row);
   });
 
-  return { getSelected: () => Array.from(selected) };
+  return {
+    getSelected: () => Array.from(selected).map(parseAssignmentKey).filter(Boolean)
+  };
 }
 
-// Sync writer: update the tracker bin so each objective's assignedTo array
-// reflects which users have it in their assignedObjectives. Receives the full
-// users record so we can fully reconcile.
-// Use sparingly — one extra fetch + write per call.
+// Sync writer: walk every configured tracker, recompute the inverse assignedTo
+// arrays for objectives in THAT tracker only, and write back if anything changed.
+// One fetch + (conditional) write per configured tracker.
 async function syncTrackerAssignments(usersRecord) {
-  if (!trackerConfigured()) return;
-  const tracker = await jbFetchTracker();
-  const objectives = tracker.objectives || [];
-  // Build the inverse map: objectiveId -> [emails]
+  const trackers = getConfiguredTrackers();
+  if (!trackers.length) return;
+
+  // Build inverse map keyed by `${trackerId}::${objId}` -> [emails]
   const inverse = {};
   (usersRecord.users || []).forEach(u => {
-    if (u.disabled) return; // disabled users shouldn't appear as assignees
-    (u.assignedObjectives || []).forEach(id => {
-      (inverse[id] = inverse[id] || []).push(normaliseEmail(u.email));
+    if (u.disabled) return;
+    (u.assignedObjectives || []).forEach(a => {
+      if (!a || !a.id || !a.tracker) return;
+      const k = assignmentKey(a);
+      (inverse[k] = inverse[k] || []).push(normaliseEmail(u.email));
     });
   });
-  let changed = false;
-  objectives.forEach(obj => {
-    const id = objectiveId(obj);
-    if (!id) return;
-    const next = (inverse[id] || []).slice().sort();
-    const prev = (Array.isArray(obj.assignedTo) ? obj.assignedTo : []).map(normaliseEmail).sort();
-    if (next.length !== prev.length || next.some((v, i) => v !== prev[i])) {
-      obj.assignedTo = next;
-      changed = true;
+
+  // For each tracker, rewrite assignedTo on its objectives and save if changed.
+  await Promise.all(trackers.map(async t => {
+    let tracker;
+    try { tracker = await jbFetchTracker(t.id); }
+    catch (e) { console.warn(`Skipping sync for ${t.name}: ${e.message}`); return; }
+    const objectives = tracker.objectives || [];
+    let changed = false;
+    objectives.forEach(obj => {
+      const id = objectiveId(obj);
+      if (!id) return;
+      const k = assignmentKey({ tracker: t.id, id });
+      const next = (inverse[k] || []).slice().sort();
+      const prev = (Array.isArray(obj.assignedTo) ? obj.assignedTo : []).map(normaliseEmail).sort();
+      if (next.length !== prev.length || next.some((v, i) => v !== prev[i])) {
+        obj.assignedTo = next;
+        changed = true;
+      }
+    });
+    if (changed) {
+      try { await jbSaveTracker(t.id, tracker); }
+      catch (e) { console.warn(`Save failed for ${t.name}: ${e.message}`); }
     }
-  });
-  if (changed) await jbSaveTracker(tracker);
+  }));
 }
 
 function openAddUserModal() {
