@@ -284,6 +284,23 @@
     margin-top: 4px;
   }
  
+  /* Tile sections */
+  .tile-section {
+    margin-bottom: 2rem;
+  }
+  .tile-section:last-child {
+    margin-bottom: 0;
+  }
+  .tile-section-head {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-subtle);
+    margin: 0 0 12px;
+    padding: 0 4px;
+  }
+
   /* Tile grid */
   .tile-grid {
     display: grid;
@@ -734,7 +751,7 @@
       <h1 id="hub-greeting">Welcome back</h1>
       <div class="meta" id="hub-greeting-meta">&nbsp;</div>
     </div>
-    <div class="tile-grid" id="tile-grid"></div>
+    <div id="tile-sections"></div>
   </div>
 </div>
  
@@ -876,6 +893,9 @@ function ganttUrlFor(tracker) {
   }
   return url;
 }
+function meetingPageUrlFor(tracker) {
+  return (tracker && tracker.meetingPageUrl) || null;
+}
 
 const TOOLS = [
   {
@@ -884,6 +904,7 @@ const TOOLS = [
     description: 'Team wiki and project documentation',
     icon: 'brand-confluence',
     url: 'https://celadyne.atlassian.net/wiki/',
+    section: 'links',
     fetchStatus: async () => {
       // External site — no live status to fetch.
       return { text: 'Open workspace', severity: 'subtle' };
@@ -895,9 +916,21 @@ const TOOLS = [
     description: 'OKR platform for company-level objectives',
     icon: 'flag-3',
     url: 'https://app.profit.co/',
+    section: 'links',
     fetchStatus: async () => {
       // External site — no live status to fetch.
       return { text: 'Open OKR dashboard', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'celadyne-gantt-link',
+    name: 'Celadyne Gantt',
+    description: 'Company-level Gantt overview',
+    icon: 'chart-gantt',
+    url: 'https://celadynestaller.github.io/rd-gantt/?readonly',
+    section: 'links',
+    fetchStatus: async () => {
+      return { text: 'Open chart', severity: 'subtle' };
     }
   },
   {
@@ -906,6 +939,7 @@ const TOOLS = [
     description: 'Lab and field activity logging',
     icon: 'shield-check',
     url: 'safety-checkin.html',
+    section: 'safety',
     fetchStatus: async () => {
       // TODO: wire to safety-checkin bin once built
       return { text: 'Not checked in today', severity: 'warning' };
@@ -917,6 +951,7 @@ const TOOLS = [
     description: 'Test data and performance review',
     icon: 'chart-line',
     url: 'analysis-portal.html',
+    section: 'analysis',
     fetchStatus: async () => {
       // TODO: wire to analysis bin once built
       return { text: 'Last upload: 2 days ago', severity: 'subtle' };
@@ -1108,18 +1143,18 @@ function getConfiguredTrackers() {
   const cfg = STATE.config || {};
   const list = Array.isArray(cfg.trackers) ? cfg.trackers.filter(t => t && t.id && t.binId) : [];
   if (list.length) {
-    // Normalise so callers can rely on every field existing.
     return list.map(t => ({
       id: t.id,
       name: t.name || t.id,
       binId: t.binId,
       trackerUrl: t.trackerUrl || '',
       ganttUrl: t.ganttUrl || '',
+      meetingPageUrl: t.meetingPageUrl || '',
       alwaysShowGantt: !!t.alwaysShowGantt
     }));
   }
   if (cfg.trackerBinId) {
-    return [{ id: 'default', name: 'Tracker', binId: cfg.trackerBinId, trackerUrl: '', ganttUrl: '', alwaysShowGantt: false }];
+    return [{ id: 'default', name: 'Tracker', binId: cfg.trackerBinId, trackerUrl: '', ganttUrl: '', meetingPageUrl: '', alwaysShowGantt: false }];
   }
   return [];
 }
@@ -1552,12 +1587,15 @@ function renderHubChrome() {
 // Build the full tile list: static TOOLS plus dynamic tiles generated from
 // configured trackers and the current user's assigned objectives.
 //
-// Per-tracker Gantt tiles:
+// Per-tracker Meeting Page tiles (Projects section):
+//   - Same visibility rules as Gantt (admin / pinned default / assigned)
+//
+// Per-tracker Gantt tiles (Projects section):
 //   - Admins always see every configured Gantt
 //   - Always shown if tracker.alwaysShowGantt is true (org-wide default)
 //   - Otherwise shown only for users with at least one assignment in that tracker
 //
-// Per-objective Stage-gate tiles:
+// Per-objective Stage-gate tiles (Projects section):
 //   - One per assigned objective, provided the objective's tracker has a
 //     trackerUrl set. Stage-gate is the unified view (Q tracker is the same UI).
 function buildToolList(session) {
@@ -1570,35 +1608,53 @@ function buildToolList(session) {
   assignments.forEach(a => {
     if (a && a.tracker) assignedTrackerIds.add(a.tracker);
   });
-
-  // Per-tracker Gantt tiles. Visibility rule:
-  //   - Admins always see every Gantt (oversight role)
-  //   - Always show if tracker.alwaysShowGantt is true (org-wide default)
-  //   - Otherwise show only if the user has an assignment in that tracker
   const isAdmin = !!(session && session.role === 'admin');
+
+  // Per-tracker tile visibility: admin → all; pinned-default → all users; otherwise assigned only.
+  function trackerTileVisible(t) {
+    return isAdmin || t.alwaysShowGantt || assignedTrackerIds.has(t.id);
+  }
+
+  // 1) Per-tracker Meeting Page tiles
+  trackers.forEach(t => {
+    const url = meetingPageUrlFor(t);
+    if (!url) return;
+    if (!trackerTileVisible(t)) return;
+    list.push({
+      id: `meeting__${t.id}`,
+      name: `${t.name} project meetings`,
+      description: 'Confluence meeting page',
+      icon: 'calendar-event',
+      url,
+      section: 'projects',
+      fetchStatus: async () => ({ text: 'Open page', severity: 'subtle' })
+    });
+  });
+
+  // 2) Per-tracker Gantt tiles
   trackers.forEach(t => {
     const url = ganttUrlFor(t);
     if (!url) return;
-    const visible = isAdmin || t.alwaysShowGantt || assignedTrackerIds.has(t.id);
-    if (!visible) return;
+    if (!trackerTileVisible(t)) return;
     list.push({
       id: `gantt__${t.id}`,
       name: `${t.name} Gantt`,
       description: 'Project timelines and stage-gates',
       icon: 'chart-gantt',
       url,
+      section: 'projects',
       fetchStatus: async () => ({ text: 'Open chart', severity: 'subtle' })
     });
   });
 
   if (!assignments.length) return list;
 
-  // Stage-gate tiles: one per assigned objective
+  // 3) Stage-gate tiles: one per assigned objective
   assignments.forEach(a => {
     const tracker = findTracker(a.tracker);
     const trackerName = tracker ? tracker.name : a.tracker;
     const url = stageGateUrlFor(tracker, a.id);
-    if (!url) return; // tracker not configured or has no trackerUrl
+    if (!url) return;
     const display = a.name || `#${a.id}`;
     list.push({
       id: `stage-gate__${a.tracker}__${a.id}`,
@@ -1606,6 +1662,7 @@ function buildToolList(session) {
       description: `${trackerName} · ${a.name ? `#${a.id} · ` : ''}TRL/MRL progress`,
       icon: 'stack-2',
       url,
+      section: 'projects',
       titleAttr: a.name ? `Stage-gate for: ${a.name} (#${a.id})` : `Stage-gate for #${a.id}`,
       fetchStatus: async () => ({ text: 'View progress', severity: 'subtle' })
     });
@@ -1614,31 +1671,60 @@ function buildToolList(session) {
   return list;
 }
 
+// Section order + display labels. Tiles without a section default to 'links'.
+const TILE_SECTIONS = [
+  { id: 'safety',   label: 'Safety' },
+  { id: 'projects', label: 'Projects' },
+  { id: 'analysis', label: 'Analysis' },
+  { id: 'links',    label: 'Useful links' }
+];
+
 function renderTiles() {
-  const grid = document.getElementById('tile-grid');
-  grid.innerHTML = '';
+  const root = document.getElementById('tile-sections');
+  root.innerHTML = '';
   const tools = buildToolList(STATE.session);
   STATE._currentTools = tools; // expose to fetchTileStatuses
-  tools.forEach(tool => {
-    const a = document.createElement('a');
-    a.className = 'tile';
-    a.href = typeof tool.url === 'function' ? tool.url(STATE.session) : tool.url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    if (tool.titleAttr) a.title = tool.titleAttr;
-    a.dataset.toolId = tool.id;
-    a.innerHTML = `
-      <div class="tile-head">
-        <i class="ti ti-${tool.icon} tile-icon" aria-hidden="true"></i>
-        <span class="tile-name">${tool.name}</span>
-      </div>
-      <p class="tile-desc">${tool.description}</p>
-      <div class="tile-status loading" data-status="${tool.id}">
-        <span class="dot" style="opacity: 0.4;"></span>
-        Loading status…
-      </div>
-    `;
-    grid.appendChild(a);
+
+  TILE_SECTIONS.forEach(section => {
+    const sectionTools = tools.filter(t => (t.section || 'links') === section.id);
+    if (!sectionTools.length) return; // hide empty sections
+
+    const wrap = document.createElement('section');
+    wrap.className = 'tile-section';
+    wrap.dataset.section = section.id;
+
+    const head = document.createElement('h2');
+    head.className = 'tile-section-head';
+    head.textContent = section.label;
+    wrap.appendChild(head);
+
+    const grid = document.createElement('div');
+    grid.className = 'tile-grid';
+
+    sectionTools.forEach(tool => {
+      const a = document.createElement('a');
+      a.className = 'tile';
+      a.href = typeof tool.url === 'function' ? tool.url(STATE.session) : tool.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      if (tool.titleAttr) a.title = tool.titleAttr;
+      a.dataset.toolId = tool.id;
+      a.innerHTML = `
+        <div class="tile-head">
+          <i class="ti ti-${tool.icon} tile-icon" aria-hidden="true"></i>
+          <span class="tile-name">${tool.name}</span>
+        </div>
+        <p class="tile-desc">${tool.description}</p>
+        <div class="tile-status loading" data-status="${tool.id}">
+          <span class="dot" style="opacity: 0.4;"></span>
+          Loading status…
+        </div>
+      `;
+      grid.appendChild(a);
+    });
+
+    wrap.appendChild(grid);
+    root.appendChild(wrap);
   });
 }
 async function fetchTileStatuses() {
@@ -1735,6 +1821,7 @@ function openManageTrackersModal() {
     const rows = trackers.map((t, i) => {
       const urls = [];
       urls.push(t.trackerUrl ? '<span style="color: var(--success);">tracker ✓</span>' : '<span style="color: var(--text-subtle);">tracker —</span>');
+      urls.push(t.meetingPageUrl ? '<span style="color: var(--success);">meeting ✓</span>' : '<span style="color: var(--text-subtle);">meeting —</span>');
       const ganttBit = t.ganttUrl
         ? `<span style="color: var(--success);">gantt ✓${t.alwaysShowGantt ? ' (default)' : ''}</span>`
         : '<span style="color: var(--text-subtle);">gantt —</span>';
@@ -1840,6 +1927,11 @@ function openTrackerEditModal(existing, onDone) {
       <div class="obj-picker-meta">Used by Q tracker and Stage-gate tiles. Leave blank to skip those tiles for this tracker.</div>
     </label>
     <label class="field">
+      <span class="label-row">Project Meeting Page URL <span class="subtle">(optional)</span></span>
+      <input type="text" id="meeting-page-url" autocomplete="off" value="${esc(existing && existing.meetingPageUrl)}" placeholder="https://celadyne.atlassian.net/wiki/spaces/...">
+      <div class="obj-picker-meta">Confluence page for this division's project meetings. Same visibility rules as the Gantt tile.</div>
+    </label>
+    <label class="field">
       <span class="label-row">Gantt URL <span class="subtle">(optional)</span></span>
       <input type="text" id="gantt-url" autocomplete="off" value="${esc(existing && existing.ganttUrl)}" placeholder="https://...github.io/celadyne-gantt/">
       <div class="obj-picker-meta">Used by the Gantt tile. Leave blank to hide the Gantt tile for this tracker.</div>
@@ -1878,6 +1970,7 @@ function openTrackerEditModal(existing, onDone) {
     const id = document.getElementById('tracker-id').value.trim();
     const binId = document.getElementById('tracker-bin-id').value.trim();
     const trackerUrl = document.getElementById('tracker-url').value.trim();
+    const meetingPageUrl = document.getElementById('meeting-page-url').value.trim();
     const ganttUrl = document.getElementById('gantt-url').value.trim();
     const alwaysShowGantt = document.getElementById('gantt-always-show').checked;
     if (!name) return showError('tracker-edit-error', 'Display name is required.');
@@ -1893,7 +1986,7 @@ function openTrackerEditModal(existing, onDone) {
     // Save provisionally so jbFetchTracker can find the new entry
     const trackers = getConfiguredTrackers().slice();
     const idx = trackers.findIndex(t => t.id === id);
-    const updated = { id, name, binId, trackerUrl, ganttUrl, alwaysShowGantt };
+    const updated = { id, name, binId, trackerUrl, ganttUrl, meetingPageUrl, alwaysShowGantt };
     if (idx >= 0) trackers[idx] = updated; else trackers.push(updated);
     saveConfig({ trackers, trackerBinId: '' });
 
