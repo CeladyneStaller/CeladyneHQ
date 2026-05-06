@@ -1108,17 +1108,18 @@ function getConfiguredTrackers() {
   const cfg = STATE.config || {};
   const list = Array.isArray(cfg.trackers) ? cfg.trackers.filter(t => t && t.id && t.binId) : [];
   if (list.length) {
-    // Normalise URL fields so callers can rely on them existing.
+    // Normalise so callers can rely on every field existing.
     return list.map(t => ({
       id: t.id,
       name: t.name || t.id,
       binId: t.binId,
       trackerUrl: t.trackerUrl || '',
-      ganttUrl: t.ganttUrl || ''
+      ganttUrl: t.ganttUrl || '',
+      alwaysShowGantt: !!t.alwaysShowGantt
     }));
   }
   if (cfg.trackerBinId) {
-    return [{ id: 'default', name: 'Tracker', binId: cfg.trackerBinId, trackerUrl: '', ganttUrl: '' }];
+    return [{ id: 'default', name: 'Tracker', binId: cfg.trackerBinId, trackerUrl: '', ganttUrl: '', alwaysShowGantt: false }];
   }
   return [];
 }
@@ -1551,10 +1552,11 @@ function renderHubChrome() {
 // Build the full tile list: static TOOLS plus dynamic tiles generated from
 // configured trackers and the current user's assigned objectives.
 //
-// Always shown (per configured tracker, regardless of user assignments):
-//   - One Gantt tile per tracker that has a ganttUrl set
+// Per-tracker Gantt tiles:
+//   - Always shown if tracker.alwaysShowGantt is true (org-wide default)
+//   - Otherwise shown only for users with at least one assignment in that tracker
 //
-// Shown only for users with assignments:
+// Per-user assignment-driven tiles:
 //   - One Q tracker tile per tracker the user has any assignments in
 //     (provided the tracker has a trackerUrl set)
 //   - One Stage-gate tile per assigned objective
@@ -1562,11 +1564,22 @@ function renderHubChrome() {
 function buildToolList(session) {
   const list = TOOLS.slice();
   const trackers = getConfiguredTrackers();
+  const assignments = (session && session.assignedObjectives) || [];
 
-  // Per-tracker Gantt tiles (always)
+  // Compute the set of trackers the user has at least one assignment in.
+  const assignedTrackerIds = new Set();
+  assignments.forEach(a => {
+    if (a && a.tracker) assignedTrackerIds.add(a.tracker);
+  });
+
+  // Per-tracker Gantt tiles. Visibility rule:
+  //   - Always show if tracker.alwaysShowGantt is true (org-wide default)
+  //   - Otherwise show only if the user has an assignment in that tracker
   trackers.forEach(t => {
     const url = ganttUrlFor(t);
     if (!url) return;
+    const visible = t.alwaysShowGantt || assignedTrackerIds.has(t.id);
+    if (!visible) return;
     list.push({
       id: `gantt__${t.id}`,
       name: `${t.name} Gantt`,
@@ -1577,7 +1590,6 @@ function buildToolList(session) {
     });
   });
 
-  const assignments = (session && session.assignedObjectives) || [];
   if (!assignments.length) return list;
 
   // Group assignments by tracker
@@ -1746,7 +1758,10 @@ function openManageTrackersModal() {
     const rows = trackers.map((t, i) => {
       const urls = [];
       urls.push(t.trackerUrl ? '<span style="color: var(--success);">tracker ✓</span>' : '<span style="color: var(--text-subtle);">tracker —</span>');
-      urls.push(t.ganttUrl ? '<span style="color: var(--success);">gantt ✓</span>' : '<span style="color: var(--text-subtle);">gantt —</span>');
+      const ganttBit = t.ganttUrl
+        ? `<span style="color: var(--success);">gantt ✓${t.alwaysShowGantt ? ' (default)' : ''}</span>`
+        : '<span style="color: var(--text-subtle);">gantt —</span>';
+      urls.push(ganttBit);
       return `
       <div class="user-row">
         <div class="user-info">
@@ -1852,6 +1867,14 @@ function openTrackerEditModal(existing, onDone) {
       <input type="text" id="gantt-url" autocomplete="off" value="${esc(existing && existing.ganttUrl)}" placeholder="https://...github.io/celadyne-gantt/">
       <div class="obj-picker-meta">Used by the Gantt tile. Leave blank to hide the Gantt tile for this tracker.</div>
     </label>
+    <label class="checkbox-row" style="margin-bottom: 14px;">
+      <input type="checkbox" id="gantt-always-show" ${existing && existing.alwaysShowGantt ? 'checked' : ''}>
+      <span>Show Gantt to everyone <span class="subtle">(default)</span></span>
+    </label>
+    <div class="obj-picker-meta" style="margin-top: -10px; margin-bottom: 14px;">
+      Off (default): Gantt tile shows only for users with an assigned objective in this tracker.<br>
+      On: Gantt tile shows for everyone, regardless of assignments.
+    </div>
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">Save</button>
@@ -1879,6 +1902,7 @@ function openTrackerEditModal(existing, onDone) {
     const binId = document.getElementById('tracker-bin-id').value.trim();
     const trackerUrl = document.getElementById('tracker-url').value.trim();
     const ganttUrl = document.getElementById('gantt-url').value.trim();
+    const alwaysShowGantt = document.getElementById('gantt-always-show').checked;
     if (!name) return showError('tracker-edit-error', 'Display name is required.');
     if (!id || !/^[a-z0-9-]+$/.test(id)) return showError('tracker-edit-error', 'ID must be lowercase letters, numbers, and dashes only.');
     if (!binId) return showError('tracker-edit-error', 'Bin ID is required.');
@@ -1892,7 +1916,7 @@ function openTrackerEditModal(existing, onDone) {
     // Save provisionally so jbFetchTracker can find the new entry
     const trackers = getConfiguredTrackers().slice();
     const idx = trackers.findIndex(t => t.id === id);
-    const updated = { id, name, binId, trackerUrl, ganttUrl };
+    const updated = { id, name, binId, trackerUrl, ganttUrl, alwaysShowGantt };
     if (idx >= 0) trackers[idx] = updated; else trackers.push(updated);
     saveConfig({ trackers, trackerBinId: '' });
 
