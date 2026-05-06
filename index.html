@@ -767,12 +767,23 @@ const CONFIG_DEFAULTS = {
 //  most return placeholder text that matches the mockup.
 
 const TOOLS = [
+   {
+    id: 'rd_gantt',
+    name: 'Celadyne Gantt Chart',
+    description: 'Celadyne Project Timelines',
+    icon: 'chart-gantt',
+    url: 'https://celadynestaller.github.io/rd-gantt/?readonly',
+    fetchStatus: async () => {
+      // TODO: wire to gantt bin — count gates with end date in next 7 days
+      return { text: '2 gates due this week', severity: 'warning' };
+    }
+  },
   {
     id: 'el_gantt',
     name: 'Electrolyzer Gantt Chart',
     description: 'Electrolyzer Project Timelines',
     icon: 'chart-gantt',
-    url: 'https://celadynestaller.github.io/echem-gantt/',
+    url: 'https://celadynestaller.github.io/echem-gantt/?readonly',
     fetchStatus: async () => {
       // TODO: wire to gantt bin — count gates with end date in next 7 days
       return { text: '2 gates due this week', severity: 'warning' };
@@ -783,7 +794,7 @@ const TOOLS = [
     name: 'Fuel Cell Gantt Chart',
     description: 'Fuel Cell Project Timelines',
     icon: 'chart-gantt',
-    url: 'https://celadynestaller.github.io/FuelCell-gantt/',
+    url: 'https://celadynestaller.github.io/FuelCell-gantt/?readonly',
     fetchStatus: async () => {
       // TODO: wire to gantt bin — count gates with end date in next 7 days
       return { text: '2 gates due this week', severity: 'warning' };
