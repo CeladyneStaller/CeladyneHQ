@@ -3,6 +3,8 @@
 <head>
   <link rel="icon" type="image/png" href="logo.png">
   <link rel="apple-touch-icon" href="logo.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0F766E">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>R&amp;D Hub</title>
@@ -1303,6 +1305,7 @@ function renderTiles() {
   });
 }
 async function fetchTileStatuses() {
+  let urgentCount = 0;
   await Promise.all(TOOLS.map(async (tool) => {
     const el = document.querySelector(`[data-status="${tool.id}"]`);
     if (!el) return;
@@ -1311,11 +1314,14 @@ async function fetchTileStatuses() {
       const sev = result.severity || 'subtle';
       el.className = 'tile-status ' + (sev === 'subtle' ? '' : sev);
       el.innerHTML = `<span class="dot"></span><span>${result.text}</span>`;
+      if (sev === 'warning' || sev === 'danger') urgentCount++;
     } catch (e) {
       el.className = 'tile-status danger';
       el.innerHTML = `<span class="dot"></span><span>Status unavailable</span>`;
+      urgentCount++;
     }
   }));
+  document.title = urgentCount > 0 ? `(${urgentCount}) R&D Hub` : 'R&D Hub';
 }
 
 // ============================================================
