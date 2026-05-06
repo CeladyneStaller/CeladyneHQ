@@ -923,17 +923,6 @@ const TOOLS = [
     }
   },
   {
-    id: 'celadyne-gantt-link',
-    name: 'Celadyne Gantt',
-    description: 'Company-level Gantt overview',
-    icon: 'chart-gantt',
-    url: 'https://celadynestaller.github.io/rd-gantt/?readonly',
-    section: 'links',
-    fetchStatus: async () => {
-      return { text: 'Open chart', severity: 'subtle' };
-    }
-  },
-  {
     id: 'safety-checkin',
     name: 'Safety check-in',
     description: 'Lab and field activity logging',
@@ -1150,11 +1139,13 @@ function getConfiguredTrackers() {
       trackerUrl: t.trackerUrl || '',
       ganttUrl: t.ganttUrl || '',
       meetingPageUrl: t.meetingPageUrl || '',
-      alwaysShowGantt: !!t.alwaysShowGantt
+      // companyLevelGantt: pin Gantt to Useful links section, never Projects.
+      // Migrated from legacy `alwaysShowGantt` flag (same intent, clearer name).
+      companyLevelGantt: !!(t.companyLevelGantt || t.alwaysShowGantt)
     }));
   }
   if (cfg.trackerBinId) {
-    return [{ id: 'default', name: 'Tracker', binId: cfg.trackerBinId, trackerUrl: '', ganttUrl: '', meetingPageUrl: '', alwaysShowGantt: false }];
+    return [{ id: 'default', name: 'Tracker', binId: cfg.trackerBinId, trackerUrl: '', ganttUrl: '', meetingPageUrl: '', companyLevelGantt: false }];
   }
   return [];
 }
@@ -1588,12 +1579,12 @@ function renderHubChrome() {
 // configured trackers and the current user's assigned objectives.
 //
 // Per-tracker Meeting Page tiles (Projects section):
-//   - Same visibility rules as Gantt (admin / pinned default / assigned)
+//   - Same admin/assigned/default visibility as before
 //
-// Per-tracker Gantt tiles (Projects section):
-//   - Admins always see every configured Gantt
-//   - Always shown if tracker.alwaysShowGantt is true (org-wide default)
-//   - Otherwise shown only for users with at least one assignment in that tracker
+// Per-tracker Gantt tiles (always rendered, sectioned by routing rule):
+//   - companyLevelGantt → Useful links (always, regardless of assignment)
+//   - Otherwise: assigned → Projects, unassigned → Useful links
+//   - No admin override (admins follow the same rule)
 //
 // Per-objective Stage-gate tiles (Projects section):
 //   - One per assigned objective, provided the objective's tracker has a
@@ -1610,16 +1601,16 @@ function buildToolList(session) {
   });
   const isAdmin = !!(session && session.role === 'admin');
 
-  // Per-tracker tile visibility: admin → all; pinned-default → all users; otherwise assigned only.
-  function trackerTileVisible(t) {
-    return isAdmin || t.alwaysShowGantt || assignedTrackerIds.has(t.id);
+  // Meeting Page visibility (admin/assigned/companyLevel — unchanged from prior behavior).
+  function meetingTileVisible(t) {
+    return isAdmin || t.companyLevelGantt || assignedTrackerIds.has(t.id);
   }
 
   // 1) Per-tracker Meeting Page tiles
   trackers.forEach(t => {
     const url = meetingPageUrlFor(t);
     if (!url) return;
-    if (!trackerTileVisible(t)) return;
+    if (!meetingTileVisible(t)) return;
     list.push({
       id: `meeting__${t.id}`,
       name: `${t.name} project meetings`,
@@ -1631,18 +1622,27 @@ function buildToolList(session) {
     });
   });
 
-  // 2) Per-tracker Gantt tiles
+  // 2) Per-tracker Gantt tiles — section depends on assignment + companyLevel flag.
   trackers.forEach(t => {
     const url = ganttUrlFor(t);
     if (!url) return;
-    if (!trackerTileVisible(t)) return;
+    let section;
+    if (t.companyLevelGantt) {
+      section = 'links';
+    } else if (assignedTrackerIds.has(t.id)) {
+      section = 'projects';
+    } else {
+      section = 'links';
+    }
     list.push({
       id: `gantt__${t.id}`,
       name: `${t.name} Gantt`,
-      description: 'Project timelines and stage-gates',
+      description: section === 'projects'
+        ? 'Project timelines and stage-gates'
+        : 'Project timelines (reference)',
       icon: 'chart-gantt',
       url,
-      section: 'projects',
+      section,
       fetchStatus: async () => ({ text: 'Open chart', severity: 'subtle' })
     });
   });
@@ -1823,7 +1823,7 @@ function openManageTrackersModal() {
       urls.push(t.trackerUrl ? '<span style="color: var(--success);">tracker ✓</span>' : '<span style="color: var(--text-subtle);">tracker —</span>');
       urls.push(t.meetingPageUrl ? '<span style="color: var(--success);">meeting ✓</span>' : '<span style="color: var(--text-subtle);">meeting —</span>');
       const ganttBit = t.ganttUrl
-        ? `<span style="color: var(--success);">gantt ✓${t.alwaysShowGantt ? ' (default)' : ''}</span>`
+        ? `<span style="color: var(--success);">gantt ✓${t.companyLevelGantt ? ' (company-level)' : ''}</span>`
         : '<span style="color: var(--text-subtle);">gantt —</span>';
       urls.push(ganttBit);
       return `
@@ -1937,12 +1937,12 @@ function openTrackerEditModal(existing, onDone) {
       <div class="obj-picker-meta">Used by the Gantt tile. Leave blank to hide the Gantt tile for this tracker.</div>
     </label>
     <label class="checkbox-row" style="margin-bottom: 14px;">
-      <input type="checkbox" id="gantt-always-show" ${existing && existing.alwaysShowGantt ? 'checked' : ''}>
-      <span>Show Gantt to everyone <span class="subtle">(default)</span></span>
+      <input type="checkbox" id="gantt-always-show" ${existing && existing.companyLevelGantt ? 'checked' : ''}>
+      <span>Treat as company-level Gantt</span>
     </label>
     <div class="obj-picker-meta" style="margin-top: -10px; margin-bottom: 14px;">
-      Off (default): Gantt tile shows only for users with an assigned objective in this tracker.<br>
-      On: Gantt tile shows for everyone, regardless of assignments.
+      Off (default): Gantt tile appears in <em>Projects</em> for users assigned to this tracker, in <em>Useful links</em> otherwise.<br>
+      On: Gantt tile always appears in <em>Useful links</em>, never in <em>Projects</em> — useful for cross-cutting reference Gantts.
     </div>
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
@@ -1972,7 +1972,7 @@ function openTrackerEditModal(existing, onDone) {
     const trackerUrl = document.getElementById('tracker-url').value.trim();
     const meetingPageUrl = document.getElementById('meeting-page-url').value.trim();
     const ganttUrl = document.getElementById('gantt-url').value.trim();
-    const alwaysShowGantt = document.getElementById('gantt-always-show').checked;
+    const companyLevelGantt = document.getElementById('gantt-always-show').checked;
     if (!name) return showError('tracker-edit-error', 'Display name is required.');
     if (!id || !/^[a-z0-9-]+$/.test(id)) return showError('tracker-edit-error', 'ID must be lowercase letters, numbers, and dashes only.');
     if (!binId) return showError('tracker-edit-error', 'Bin ID is required.');
@@ -1986,7 +1986,7 @@ function openTrackerEditModal(existing, onDone) {
     // Save provisionally so jbFetchTracker can find the new entry
     const trackers = getConfiguredTrackers().slice();
     const idx = trackers.findIndex(t => t.id === id);
-    const updated = { id, name, binId, trackerUrl, ganttUrl, meetingPageUrl, alwaysShowGantt };
+    const updated = { id, name, binId, trackerUrl, ganttUrl, meetingPageUrl, companyLevelGantt };
     if (idx >= 0) trackers[idx] = updated; else trackers.push(updated);
     saveConfig({ trackers, trackerBinId: '' });
 
