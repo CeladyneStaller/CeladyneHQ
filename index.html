@@ -1813,11 +1813,61 @@ function buildToolList(session) {
       url,
       section: 'projects',
       titleAttr: a.name ? `Stage-gate for: ${a.name} (#${a.id})` : `Stage-gate for #${a.id}`,
-      fetchStatus: async () => ({ text: 'View progress', severity: 'subtle' })
+      fetchStatus: async () => fetchStageGateStatus(a.tracker, a.id)
     });
   });
 
   return list;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage-gate status — reads the `computedStatus` snapshot the Gantt writes
+// into each tracker bin on save. Per-render cache so multiple stage-gate
+// tiles for the same tracker share one fetch.
+// ─────────────────────────────────────────────────────────────────────────────
+const _statusCache = {}; // trackerId → Promise<computedStatus | null>
+
+function clearStatusCache() {
+  for (const k in _statusCache) delete _statusCache[k];
+}
+
+function fetchTrackerComputedStatus(trackerId) {
+  if (!_statusCache[trackerId]) {
+    _statusCache[trackerId] = jbFetchTracker(trackerId)
+      .then(data => (data && data.computedStatus) || null)
+      .catch(() => null);
+  }
+  return _statusCache[trackerId];
+}
+
+async function fetchStageGateStatus(trackerId, objectiveId) {
+  const snapshot = await fetchTrackerComputedStatus(trackerId);
+  const obj = snapshot && snapshot.objectives && snapshot.objectives[String(objectiveId)];
+  if (!obj) {
+    // Snapshot not present (Gantt hasn't saved since this objective existed,
+    // or the bin pre-dates the snapshot feature). Fall back to a neutral state.
+    return { text: 'View progress', severity: 'subtle' };
+  }
+  // Format: "Status · 72% · 4d left" — or "Complete · 100%" when done.
+  const label = obj.isComplete ? 'Complete'
+    : obj.status === 'ontrack' ? 'On track'
+    : obj.status === 'watch'   ? 'Watch'
+    : obj.status === 'atrisk'  ? 'At risk'
+    : 'In progress';
+  const sev = obj.isComplete ? 'success'
+    : obj.status === 'ontrack' ? 'success'
+    : obj.status === 'watch'   ? 'warning'
+    : obj.status === 'atrisk'  ? 'danger'
+    : 'subtle';
+  let daysText = '';
+  if (!obj.isComplete && Number.isFinite(obj.daysLeft)) {
+    if (obj.daysLeft < 0) daysText = `${Math.abs(obj.daysLeft)}d overdue`;
+    else if (obj.daysLeft === 0) daysText = 'Due today';
+    else daysText = `${obj.daysLeft}d left`;
+  }
+  const parts = [label, `${obj.progress}%`];
+  if (daysText) parts.push(daysText);
+  return { text: parts.join(' · '), severity: sev };
 }
 
 // Section order + display labels. Tiles without a section default to 'links'.
@@ -1886,6 +1936,8 @@ function renderTiles() {
   });
 }
 async function fetchTileStatuses() {
+  // Drop the per-render cache so the periodic refresh actually re-fetches.
+  clearStatusCache();
   let urgentCount = 0;
   const tools = STATE._currentTools || TOOLS;
   await Promise.all(tools.map(async (tool) => {
