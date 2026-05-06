@@ -764,11 +764,22 @@ const CONFIG_DEFAULTS = {
 
 const TOOLS = [
   {
-    id: 'gantt',
-    name: 'Gantt chart',
-    description: 'Project timelines and stage-gates',
+    id: 'el_gantt',
+    name: 'Electrolyzer Gantt Chart',
+    description: 'Electrolyzer Project Timelines',
     icon: 'chart-gantt',
-    url: 'gantt-confluence-14.html',
+    url: 'https://celadynestaller.github.io/echem-gantt/',
+    fetchStatus: async () => {
+      // TODO: wire to gantt bin — count gates with end date in next 7 days
+      return { text: '2 gates due this week', severity: 'warning' };
+    }
+  },
+   {
+    id: 'fc_gantt',
+    name: 'Fuel Cell Gantt Chart',
+    description: 'Fuel Cell Project Timelines',
+    icon: 'chart-gantt',
+    url: 'https://celadynestaller.github.io/FuelCell-gantt/',
     fetchStatus: async () => {
       // TODO: wire to gantt bin — count gates with end date in next 7 days
       return { text: '2 gates due this week', severity: 'warning' };
