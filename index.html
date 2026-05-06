@@ -1556,11 +1556,9 @@ function renderHubChrome() {
 //   - Always shown if tracker.alwaysShowGantt is true (org-wide default)
 //   - Otherwise shown only for users with at least one assignment in that tracker
 //
-// Per-user assignment-driven tiles:
-//   - One Q tracker tile per tracker the user has any assignments in
-//     (provided the tracker has a trackerUrl set)
-//   - One Stage-gate tile per assigned objective
-//     (provided the objective's tracker has a trackerUrl set)
+// Per-objective Stage-gate tiles:
+//   - One per assigned objective, provided the objective's tracker has a
+//     trackerUrl set. Stage-gate is the unified view (Q tracker is the same UI).
 function buildToolList(session) {
   const list = TOOLS.slice();
   const trackers = getConfiguredTrackers();
@@ -1591,30 +1589,6 @@ function buildToolList(session) {
   });
 
   if (!assignments.length) return list;
-
-  // Group assignments by tracker
-  const byTracker = {};
-  assignments.forEach(a => {
-    if (!a || a.id == null || !a.tracker) return;
-    (byTracker[a.tracker] = byTracker[a.tracker] || []).push(a.id);
-  });
-
-  // Q tracker tiles: one per tracker
-  Object.keys(byTracker).forEach(trackerId => {
-    const tracker = findTracker(trackerId);
-    if (!tracker) return; // user assigned to an unconfigured tracker
-    const ids = byTracker[trackerId];
-    const url = qTrackerUrlFor(tracker, ids);
-    if (!url) return; // tracker has no trackerUrl set
-    list.push({
-      id: `q-tracker__${trackerId}`,
-      name: `${tracker.name} Q tracker`,
-      description: `${ids.length} objective${ids.length === 1 ? '' : 's'} assigned to you`,
-      icon: 'target-arrow',
-      url,
-      fetchStatus: async () => ({ text: `${ids.length} assigned`, severity: 'subtle' })
-    });
-  });
 
   // Stage-gate tiles: one per assigned objective
   assignments.forEach(a => {
