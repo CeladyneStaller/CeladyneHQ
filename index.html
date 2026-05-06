@@ -365,6 +365,67 @@
     background: currentColor;
     flex-shrink: 0;
   }
+
+  /* Stage-gate bubbles (mirrors the active panel of the Gantt) */
+  .tile-gates {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0.5px solid var(--border);
+  }
+  .tile-gates:empty {
+    display: none;
+  }
+  .tile-gates-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-subtle);
+  }
+  .tile-gates-behind {
+    color: #A32D2D;
+    background: #FCEBEB;
+    padding: 1px 6px;
+    border-radius: 8px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 10px;
+  }
+  .tile-gates-track {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .gate-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: 700;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  .gate-dot.passed       { background: #EAF3DE; border-color: #3B6D11; color: #3B6D11; }
+  .gate-dot.passed-late  { background: #FAEEDA; border-color: #854F0B; color: #854F0B; }
+  .gate-dot.overdue      { background: #FCEBEB; border-color: #A32D2D; color: #A32D2D; }
+  .gate-dot.in-progress  { background: #E6F1FB; border-color: #0C447C; color: #0C447C; }
+  .gate-dot.pending      { background: #f0f0ee; border-color: #ccc;    color: #555; }
+  .gate-conn {
+    flex: 1;
+    height: 2px;
+    min-width: 4px;
+    max-width: 16px;
+    background: var(--border);
+  }
  
   /* Drawer (settings) */
   .drawer-backdrop {
@@ -1867,7 +1928,41 @@ async function fetchStageGateStatus(trackerId, objectiveId) {
   }
   const parts = [label, `${obj.progress}%`];
   if (daysText) parts.push(daysText);
-  return { text: parts.join(' · '), severity: sev };
+  return {
+    text: parts.join(' · '),
+    severity: sev,
+    gates: Array.isArray(obj.gates) ? obj.gates : []
+  };
+}
+
+// Renders the stage-gate dot row that mirrors the active panel's bubbles.
+// Empty array → empty string (the .tile-gates div is :empty-hidden via CSS).
+function renderGateBubblesHtml(gates) {
+  if (!gates || !gates.length) return '';
+  const escAttr = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
+  const escText = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const passed = gates.filter(g => g.state === 'passed' || g.state === 'passed-late').length;
+  const total = gates.length;
+  const behind = gates.filter(g => g.state === 'overdue').length;
+  const dots = gates.map((g, i) => {
+    const state = g.state || 'pending';
+    const isDone = state === 'passed' || state === 'passed-late';
+    const inner = isDone ? '✓' : String(i + 1);
+    const tooltip = `Gate ${i + 1}: ${g.name || '(unnamed)'} — ${state.replace('-', ' ')}`;
+    return `<span class="gate-dot ${state}" title="${escAttr(tooltip)}">${escText(inner)}</span>`;
+  });
+  const connector = '<span class="gate-conn"></span>';
+  const track = dots.join(connector);
+  const behindBadge = behind > 0
+    ? `<span class="tile-gates-behind">⚑ ${behind} behind</span>`
+    : '';
+  return `
+    <div class="tile-gates-head">
+      <span>Gates ${passed}/${total}</span>
+      ${behindBadge}
+    </div>
+    <div class="tile-gates-track">${track}</div>
+  `;
 }
 
 // Section order + display labels. Tiles without a section default to 'links'.
@@ -1917,6 +2012,7 @@ function renderTiles() {
       }
       if (tool.titleAttr) a.title = tool.titleAttr;
       a.dataset.toolId = tool.id;
+      const isStageGate = typeof tool.id === 'string' && tool.id.startsWith('stage-gate__');
       a.innerHTML = `
         <div class="tile-head">
           <i class="ti ti-${tool.icon} tile-icon" aria-hidden="true"></i>
@@ -1927,6 +2023,7 @@ function renderTiles() {
           <span class="dot" style="opacity: 0.4;"></span>
           Loading status…
         </div>
+        ${isStageGate ? `<div class="tile-gates" data-gates="${tool.id}"></div>` : ''}
       `;
       grid.appendChild(a);
     });
@@ -1949,6 +2046,11 @@ async function fetchTileStatuses() {
       el.className = 'tile-status ' + (sev === 'subtle' ? '' : sev);
       el.innerHTML = `<span class="dot"></span><span>${result.text}</span>`;
       if (sev === 'warning' || sev === 'danger') urgentCount++;
+      // Optional: tile-gates slot for stage-gate dot rows.
+      if (result.gates) {
+        const gatesEl = document.querySelector(`[data-gates="${tool.id}"]`);
+        if (gatesEl) gatesEl.innerHTML = renderGateBubblesHtml(result.gates);
+      }
     } catch (e) {
       el.className = 'tile-status danger';
       el.innerHTML = `<span class="dot"></span><span>Status unavailable</span>`;
