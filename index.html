@@ -867,7 +867,14 @@ function stageGateUrlFor(tracker, objectiveId) {
   return appendParams(tracker.trackerUrl, { objective: String(objectiveId) });
 }
 function ganttUrlFor(tracker) {
-  return (tracker && tracker.ganttUrl) || null;
+  if (!tracker || !tracker.ganttUrl) return null;
+  let url = tracker.ganttUrl;
+  // Always open Gantts in read-only mode. Idempotent: if `?readonly` (as a
+  // bare flag or readonly=value) is already in the URL, don't add a second one.
+  if (!/[?&]readonly(=|&|$)/.test(url)) {
+    url += url.includes('?') ? '&readonly' : '?readonly';
+  }
+  return url;
 }
 
 const TOOLS = [
