@@ -38,7 +38,7 @@
     --shadow-card: 0 1px 0 rgba(15,15,14,0.04);
     --shadow-elev: 0 1px 2px rgba(15,15,14,0.04), 0 12px 32px rgba(15,15,14,0.08);
   }
-
+ 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
@@ -52,7 +52,7 @@
     -moz-osx-font-smoothing: grayscale;
   }
   .mono { font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace; }
-
+ 
   /* Layout shells */
   .view { display: none; }
   .view.active { display: block; }
@@ -72,7 +72,7 @@
     max-width: 380px;
     box-shadow: var(--shadow-card);
   }
-
+ 
   /* Brand */
   .brand {
     display: flex;
@@ -105,7 +105,7 @@
     font-weight: 500;
     letter-spacing: -0.005em;
   }
-
+ 
   /* Typography */
   h1 { font-size: 24px; font-weight: 500; letter-spacing: -0.015em; margin: 0; }
   h2 { font-size: 18px; font-weight: 500; letter-spacing: -0.01em; margin: 0; }
@@ -114,7 +114,7 @@
   .subtle { color: var(--text-subtle); }
   .small { font-size: 13px; }
   .tiny { font-size: 12px; }
-
+ 
   /* Form elements */
   label.field {
     display: block;
@@ -168,7 +168,7 @@
     accent-color: var(--accent);
     margin: 0;
   }
-
+ 
   /* Buttons */
   .btn {
     display: inline-flex;
@@ -217,7 +217,7 @@
     background: transparent;
   }
   .btn-icon:hover { background: var(--surface-alt); border-color: transparent; }
-
+ 
   /* Page header (hub) */
   .page-header {
     background: var(--bg);
@@ -268,7 +268,7 @@
     text-transform: lowercase;
     letter-spacing: 0.04em;
   }
-
+ 
   /* Hub body */
   .hub-body {
     max-width: 1080px;
@@ -283,7 +283,7 @@
     color: var(--text-muted);
     margin-top: 4px;
   }
-
+ 
   /* Tile grid */
   .tile-grid {
     display: grid;
@@ -348,7 +348,7 @@
     background: currentColor;
     flex-shrink: 0;
   }
-
+ 
   /* Drawer (settings) */
   .drawer-backdrop {
     position: fixed;
@@ -403,7 +403,7 @@
     letter-spacing: 0.08em;
     margin-bottom: 10px;
   }
-
+ 
   /* User list (admin) */
   .user-row {
     display: flex;
@@ -432,7 +432,7 @@
     flex-shrink: 0;
   }
   .user-row.disabled .email { text-decoration: line-through; color: var(--text-subtle); }
-
+ 
   /* Modal */
   .modal-backdrop {
     position: fixed;
@@ -461,7 +461,7 @@
     justify-content: flex-end;
     margin-top: 1.25rem;
   }
-
+ 
   /* Toasts */
   .toast-stack {
     position: fixed;
@@ -491,7 +491,7 @@
     from { transform: translateY(8px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
-
+ 
   /* Inline messages */
   .inline-error {
     background: var(--danger-bg);
@@ -509,7 +509,7 @@
     border-radius: var(--radius);
     margin-bottom: 14px;
   }
-
+ 
   /* Footer note (login) */
   .auth-footnote {
     margin-top: 1.5rem;
@@ -517,7 +517,7 @@
     color: var(--text-subtle);
     text-align: center;
   }
-
+ 
   /* Loading spinner */
   .spinner {
     display: inline-block;
@@ -529,7 +529,7 @@
     animation: spin 0.7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-
+ 
   .sr-only {
     position: absolute;
     width: 1px; height: 1px;
@@ -540,7 +540,7 @@
 </style>
 </head>
 <body>
-
+ 
 <!-- ============================================================ -->
 <!-- BOOT / LOADING                                                -->
 <!-- ============================================================ -->
@@ -552,7 +552,7 @@
     </div>
   </div>
 </div>
-
+ 
 <!-- ============================================================ -->
 <!-- SETUP (first device run / no JSONBin config)                  -->
 <!-- ============================================================ -->
@@ -579,7 +579,7 @@
     </div>
   </div>
 </div>
-
+ 
 <!-- ============================================================ -->
 <!-- BOOTSTRAP FIRST ADMIN                                         -->
 <!-- ============================================================ -->
@@ -609,7 +609,7 @@
     </div>
   </div>
 </div>
-
+ 
 <!-- ============================================================ -->
 <!-- LOGIN                                                         -->
 <!-- ============================================================ -->
@@ -640,7 +640,7 @@
     </div>
   </div>
 </div>
-
+ 
 <!-- ============================================================ -->
 <!-- HUB                                                           -->
 <!-- ============================================================ -->
@@ -668,7 +668,7 @@
     <div class="tile-grid" id="tile-grid"></div>
   </div>
 </div>
-
+ 
 <!-- ============================================================ -->
 <!-- SETTINGS DRAWER                                               -->
 <!-- ============================================================ -->
@@ -681,7 +681,7 @@
     </button>
   </div>
   <div class="drawer-body">
-
+ 
     <!-- Profile -->
     <div class="drawer-section">
       <div class="drawer-section-head">Profile</div>
@@ -698,7 +698,7 @@
         Sign out of this device
       </button>
     </div>
-
+ 
     <!-- Admin -->
     <div class="drawer-section" id="drawer-admin-section" style="display: none;">
       <div class="drawer-section-head">Users (admin only)</div>
@@ -708,7 +708,7 @@
         Add user
       </button>
     </div>
-
+ 
     <!-- Hub config -->
     <div class="drawer-section">
       <div class="drawer-section-head">Hub configuration</div>
@@ -717,21 +717,21 @@
       </div>
       <button class="btn btn-block btn-sm" id="drawer-reset-config">Reset device configuration</button>
     </div>
-
+ 
   </div>
 </aside>
-
+ 
 <!-- ============================================================ -->
 <!-- MODALS                                                        -->
 <!-- ============================================================ -->
 <div class="modal-backdrop" id="modal-backdrop">
   <div class="modal" id="modal-content"></div>
 </div>
-
+ 
 <!-- Toasts -->
 <div class="toast-stack" id="toast-stack"></div>
-
-
+ 
+ 
 <script>
 //
 //  R&D HUB
@@ -739,7 +739,7 @@
 //  device-remember session token, and JSONBin-backed user store.
 //  Designed to live alongside other tools on the same GitHub Pages origin.
 //
-
+ 
 // ============================================================
 //  CONFIG
 // ============================================================
@@ -749,13 +749,13 @@
 const CONFIG_DEFAULTS = {
   usersBinId: '',
   masterKey: '',
-  logoPath: 'logo.png',     // drop a logo.svg or logo.png next to hub.html
+  logoPath: 'logo.svg',     // drop a logo.svg or logo.png next to hub.html
   sessionDays: 30,
   pinMinLength: 6,
   pbkdf2Iterations: 200000,
   failedLoginThrottleMs: 1500
 };
-
+ 
 // ============================================================
 //  TOOL REGISTRY
 // ============================================================
@@ -856,12 +856,12 @@ const STATE = {
   bootstrapping: false,
   loginThrottleUntil: 0
 };
-
+ 
 const LS_CONFIG_KEY = 'hub_config_v1';
 const LS_SESSION_KEY = 'hub_session_v1';
 const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
 const SCHEMA_VERSION = 1;
-
+ 
 // ============================================================
 //  STORAGE HELPERS
 // ============================================================
@@ -874,7 +874,7 @@ function lsSet(key, value) {
 function lsDel(key) {
   try { localStorage.removeItem(key); } catch {}
 }
-
+ 
 function loadConfig() {
   const stored = lsGet(LS_CONFIG_KEY) || {};
   return Object.assign({}, CONFIG_DEFAULTS, stored);
@@ -891,7 +891,7 @@ function clearDeviceConfig() {
   STATE.config = null;
   STATE.session = null;
 }
-
+ 
 function loadSession() {
   const s = lsGet(LS_SESSION_KEY);
   if (!s || typeof s !== 'object') return null;
@@ -909,7 +909,7 @@ function clearSession() {
   lsDel(LS_SESSION_KEY);
   STATE.session = null;
 }
-
+ 
 // ============================================================
 //  CRYPTO (PBKDF2-SHA256)
 // ============================================================
@@ -949,7 +949,7 @@ function constantTimeEqual(a, b) {
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
 }
-
+ 
 // ============================================================
 //  JSONBIN CLIENT
 // ============================================================
@@ -997,7 +997,7 @@ async function jbSaveUsers(record) {
   }
   return r.json();
 }
-
+ 
 // ============================================================
 //  AUTH
 // ============================================================
@@ -1039,7 +1039,7 @@ function makeSession(user, days) {
     tokenId: (crypto.randomUUID && crypto.randomUUID()) || generateSalt(8)
   };
 }
-
+ 
 // ============================================================
 //  UI HELPERS
 // ============================================================
@@ -1088,7 +1088,7 @@ function setLogoSrc() {
     mark.insertBefore(img, mark.firstChild);
   });
 }
-
+ 
 function greetingFor(date) {
   const h = date.getHours();
   if (h < 5) return 'Working late';
@@ -1109,7 +1109,7 @@ function relativeTime(ts) {
   const d = new Date(ts);
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
-
+ 
 // ============================================================
 //  SETUP VIEW
 // ============================================================
@@ -1140,7 +1140,7 @@ function bindSetupView() {
     }
   });
 }
-
+ 
 // ============================================================
 //  BOOTSTRAP FIRST ADMIN
 // ============================================================
@@ -1155,7 +1155,7 @@ function bindBootstrapView() {
     }
     if (pin !== pin2) return showError('bootstrap-error', 'PINs do not match.');
     showError('bootstrap-error', '');
-
+ 
     const btn = document.getElementById('bootstrap-save');
     btn.disabled = true;
     btn.textContent = 'Creating…';
@@ -1178,7 +1178,7 @@ function bindBootstrapView() {
     }
   });
 }
-
+ 
 // ============================================================
 //  LOGIN VIEW
 // ============================================================
@@ -1221,7 +1221,7 @@ function bindLoginView() {
       const idx = record.users.findIndex(u => normaliseEmail(u.email) === normaliseEmail(user.email));
       if (idx >= 0) record.users[idx] = user;
       jbSaveUsers(record).catch(err => console.warn('lastLogin update failed', err));
-
+ 
       const days = remember ? STATE.config.sessionDays : 1;
       saveSession(makeSession(user, days));
       enterHub();
@@ -1239,7 +1239,7 @@ function bindLoginView() {
     if (e.key === 'Enter') document.getElementById('login-pin').focus();
   });
 }
-
+ 
 // ============================================================
 //  HUB VIEW
 // ============================================================
@@ -1260,6 +1260,38 @@ function enterHub() {
   renderHubChrome();
   renderTiles();
   fetchTileStatuses();
+  installStatusRefresh();
+}
+ 
+// Status refresh: 5-minute interval + immediate refresh on tab focus.
+// Pauses while the tab is hidden to avoid wasting JSONBin quota.
+const STATUS_REFRESH_MS = 5 * 60 * 1000;
+function installStatusRefresh() {
+  if (STATE._refreshInstalled) return;
+  STATE._refreshInstalled = true;
+  STATE._refreshTimer = null;
+ 
+  const start = () => {
+    if (STATE._refreshTimer) return;
+    STATE._refreshTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchTileStatuses();
+    }, STATUS_REFRESH_MS);
+  };
+  const stop = () => {
+    if (!STATE._refreshTimer) return;
+    clearInterval(STATE._refreshTimer);
+    STATE._refreshTimer = null;
+  };
+ 
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      fetchTileStatuses();
+      start();
+    } else {
+      stop();
+    }
+  });
+  start();
 }
 function renderHubChrome() {
   const s = STATE.session;
@@ -1334,7 +1366,7 @@ async function fetchTileStatuses() {
   }));
   document.title = urgentCount > 0 ? `(${urgentCount}) R&D Hub` : 'R&D Hub';
 }
-
+ 
 // ============================================================
 //  DRAWER
 // ============================================================
@@ -1353,7 +1385,7 @@ function bindDrawer() {
   document.getElementById('header-settings-btn').addEventListener('click', openDrawer);
   document.getElementById('drawer-close').addEventListener('click', closeDrawer);
   document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
-
+ 
   document.getElementById('drawer-signout').addEventListener('click', () => {
     confirmModal({
       title: 'Sign out of this device?',
@@ -1368,15 +1400,15 @@ function bindDrawer() {
       }
     });
   });
-
+ 
   document.getElementById('drawer-change-pin').addEventListener('click', () => {
     openChangePinModal();
   });
-
+ 
   document.getElementById('drawer-add-user').addEventListener('click', () => {
     openAddUserModal();
   });
-
+ 
   document.getElementById('drawer-reset-config').addEventListener('click', () => {
     confirmModal({
       title: 'Reset device configuration?',
@@ -1390,7 +1422,7 @@ function bindDrawer() {
     });
   });
 }
-
+ 
 // ============================================================
 //  USER LIST (admin)
 // ============================================================
@@ -1466,7 +1498,7 @@ async function handleUserAction(action, email) {
     });
   }
 }
-
+ 
 // ============================================================
 //  MODALS
 // ============================================================
@@ -1481,7 +1513,7 @@ function closeModal() {
 document.addEventListener('click', (e) => {
   if (e.target.id === 'modal-backdrop') closeModal();
 });
-
+ 
 function confirmModal({ title, body, confirmText, danger, onConfirm }) {
   openModal(`
     <h3>${title}</h3>
@@ -1497,7 +1529,7 @@ function confirmModal({ title, body, confirmText, danger, onConfirm }) {
     onConfirm && onConfirm();
   });
 }
-
+ 
 function openAddUserModal() {
   openModal(`
     <h3>Add user</h3>
@@ -1552,7 +1584,7 @@ function openAddUserModal() {
     }
   });
 }
-
+ 
 function openResetPinModal(user) {
   openModal(`
     <h3>Reset PIN for ${user.email}</h3>
@@ -1595,7 +1627,7 @@ function openResetPinModal(user) {
     }
   });
 }
-
+ 
 function openChangePinModal() {
   openModal(`
     <h3>Change your PIN</h3>
@@ -1656,7 +1688,7 @@ function openChangePinModal() {
     }
   });
 }
-
+ 
 // ============================================================
 //  BOOT
 // ============================================================
@@ -1667,20 +1699,20 @@ async function boot() {
   bindBootstrapView();
   bindLoginView();
   bindDrawer();
-
+ 
   // No JSONBin config? → setup
   if (!STATE.config.usersBinId || !STATE.config.masterKey) {
     showView('setup');
     return;
   }
-
+ 
   // Have an active session? → straight to hub
   STATE.session = loadSession();
   if (STATE.session) {
     enterHub();
     return;
   }
-
+ 
   // Otherwise, validate config and check for empty users
   try {
     const record = await jbFetchUsers();
@@ -1696,9 +1728,9 @@ async function boot() {
     showError('setup-error', e.message || 'Could not connect to JSONBin.');
   }
 }
-
+ 
 document.addEventListener('DOMContentLoaded', boot);
 </script>
-
+ 
 </body>
 </html>
