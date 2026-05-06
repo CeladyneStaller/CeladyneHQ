@@ -514,10 +514,46 @@
   .obj-picker {
     border: 0.5px solid var(--border-strong);
     border-radius: var(--radius);
-    max-height: 180px;
-    overflow-y: auto;
     background: var(--surface);
+    overflow: hidden; /* contain rounded corners over the filter row */
   }
+  .obj-picker-filters {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--surface-alt);
+  }
+  .obj-picker-filters select {
+    flex: 1;
+    height: 28px;
+    font-size: 12px;
+    padding: 0 24px 0 8px;
+    min-width: 0; /* let flex children shrink past content */
+  }
+  .obj-picker-body {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .obj-picker-footer {
+    padding: 6px 10px;
+    border-top: 0.5px solid var(--border);
+    background: var(--surface-alt);
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .obj-picker-footer button {
+    background: none;
+    border: none;
+    color: var(--text-info, var(--accent));
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 4px;
+  }
+  .obj-picker-footer button:hover { text-decoration: underline; }
   .obj-picker .obj-row {
     display: flex;
     align-items: center;
@@ -805,58 +841,36 @@ const CONFIG_DEFAULTS = {
 //  Wire fetchStatus to real bins as those tools settle. For now,
 //  most return placeholder text that matches the mockup.
 
-// URL builders for the dynamically-generated tiles.
-// Each tracker's tile points at the same q-tracker.html / stage-gate-health.html
-// page, identifying which bin to load via ?tracker=<id> and which objective(s)
-// to filter to via ?objective=<csv>. Sub-tools must read those params on load.
-function qTrackerUrlFor(trackerId, objectiveIds) {
-  const csv = (objectiveIds || []).map(encodeURIComponent).join(',');
-  const params = new URLSearchParams();
-  params.set('tracker', trackerId);
-  if (csv) params.set('objective', csv);
-  return `q-tracker.html?${params.toString()}`;
+// Append query params to a URL that may already have some.
+function appendParams(baseUrl, params) {
+  if (!baseUrl) return null;
+  const qs = new URLSearchParams();
+  Object.keys(params || {}).forEach(k => {
+    if (params[k] != null && params[k] !== '') qs.set(k, params[k]);
+  });
+  const qsStr = qs.toString();
+  if (!qsStr) return baseUrl;
+  const sep = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${sep}${qsStr}`;
 }
-function stageGateUrlFor(trackerId, objectiveId) {
-  const params = new URLSearchParams();
-  params.set('tracker', trackerId);
-  params.set('objective', objectiveId);
-  return `stage-gate-health.html?${params.toString()}`;
+
+// URL builders for the dynamically-generated tiles.
+// Each returns null if the relevant URL isn't configured on the tracker, in
+// which case the corresponding tile is skipped.
+function qTrackerUrlFor(tracker, objectiveIds) {
+  if (!tracker || !tracker.trackerUrl) return null;
+  const csv = (objectiveIds || []).map(String).join(',');
+  return appendParams(tracker.trackerUrl, { objective: csv });
+}
+function stageGateUrlFor(tracker, objectiveId) {
+  if (!tracker || !tracker.trackerUrl) return null;
+  return appendParams(tracker.trackerUrl, { objective: String(objectiveId) });
+}
+function ganttUrlFor(tracker) {
+  return (tracker && tracker.ganttUrl) || null;
 }
 
 const TOOLS = [
-   {
-    id: 'rd_gantt',
-    name: 'Celadyne Gantt Chart',
-    description: 'Celadyne Project Timelines',
-    icon: 'chart-gantt',
-    url: 'https://celadynestaller.github.io/rd-gantt/?readonly',
-    fetchStatus: async () => {
-      // TODO: wire to gantt bin — count gates with end date in next 7 days
-      return { text: '2 gates due this week', severity: 'warning' };
-    }
-  },
-  {
-    id: 'el_gantt',
-    name: 'Electrolyzer Gantt Chart',
-    description: 'Electrolyzer Project Timelines',
-    icon: 'chart-gantt',
-    url: 'https://celadynestaller.github.io/echem-gantt/?readonly',
-    fetchStatus: async () => {
-      // TODO: wire to gantt bin — count gates with end date in next 7 days
-      return { text: '2 gates due this week', severity: 'warning' };
-    }
-  },
-   {
-    id: 'fc_gantt',
-    name: 'Fuel Cell Gantt Chart',
-    description: 'Fuel Cell Project Timelines',
-    icon: 'chart-gantt',
-    url: 'https://celadynestaller.github.io/FuelCell-gantt/?readonly',
-    fetchStatus: async () => {
-      // TODO: wire to gantt bin — count gates with end date in next 7 days
-      return { text: '2 gates due this week', severity: 'warning' };
-    }
-  },
   {
     id: 'celadyne-confluence',
     name: 'Celadyne Confluence',
@@ -1086,9 +1100,18 @@ async function jbSaveUsers(record) {
 function getConfiguredTrackers() {
   const cfg = STATE.config || {};
   const list = Array.isArray(cfg.trackers) ? cfg.trackers.filter(t => t && t.id && t.binId) : [];
-  if (list.length) return list;
+  if (list.length) {
+    // Normalise URL fields so callers can rely on them existing.
+    return list.map(t => ({
+      id: t.id,
+      name: t.name || t.id,
+      binId: t.binId,
+      trackerUrl: t.trackerUrl || '',
+      ganttUrl: t.ganttUrl || ''
+    }));
+  }
   if (cfg.trackerBinId) {
-    return [{ id: 'default', name: 'Tracker', binId: cfg.trackerBinId }];
+    return [{ id: 'default', name: 'Tracker', binId: cfg.trackerBinId, trackerUrl: '', ganttUrl: '' }];
   }
   return [];
 }
@@ -1519,32 +1542,57 @@ function renderHubChrome() {
     s.role === 'admin' ? 'block' : 'none';
 }
 // Build the full tile list: static TOOLS plus dynamic tiles generated from
-// the current user's assigned objectives. Dynamic tiles are:
+// configured trackers and the current user's assigned objectives.
+//
+// Always shown (per configured tracker, regardless of user assignments):
+//   - One Gantt tile per tracker that has a ganttUrl set
+//
+// Shown only for users with assignments:
 //   - One Q tracker tile per tracker the user has any assignments in
+//     (provided the tracker has a trackerUrl set)
 //   - One Stage-gate tile per assigned objective
+//     (provided the objective's tracker has a trackerUrl set)
 function buildToolList(session) {
   const list = TOOLS.slice();
+  const trackers = getConfiguredTrackers();
+
+  // Per-tracker Gantt tiles (always)
+  trackers.forEach(t => {
+    const url = ganttUrlFor(t);
+    if (!url) return;
+    list.push({
+      id: `gantt__${t.id}`,
+      name: `${t.name} Gantt`,
+      description: 'Project timelines and stage-gates',
+      icon: 'chart-gantt',
+      url,
+      fetchStatus: async () => ({ text: 'Open chart', severity: 'subtle' })
+    });
+  });
+
   const assignments = (session && session.assignedObjectives) || [];
   if (!assignments.length) return list;
 
   // Group assignments by tracker
   const byTracker = {};
   assignments.forEach(a => {
-    if (!a || !a.id || !a.tracker) return;
+    if (!a || a.id == null || !a.tracker) return;
     (byTracker[a.tracker] = byTracker[a.tracker] || []).push(a.id);
   });
 
   // Q tracker tiles: one per tracker
   Object.keys(byTracker).forEach(trackerId => {
     const tracker = findTracker(trackerId);
-    const trackerName = tracker ? tracker.name : trackerId;
+    if (!tracker) return; // user assigned to an unconfigured tracker
     const ids = byTracker[trackerId];
+    const url = qTrackerUrlFor(tracker, ids);
+    if (!url) return; // tracker has no trackerUrl set
     list.push({
       id: `q-tracker__${trackerId}`,
-      name: `${trackerName} Q tracker`,
+      name: `${tracker.name} Q tracker`,
       description: `${ids.length} objective${ids.length === 1 ? '' : 's'} assigned to you`,
       icon: 'target-arrow',
-      url: qTrackerUrlFor(trackerId, ids),
+      url,
       fetchStatus: async () => ({ text: `${ids.length} assigned`, severity: 'subtle' })
     });
   });
@@ -1553,13 +1601,15 @@ function buildToolList(session) {
   assignments.forEach(a => {
     const tracker = findTracker(a.tracker);
     const trackerName = tracker ? tracker.name : a.tracker;
+    const url = stageGateUrlFor(tracker, a.id);
+    if (!url) return; // tracker not configured or has no trackerUrl
     const display = a.name || `#${a.id}`;
     list.push({
       id: `stage-gate__${a.tracker}__${a.id}`,
       name: `Stage-gate · ${shortLabel(display, 28)}`,
       description: `${trackerName} · ${a.name ? `#${a.id} · ` : ''}TRL/MRL progress`,
       icon: 'stack-2',
-      url: stageGateUrlFor(a.tracker, a.id),
+      url,
       titleAttr: a.name ? `Stage-gate for: ${a.name} (#${a.id})` : `Stage-gate for #${a.id}`,
       fetchStatus: async () => ({ text: 'View progress', severity: 'subtle' })
     });
@@ -1686,11 +1736,15 @@ function slugify(s) {
 function openManageTrackersModal() {
   const renderBody = () => {
     const trackers = getConfiguredTrackers();
-    const rows = trackers.map((t, i) => `
+    const rows = trackers.map((t, i) => {
+      const urls = [];
+      urls.push(t.trackerUrl ? '<span style="color: var(--success);">tracker ✓</span>' : '<span style="color: var(--text-subtle);">tracker —</span>');
+      urls.push(t.ganttUrl ? '<span style="color: var(--success);">gantt ✓</span>' : '<span style="color: var(--text-subtle);">gantt —</span>');
+      return `
       <div class="user-row">
         <div class="user-info">
           <div class="email">${t.name}</div>
-          <div class="meta mono">${t.binId}</div>
+          <div class="meta"><span class="mono">${t.binId}</span> · ${urls.join(' · ')}</div>
         </div>
         <div class="user-actions">
           <button class="btn btn-sm" data-act="edit-tracker" data-idx="${i}" title="Edit">
@@ -1701,7 +1755,8 @@ function openManageTrackersModal() {
           </button>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
     return `
       <h3>Tracker bins</h3>
       <p class="intro">Each tracker bin holds the objectives for one division. Users can be assigned objectives from any of these.</p>
@@ -1763,21 +1818,32 @@ function openManageTrackersModal() {
 // Add or edit a single tracker. onDone() is called after save/cancel.
 function openTrackerEditModal(existing, onDone) {
   const isEdit = !!existing;
+  const esc = s => String(s || '').replace(/"/g, '&quot;');
   openModal(`
     <h3>${isEdit ? 'Edit' : 'Add'} tracker</h3>
     <p class="intro">A tracker bin holds the objectives for one division. The internal ID is used in URLs and shouldn't change after first use.</p>
     <div id="tracker-edit-error" class="inline-error" style="display: none;"></div>
     <label class="field">
       <span class="label-row">Display name</span>
-      <input type="text" id="tracker-name" autocomplete="off" value="${existing ? existing.name.replace(/"/g, '&quot;') : ''}" placeholder="e.g. Celadyne">
+      <input type="text" id="tracker-name" autocomplete="off" value="${esc(existing && existing.name)}" placeholder="e.g. Celadyne">
     </label>
     <label class="field">
       <span class="label-row">Internal ID <span class="subtle">(slug, used in URLs)</span></span>
-      <input type="text" id="tracker-id" autocomplete="off" value="${existing ? existing.id : ''}" placeholder="auto from name" ${isEdit ? 'readonly' : ''}>
+      <input type="text" id="tracker-id" autocomplete="off" value="${esc(existing && existing.id)}" placeholder="auto from name" ${isEdit ? 'readonly' : ''}>
     </label>
     <label class="field">
       <span class="label-row">JSONBin bin ID</span>
-      <input type="text" id="tracker-bin-id" autocomplete="off" value="${existing ? existing.binId : ''}" placeholder="paste bin ID">
+      <input type="text" id="tracker-bin-id" autocomplete="off" value="${esc(existing && existing.binId)}" placeholder="paste bin ID">
+    </label>
+    <label class="field">
+      <span class="label-row">Tracker URL <span class="subtle">(optional)</span></span>
+      <input type="text" id="tracker-url" autocomplete="off" value="${esc(existing && existing.trackerUrl)}" placeholder="https://...github.io/celadyne-tracker/">
+      <div class="obj-picker-meta">Used by Q tracker and Stage-gate tiles. Leave blank to skip those tiles for this tracker.</div>
+    </label>
+    <label class="field">
+      <span class="label-row">Gantt URL <span class="subtle">(optional)</span></span>
+      <input type="text" id="gantt-url" autocomplete="off" value="${esc(existing && existing.ganttUrl)}" placeholder="https://...github.io/celadyne-gantt/">
+      <div class="obj-picker-meta">Used by the Gantt tile. Leave blank to hide the Gantt tile for this tracker.</div>
     </label>
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
@@ -1804,6 +1870,8 @@ function openTrackerEditModal(existing, onDone) {
     const name = document.getElementById('tracker-name').value.trim();
     const id = document.getElementById('tracker-id').value.trim();
     const binId = document.getElementById('tracker-bin-id').value.trim();
+    const trackerUrl = document.getElementById('tracker-url').value.trim();
+    const ganttUrl = document.getElementById('gantt-url').value.trim();
     if (!name) return showError('tracker-edit-error', 'Display name is required.');
     if (!id || !/^[a-z0-9-]+$/.test(id)) return showError('tracker-edit-error', 'ID must be lowercase letters, numbers, and dashes only.');
     if (!binId) return showError('tracker-edit-error', 'Bin ID is required.');
@@ -1817,7 +1885,7 @@ function openTrackerEditModal(existing, onDone) {
     // Save provisionally so jbFetchTracker can find the new entry
     const trackers = getConfiguredTrackers().slice();
     const idx = trackers.findIndex(t => t.id === id);
-    const updated = { id, name, binId };
+    const updated = { id, name, binId, trackerUrl, ganttUrl };
     if (idx >= 0) trackers[idx] = updated; else trackers.push(updated);
     saveConfig({ trackers, trackerBinId: '' });
 
@@ -1959,8 +2027,9 @@ function confirmModal({ title, body, confirmText, danger, onConfirm }) {
  
 // ---------- Objective picker helpers ----------
 // Renders a checkbox list of OBJECTIVES from ALL configured tracker bins.
-// Tracker bins store work items in a `projects` array; we filter to entries
-// where projectType === "objective".
+// Filterable by bin, division, and productLine. Selection persists across
+// filter changes (a checked item that gets filtered out is just hidden).
+//
 // preselected: array of {tracker, id, name?} pairs.
 // Returns { getSelected(): [{tracker, id, name}, ...] }.
 async function mountObjectivePicker(containerId, preselected) {
@@ -1976,23 +2045,37 @@ async function mountObjectivePicker(containerId, preselected) {
 
   el.innerHTML = '<div class="obj-empty">Loading objectives…</div>';
 
-  // Fetch all trackers in parallel; degrade gracefully if some fail.
+  // Fetch all trackers in parallel; capture products for name lookup.
   const results = await Promise.all(trackers.map(async t => {
     try {
       const data = await jbFetchTracker(t.id);
-      return { tracker: t, objectives: objectivesIn(data), error: null };
+      const products = Array.isArray(data.products) ? data.products : [];
+      return { tracker: t, objectives: objectivesIn(data), products, error: null };
     } catch (e) {
-      return { tracker: t, objectives: [], error: e.message || 'fetch failed' };
+      return { tracker: t, objectives: [], products: [], error: e.message || 'fetch failed' };
     }
   }));
 
-  const total = results.reduce((n, r) => n + r.objectives.length, 0);
-  if (total === 0 && results.every(r => !r.error)) {
+  // Flat item list for filtering, plus a product-id → display-name map.
+  const items = [];
+  const productNames = {};
+  results.forEach(({ tracker, objectives, products }) => {
+    products.forEach(p => {
+      if (p && p.id) productNames[p.id] = p.name || p.id;
+    });
+    objectives.forEach(obj => {
+      const id = projectId(obj);
+      if (!id) return;
+      items.push({ tracker, objective: obj, id });
+    });
+  });
+
+  if (!items.length && results.every(r => !r.error)) {
     el.innerHTML = '<div class="obj-empty">No objectives found in any tracker. (Looking for projects with projectType === "objective".)</div>';
     return { getSelected: () => [] };
   }
 
-  // selected: Map<key, {tracker, id, name}> so we can capture name at check time.
+  // Selection state — keyed by `${tracker}::${id}` so each selection is unique.
   const selected = new Map();
   preselected.forEach(a => {
     if (a && a.tracker && a.id != null) {
@@ -2001,39 +2084,121 @@ async function mountObjectivePicker(containerId, preselected) {
     }
   });
 
-  el.innerHTML = '';
-  results.forEach(({ tracker, objectives, error }) => {
-    if (error) {
+  // Filter state — empty string means "any".
+  const filters = { bin: '', division: '', product: '' };
+
+  // Distinct values for each filter dropdown.
+  const distinctDivisions = Array.from(new Set(
+    items.map(i => i.objective.division).filter(Boolean)
+  )).sort();
+  const distinctProducts = Array.from(new Set(
+    items.map(i => i.objective.productLine).filter(Boolean)
+  )).sort();
+
+  const escAttr = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
+  const escText = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+  el.innerHTML = `
+    <div class="obj-picker-filters">
+      <select data-filter="bin" aria-label="Filter by bin">
+        <option value="">All bins</option>
+        ${trackers.map(t => `<option value="${escAttr(t.id)}">${escText(t.name)}</option>`).join('')}
+      </select>
+      <select data-filter="division" aria-label="Filter by division">
+        <option value="">All divisions</option>
+        ${distinctDivisions.map(d => `<option value="${escAttr(d)}">${escText(d)}</option>`).join('')}
+      </select>
+      <select data-filter="product" aria-label="Filter by product">
+        <option value="">All products</option>
+        ${distinctProducts.map(p => `<option value="${escAttr(p)}">${escText(productNames[p] || p)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="obj-picker-body" data-body></div>
+    <div class="obj-picker-footer">
+      <span data-counts>0 of 0 visible</span>
+      <button type="button" data-clear-filters>Clear filters</button>
+    </div>
+  `;
+
+  const bodyEl = el.querySelector('[data-body]');
+  const countsEl = el.querySelector('[data-counts]');
+
+  function renderBody() {
+    bodyEl.innerHTML = '';
+
+    // Surface fetch errors at the top — not subject to filters.
+    results.forEach(({ tracker, error }) => {
+      if (!error) return;
       const errRow = document.createElement('div');
       errRow.className = 'obj-row';
       errRow.style.color = 'var(--danger)';
       errRow.style.cursor = 'default';
       errRow.textContent = `${tracker.name}: ${error}`;
-      el.appendChild(errRow);
-      return;
-    }
-    objectives.forEach(obj => {
-      const id = projectId(obj);
-      if (!id) return;
-      const name = projectName(obj);
-      const key = assignmentKey({ tracker: tracker.id, id });
-      const row = document.createElement('label');
-      row.className = 'obj-row';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = key;
-      cb.checked = selected.has(key);
-      cb.addEventListener('change', () => {
-        if (cb.checked) selected.set(key, { tracker: tracker.id, id, name });
-        else selected.delete(key);
+      bodyEl.appendChild(errRow);
+    });
+
+    // Apply filters (AND'd together)
+    const visible = items.filter(({ tracker, objective }) => {
+      if (filters.bin && tracker.id !== filters.bin) return false;
+      if (filters.division && objective.division !== filters.division) return false;
+      if (filters.product && objective.productLine !== filters.product) return false;
+      return true;
+    });
+
+    if (!visible.length) {
+      const msg = document.createElement('div');
+      msg.className = 'obj-empty';
+      msg.textContent = items.length
+        ? 'No objectives match the current filters.'
+        : 'No objectives loaded.';
+      bodyEl.appendChild(msg);
+    } else {
+      visible.forEach(({ tracker, objective, id }) => {
+        const name = projectName(objective);
+        const key = assignmentKey({ tracker: tracker.id, id });
+        const row = document.createElement('label');
+        row.className = 'obj-row';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = key;
+        cb.checked = selected.has(key);
+        cb.addEventListener('change', () => {
+          if (cb.checked) selected.set(key, { tracker: tracker.id, id, name });
+          else selected.delete(key);
+          updateCounts(visible.length);
+        });
+        const text = document.createElement('span');
+        text.textContent = `${tracker.name} / ${projectLabel(objective)}`;
+        row.appendChild(cb);
+        row.appendChild(text);
+        bodyEl.appendChild(row);
       });
-      const text = document.createElement('span');
-      text.textContent = `${tracker.name} / ${projectLabel(obj)}`;
-      row.appendChild(cb);
-      row.appendChild(text);
-      el.appendChild(row);
+    }
+
+    updateCounts(visible.length);
+  }
+
+  function updateCounts(visibleCount) {
+    const sel = selected.size;
+    countsEl.textContent = `${visibleCount} visible · ${sel} selected`;
+  }
+
+  // Wire filter selects
+  el.querySelectorAll('select[data-filter]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      filters[sel.dataset.filter] = sel.value;
+      renderBody();
     });
   });
+
+  // Clear filters button
+  el.querySelector('[data-clear-filters]').addEventListener('click', () => {
+    filters.bin = filters.division = filters.product = '';
+    el.querySelectorAll('select[data-filter]').forEach(s => { s.value = ''; });
+    renderBody();
+  });
+
+  renderBody();
 
   return {
     getSelected: () => Array.from(selected.values())
