@@ -301,6 +301,24 @@
     padding: 0 4px;
   }
 
+  /* Sub-sections within a tile section (e.g. Projects → Stage-gates / Meetings / Gantts) */
+  .tile-subsection {
+    margin-bottom: 1.25rem;
+  }
+  .tile-subsection:last-child {
+    margin-bottom: 0;
+  }
+  .tile-subsection-head {
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-subtle);
+    margin: 0 0 8px;
+    padding: 0 4px;
+    opacity: 0.85;
+  }
+
   /* Tile grid */
   .tile-grid {
     display: grid;
@@ -425,6 +443,149 @@
     min-width: 4px;
     max-width: 16px;
     background: var(--border);
+  }
+
+  /* Leadership panel — embedded in dashboard for Lead/CTO sessions */
+  .leadership-panel {
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .leadership-panel-loading {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-subtle);
+    font-size: 13px;
+  }
+  .leadership-filters {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--surface-alt);
+    flex-wrap: wrap;
+  }
+  .leadership-filters select {
+    height: 28px;
+    font-size: 12px;
+    padding: 0 24px 0 8px;
+  }
+  .leadership-tracker-block {
+    padding: 12px 14px;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .leadership-tracker-block:last-child { border-bottom: none; }
+  .leadership-tracker-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .leadership-tracker-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .leadership-tracker-meta {
+    font-size: 11px;
+    color: var(--text-subtle);
+  }
+  .leadership-objgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+  }
+  .leadership-card {
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    background: var(--surface);
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    transition: border-color 120ms;
+  }
+  .leadership-card:hover {
+    border-color: var(--border-strong);
+  }
+  .leadership-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .leadership-card-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    line-height: 1.3;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .leadership-status-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 10px;
+    flex-shrink: 0;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .leadership-status-badge.ontrack  { background: #EAF3DE; color: #3B6D11; }
+  .leadership-status-badge.watch    { background: #FAEEDA; color: #854F0B; }
+  .leadership-status-badge.atrisk   { background: #FCEBEB; color: #A32D2D; }
+  .leadership-status-badge.complete { background: var(--surface-alt); color: var(--text-subtle); }
+  .leadership-card-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .leadership-card-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--surface-alt);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .leadership-card-bar-fill {
+    height: 100%;
+    background: var(--text-subtle);
+    border-radius: 2px;
+  }
+  .leadership-card-bar-fill.ontrack  { background: #3B6D11; }
+  .leadership-card-bar-fill.watch    { background: #BA7517; }
+  .leadership-card-bar-fill.atrisk   { background: #A32D2D; }
+  .leadership-card-bar-fill.complete { background: var(--text-subtle); }
+  .leadership-card-pct {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 32px;
+    text-align: right;
+  }
+  .leadership-card-meta {
+    font-size: 10px;
+    color: var(--text-subtle);
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .leadership-card-gates {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0.5px solid var(--border);
+  }
+  .leadership-empty {
+    padding: 18px;
+    text-align: center;
+    color: var(--text-subtle);
+    font-size: 12px;
   }
  
   /* Drawer (settings) */
@@ -1246,6 +1407,11 @@ async function jbFetchUsers() {
   // `name` may be missing for older records — tile labels fall back to id.
   const legacyTrackerId = (getConfiguredTrackers()[0] || {}).id || 'default';
   data.users.forEach(u => {
+    // Org role / leadership fields — added in the leadership build.
+    // Default everyone to 'ic'. `leadOf` only meaningful for orgRole === 'lead'.
+    if (u.orgRole !== 'lead' && u.orgRole !== 'cto') u.orgRole = 'ic';
+    u.leadOf = Array.isArray(u.leadOf) ? u.leadOf.filter(x => typeof x === 'string') : [];
+
     if (!Array.isArray(u.assignedObjectives)) {
       u.assignedObjectives = [];
       return;
@@ -1286,6 +1452,37 @@ async function jbSaveUsers(record) {
 // Trackers are configured as { id, name, binId } in STATE.config.trackers.
 // Legacy: if STATE.config.trackerBinId is set and trackers[] is empty, treat
 // it as a single default tracker.
+
+// ---- Leadership helpers ----
+// `orgRole` and `leadOf` define a user's position in the org hierarchy:
+//   - 'ic'   (default): individual contributor; owns personal objectives
+//   - 'lead': owns specific trackers via leadOf array, plus personal objectives
+//   - 'cto': implicit lead of every configured tracker, plus personal objectives
+// These are independent of the `role` field (admin vs user, which controls
+// hub-config permissions).
+function isLeadership(session) {
+  return !!(session && (session.orgRole === 'lead' || session.orgRole === 'cto'));
+}
+function leadsTracker(session, trackerId) {
+  if (!session) return false;
+  if (session.orgRole === 'cto') return true; // CTO leads everything
+  if (session.orgRole !== 'lead') return false;
+  return Array.isArray(session.leadOf) && session.leadOf.includes(trackerId);
+}
+// Trackers this user has leadership over (CTO → all configured; Lead → leadOf).
+function trackersLed(session) {
+  if (!session) return [];
+  const all = getConfiguredTrackers();
+  if (session.orgRole === 'cto') return all;
+  if (session.orgRole !== 'lead') return [];
+  const set = new Set(session.leadOf || []);
+  return all.filter(t => set.has(t.id));
+}
+// Find the current CTO, if any. Used by the user-edit modal to enforce single-CTO.
+function findExistingCTO(usersRecord, exceptEmail) {
+  const except = exceptEmail ? normaliseEmail(exceptEmail) : null;
+  return (usersRecord.users || []).find(u => u.orgRole === 'cto' && normaliseEmail(u.email) !== except) || null;
+}
 
 function getConfiguredTrackers() {
   const cfg = STATE.config || {};
@@ -1418,6 +1615,8 @@ async function createUserRecord(email, pin, role) {
   return {
     email: normaliseEmail(email),
     role: role || 'user',
+    orgRole: 'ic',
+    leadOf: [],
     pinHash,
     salt,
     iterations: STATE.config.pbkdf2Iterations,
@@ -1439,6 +1638,8 @@ function makeSession(user, days) {
   return {
     email: user.email,
     role: user.role || 'user',
+    orgRole: (user.orgRole === 'lead' || user.orgRole === 'cto') ? user.orgRole : 'ic',
+    leadOf: Array.isArray(user.leadOf) ? user.leadOf.slice() : [],
     assignedObjectives: Array.isArray(user.assignedObjectives) ? user.assignedObjectives.slice() : [],
     issuedAt: now,
     expiresAt: now + sessionDays * 24 * 60 * 60 * 1000,
@@ -1764,6 +1965,7 @@ function buildToolList(session) {
   function sectionFor(t) {
     if (t.companyLevel) return 'links';
     if (assignedTrackerIds.has(t.id)) return 'projects';
+    if (leadsTracker(session, t.id)) return 'projects';
     return 'links';
   }
 
@@ -1965,13 +2167,238 @@ function renderGateBubblesHtml(gates) {
   `;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Leadership panel — renders an embedded view of all objectives across the
+// trackers a Lead/CTO owns. Reads the same `computedStatus` snapshots that
+// power the Stage-gate tile indicators (no extra computation hub-side).
+// Filters reset on each render (no persistence).
+// ─────────────────────────────────────────────────────────────────────────────
+async function renderLeadershipPanel(led) {
+  const root = document.getElementById('leadership-panel');
+  if (!root) return;
+  root.innerHTML = '<div class="leadership-panel-loading">Loading leadership view…</div>';
+
+  // Fetch snapshots in parallel, sharing the per-render cache with stage-gate tiles.
+  const results = await Promise.all(led.map(async t => {
+    const snapshot = await fetchTrackerComputedStatus(t.id).catch(() => null);
+    return { tracker: t, snapshot };
+  }));
+
+  // Build flat objective list across all owned trackers.
+  // Each item: { tracker, id, name, status, progress, daysLeft, isComplete, gates }.
+  const items = [];
+  results.forEach(({ tracker, snapshot }) => {
+    if (!snapshot || !snapshot.objectives) return;
+    for (const id of Object.keys(snapshot.objectives)) {
+      const obj = snapshot.objectives[id];
+      // Look up display name from the user's assignedObjectives if present;
+      // otherwise the snapshot doesn't carry a name (kept it small on purpose).
+      const fromAssignment = (STATE.session.assignedObjectives || []).find(
+        a => a.tracker === tracker.id && a.id === id
+      );
+      items.push({
+        tracker,
+        id,
+        name: (fromAssignment && fromAssignment.name) || `Objective #${id}`,
+        ...obj
+      });
+    }
+  });
+
+  // Status priority for sorting: at-risk first, then watch, on-track, complete.
+  function statusPriority(item) {
+    if (item.isComplete) return 4;
+    if (item.status === 'atrisk') return 0;
+    if (item.status === 'watch') return 1;
+    if (item.status === 'ontrack') return 2;
+    return 3;
+  }
+  items.sort((a, b) => {
+    const dp = statusPriority(a) - statusPriority(b);
+    if (dp !== 0) return dp;
+    return (a.daysLeft || 0) - (b.daysLeft || 0);
+  });
+
+  // No data at all → friendly empty state.
+  if (!items.length) {
+    root.innerHTML = `
+      <div class="leadership-empty">
+        No objective data yet. Save a Gantt for one of your trackers to populate the snapshot.
+      </div>`;
+    return;
+  }
+
+  // Build filter UI. Filters reset to "all" on every render (per spec).
+  const filtersHtml = `
+    <div class="leadership-filters">
+      <select id="leadership-tracker-filter">
+        <option value="all">All trackers</option>
+        ${led.map(t => `<option value="${escAttr(t.id)}">${escText(t.name)}</option>`).join('')}
+      </select>
+      <select id="leadership-status-filter">
+        <option value="all">All statuses</option>
+        <option value="atrisk">At risk</option>
+        <option value="watch">Watch</option>
+        <option value="ontrack">On track</option>
+        <option value="complete">Complete</option>
+      </select>
+    </div>
+    <div id="leadership-body"></div>
+  `;
+  root.innerHTML = filtersHtml;
+  const bodyEl = document.getElementById('leadership-body');
+
+  function statusKeyForFilter(item) {
+    return item.isComplete ? 'complete' : item.status;
+  }
+
+  function renderBody() {
+    const trackerFilter = document.getElementById('leadership-tracker-filter').value;
+    const statusFilter = document.getElementById('leadership-status-filter').value;
+    const visible = items.filter(it => {
+      if (trackerFilter !== 'all' && it.tracker.id !== trackerFilter) return false;
+      if (statusFilter !== 'all' && statusKeyForFilter(it) !== statusFilter) return false;
+      return true;
+    });
+
+    if (!visible.length) {
+      bodyEl.innerHTML = '<div class="leadership-empty">No objectives match the current filters.</div>';
+      return;
+    }
+
+    // Group visible items by tracker for the per-tracker block layout.
+    const byTracker = new Map();
+    visible.forEach(it => {
+      const arr = byTracker.get(it.tracker.id) || [];
+      arr.push(it);
+      byTracker.set(it.tracker.id, arr);
+    });
+
+    bodyEl.innerHTML = led
+      .filter(t => byTracker.has(t.id))
+      .map(t => renderTrackerBlock(t, byTracker.get(t.id)))
+      .join('');
+  }
+
+  function renderTrackerBlock(tracker, blockItems) {
+    const counts = { atrisk: 0, watch: 0, ontrack: 0, complete: 0 };
+    blockItems.forEach(it => counts[statusKeyForFilter(it)]++);
+    const summary = [
+      counts.atrisk  ? `${counts.atrisk} at risk`   : '',
+      counts.watch   ? `${counts.watch} watch`      : '',
+      counts.ontrack ? `${counts.ontrack} on track` : '',
+      counts.complete ? `${counts.complete} complete` : ''
+    ].filter(Boolean).join(' · ');
+    const cards = blockItems.map(it => renderObjectiveCard(it)).join('');
+    return `
+      <div class="leadership-tracker-block">
+        <div class="leadership-tracker-head">
+          <div class="leadership-tracker-name">${escText(tracker.name)}</div>
+          <div class="leadership-tracker-meta">${escText(summary || `${blockItems.length} objectives`)}</div>
+        </div>
+        <div class="leadership-objgrid">${cards}</div>
+      </div>
+    `;
+  }
+
+  function renderObjectiveCard(it) {
+    const statusKey = it.isComplete ? 'complete' : it.status;
+    const statusLabel = it.isComplete ? 'Complete'
+      : it.status === 'ontrack' ? 'On track'
+      : it.status === 'watch'   ? 'Watch'
+      : it.status === 'atrisk'  ? 'At risk'
+      : '';
+    let daysText = '';
+    if (!it.isComplete && Number.isFinite(it.daysLeft)) {
+      if (it.daysLeft < 0) daysText = `${Math.abs(it.daysLeft)}d overdue`;
+      else if (it.daysLeft === 0) daysText = 'Due today';
+      else daysText = `${it.daysLeft}d left`;
+    }
+    const url = stageGateUrlFor(it.tracker, it.id);
+    const gatesHtml = renderGateBubblesHtml(it.gates || []);
+    return `
+      <a class="leadership-card" href="${escAttr(url || '#')}" target="_blank" rel="noopener noreferrer">
+        <div class="leadership-card-head">
+          <span class="leadership-card-name" title="${escAttr(it.name)}">${escText(it.name)}</span>
+          ${statusLabel ? `<span class="leadership-status-badge ${statusKey}">${statusLabel}</span>` : ''}
+        </div>
+        <div class="leadership-card-progress">
+          <div class="leadership-card-bar">
+            <div class="leadership-card-bar-fill ${statusKey}" style="width: ${Math.min(100, Math.max(0, it.progress || 0))}%;"></div>
+          </div>
+          <span class="leadership-card-pct">${it.progress || 0}%</span>
+        </div>
+        <div class="leadership-card-meta">
+          <span>${escText(it.tracker.name)}</span>
+          <span>${escText(daysText)}</span>
+        </div>
+        ${gatesHtml ? `<div class="leadership-card-gates">${gatesHtml}</div>` : ''}
+      </a>
+    `;
+  }
+
+  // Wire filter changes
+  document.getElementById('leadership-tracker-filter').addEventListener('change', renderBody);
+  document.getElementById('leadership-status-filter').addEventListener('change', renderBody);
+  renderBody();
+}
+
+function escAttr(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
+function escText(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
 // Section order + display labels. Tiles without a section default to 'links'.
+// 'leadership' is a special section: it renders an embedded panel (per-tracker
+// objective cards) instead of tiles, and only appears for Lead/CTO sessions.
 const TILE_SECTIONS = [
-  { id: 'safety',   label: 'Safety' },
-  { id: 'projects', label: 'Projects' },
-  { id: 'analysis', label: 'Analysis' },
-  { id: 'links',    label: 'Useful links' }
+  { id: 'safety',     label: 'Safety' },
+  { id: 'projects',   label: 'Projects' },
+  { id: 'leadership', label: 'Leadership' },
+  { id: 'analysis',   label: 'Analysis' },
+  { id: 'links',      label: 'Useful links' }
 ];
+
+// Sub-sections within Projects, in display order. Tiles get sorted into
+// these by id prefix; anything that doesn't match falls into a fallback
+// unlabeled grid before the labeled subsections (so future tiles won't be lost).
+const PROJECTS_SUBSECTIONS = [
+  { id: 'stage-gates', label: 'Stage-gates', match: id => id.startsWith('stage-gate__') },
+  { id: 'meetings',    label: 'Meetings',    match: id => id.startsWith('meeting__') },
+  { id: 'gantts',      label: 'Gantts',      match: id => id.startsWith('gantt__') }
+];
+
+// Renders a single tile element and returns it. Shared between flat sections
+// and Projects subsections.
+function renderTileEl(tool) {
+  const a = document.createElement('a');
+  a.className = 'tile';
+  if (tool.isFolder) {
+    a.href = '#';
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      openFolderModal(tool);
+    });
+  } else {
+    a.href = typeof tool.url === 'function' ? tool.url(STATE.session) : tool.url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+  }
+  if (tool.titleAttr) a.title = tool.titleAttr;
+  a.dataset.toolId = tool.id;
+  const isStageGate = typeof tool.id === 'string' && tool.id.startsWith('stage-gate__');
+  a.innerHTML = `
+    <div class="tile-head">
+      <i class="ti ti-${tool.icon} tile-icon" aria-hidden="true"></i>
+      <span class="tile-name">${tool.name}</span>
+    </div>
+    <p class="tile-desc">${tool.description}</p>
+    <div class="tile-status loading" data-status="${tool.id}">
+      <span class="dot" style="opacity: 0.4;"></span>
+      Loading status…
+    </div>
+    ${isStageGate ? `<div class="tile-gates" data-gates="${tool.id}"></div>` : ''}
+  `;
+  return a;
+}
 
 function renderTiles() {
   const root = document.getElementById('tile-sections');
@@ -1980,6 +2407,30 @@ function renderTiles() {
   STATE._currentTools = tools; // expose to fetchTileStatuses
 
   TILE_SECTIONS.forEach(section => {
+    if (section.id === 'leadership') {
+      // Special path: panel rendering, not tiles.
+      const led = trackersLed(STATE.session);
+      if (!isLeadership(STATE.session) || !led.length) return;
+      const wrap = document.createElement('section');
+      wrap.className = 'tile-section';
+      wrap.dataset.section = 'leadership';
+      const head = document.createElement('h2');
+      head.className = 'tile-section-head';
+      head.textContent = section.label;
+      wrap.appendChild(head);
+      const panel = document.createElement('div');
+      panel.id = 'leadership-panel';
+      panel.className = 'leadership-panel';
+      wrap.appendChild(panel);
+      root.appendChild(wrap);
+      // Async populate; doesn't block the rest of the page render.
+      renderLeadershipPanel(led).catch(err => {
+        console.warn('leadership panel render failed:', err);
+        panel.innerHTML = '<div class="obj-empty">Could not load leadership data.</div>';
+      });
+      return;
+    }
+
     const sectionTools = tools.filter(t => (t.section || 'links') === section.id);
     if (!sectionTools.length) return; // hide empty sections
 
@@ -1992,43 +2443,47 @@ function renderTiles() {
     head.textContent = section.label;
     wrap.appendChild(head);
 
-    const grid = document.createElement('div');
-    grid.className = 'tile-grid';
-
-    sectionTools.forEach(tool => {
-      const a = document.createElement('a');
-      a.className = 'tile';
-      if (tool.isFolder) {
-        // Folder tiles open a modal instead of navigating.
-        a.href = '#';
-        a.addEventListener('click', (e) => {
-          e.preventDefault();
-          openFolderModal(tool);
-        });
-      } else {
-        a.href = typeof tool.url === 'function' ? tool.url(STATE.session) : tool.url;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
+    if (section.id === 'projects') {
+      // Projects has subsections (Stage-gates / Meetings / Gantts).
+      // Bucket tiles by id prefix; anything unmatched goes into a leading
+      // unlabeled grid so future tile types aren't accidentally hidden.
+      const buckets = PROJECTS_SUBSECTIONS.map(sub => ({ sub, tiles: [] }));
+      const other = [];
+      sectionTools.forEach(t => {
+        const bucket = buckets.find(b => b.sub.match(t.id));
+        (bucket ? bucket.tiles : other).push(t);
+      });
+      // Unmatched tiles render first (no header) so users see them but they
+      // don't pretend to belong to a known group.
+      if (other.length) {
+        const grid = document.createElement('div');
+        grid.className = 'tile-grid';
+        other.forEach(t => grid.appendChild(renderTileEl(t)));
+        wrap.appendChild(grid);
       }
-      if (tool.titleAttr) a.title = tool.titleAttr;
-      a.dataset.toolId = tool.id;
-      const isStageGate = typeof tool.id === 'string' && tool.id.startsWith('stage-gate__');
-      a.innerHTML = `
-        <div class="tile-head">
-          <i class="ti ti-${tool.icon} tile-icon" aria-hidden="true"></i>
-          <span class="tile-name">${tool.name}</span>
-        </div>
-        <p class="tile-desc">${tool.description}</p>
-        <div class="tile-status loading" data-status="${tool.id}">
-          <span class="dot" style="opacity: 0.4;"></span>
-          Loading status…
-        </div>
-        ${isStageGate ? `<div class="tile-gates" data-gates="${tool.id}"></div>` : ''}
-      `;
-      grid.appendChild(a);
-    });
+      buckets.forEach(({ sub, tiles }) => {
+        if (!tiles.length) return;
+        const subWrap = document.createElement('div');
+        subWrap.className = 'tile-subsection';
+        subWrap.dataset.subsection = sub.id;
+        const subHead = document.createElement('h3');
+        subHead.className = 'tile-subsection-head';
+        subHead.textContent = sub.label;
+        subWrap.appendChild(subHead);
+        const grid = document.createElement('div');
+        grid.className = 'tile-grid';
+        tiles.forEach(t => grid.appendChild(renderTileEl(t)));
+        subWrap.appendChild(grid);
+        wrap.appendChild(subWrap);
+      });
+    } else {
+      // Flat grid for all other sections.
+      const grid = document.createElement('div');
+      grid.className = 'tile-grid';
+      sectionTools.forEach(t => grid.appendChild(renderTileEl(t)));
+      wrap.appendChild(grid);
+    }
 
-    wrap.appendChild(grid);
     root.appendChild(wrap);
   });
 }
@@ -2336,7 +2791,7 @@ async function renderUserList() {
       <span class="avatar" style="width: 30px; height: 30px;">${initialsFor(user.email)}</span>
       <div class="user-info">
         <div class="email">${user.email}${isMe ? ' <span class="tiny subtle">(you)</span>' : ''}</div>
-        <div class="meta">${user.role || 'user'} &middot; ${(user.assignedObjectives || []).length} objective${(user.assignedObjectives || []).length === 1 ? '' : 's'} &middot; last sign-in ${last}</div>
+        <div class="meta">${user.role || 'user'}${user.orgRole && user.orgRole !== 'ic' ? ' · ' + (user.orgRole === 'cto' ? 'CTO' : 'Lead' + (user.leadOf && user.leadOf.length ? ' (' + user.leadOf.length + ')' : '')) : ''} &middot; ${(user.assignedObjectives || []).length} objective${(user.assignedObjectives || []).length === 1 ? '' : 's'} &middot; last sign-in ${last}</div>
       </div>
       <div class="user-actions">
         <button class="btn btn-sm" data-act="edit" data-email="${user.email}" title="Edit">
@@ -2703,6 +3158,91 @@ async function syncTrackerAssignments(usersRecord) {
   }));
 }
 
+// ---- Org role field (shared by add-user and edit-user modals) ----
+// Returns the HTML for the org role dropdown + tracker multi-select. The
+// multi-select is hidden by default and toggled visible when 'lead' is chosen.
+function orgRoleFieldHtml(currentOrgRole, currentLeadOf) {
+  const trackers = getConfiguredTrackers();
+  const role = currentOrgRole || 'ic';
+  const leadOf = new Set(Array.isArray(currentLeadOf) ? currentLeadOf : []);
+  const trackerCheckboxes = trackers.length
+    ? trackers.map(t => `
+        <label class="checkbox-row" style="margin-bottom: 6px;">
+          <input type="checkbox" name="org-leadof" value="${t.id}" ${leadOf.has(t.id) ? 'checked' : ''}>
+          <span>${t.name}</span>
+        </label>`).join('')
+    : '<div class="obj-empty">No trackers configured. Add one in Hub configuration first.</div>';
+  return `
+    <label class="field">
+      <span class="label-row">Org role</span>
+      <select id="org-role-select">
+        <option value="ic"   ${role === 'ic'   ? 'selected' : ''}>Individual contributor</option>
+        <option value="lead" ${role === 'lead' ? 'selected' : ''}>Lead</option>
+        <option value="cto"  ${role === 'cto'  ? 'selected' : ''}>CTO</option>
+      </select>
+      <div class="obj-picker-meta">Independent of admin role. CTO automatically leads every tracker.</div>
+    </label>
+    <div id="org-leadof-wrap" class="field" style="display: ${role === 'lead' ? 'block' : 'none'};">
+      <span class="label-row">Leads which trackers</span>
+      <div style="border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 10px;">
+        ${trackerCheckboxes}
+      </div>
+      <div class="obj-picker-meta" id="org-leadof-help">A Lead with no trackers selected won't see any leadership tiles.</div>
+    </div>
+    <div id="org-cto-warn" class="inline-error" style="display: none; margin-bottom: 14px;"></div>
+  `;
+}
+
+// Wires up the dropdown change handler and the CTO conflict warning.
+// `excludeEmail` is the email being edited (so we don't warn about themselves).
+function bindOrgRoleField(excludeEmail) {
+  const select = document.getElementById('org-role-select');
+  const wrap = document.getElementById('org-leadof-wrap');
+  const warn = document.getElementById('org-cto-warn');
+  if (!select) return;
+  function refresh() {
+    wrap.style.display = select.value === 'lead' ? 'block' : 'none';
+    if (select.value === 'cto') {
+      const existing = STATE.usersRecord
+        ? findExistingCTO(STATE.usersRecord, excludeEmail || null)
+        : null;
+      if (existing) {
+        warn.textContent = `Saving will demote the current CTO (${existing.email}) to IC.`;
+        warn.style.display = 'block';
+      } else {
+        warn.style.display = 'none';
+      }
+    } else {
+      warn.style.display = 'none';
+    }
+  }
+  select.addEventListener('change', refresh);
+  refresh();
+}
+
+// Reads the form into { orgRole, leadOf }. Validates that 'lead' has trackers.
+function readOrgRoleField() {
+  const orgRole = (document.getElementById('org-role-select') || {}).value || 'ic';
+  const leadOf = orgRole === 'lead'
+    ? Array.from(document.querySelectorAll('input[name="org-leadof"]:checked')).map(cb => cb.value)
+    : [];
+  return { orgRole, leadOf };
+}
+
+// Demote any existing CTO other than `exceptEmail` to IC. Mutates `record`.
+function enforceSingleCTO(record, exceptEmail) {
+  const except = exceptEmail ? normaliseEmail(exceptEmail) : null;
+  const demoted = [];
+  (record.users || []).forEach(u => {
+    if (u.orgRole === 'cto' && normaliseEmail(u.email) !== except) {
+      u.orgRole = 'ic';
+      u.leadOf = [];
+      demoted.push(u.email);
+    }
+  });
+  return demoted;
+}
+
 function openAddUserModal() {
   openModal(`
     <h3>Add user</h3>
@@ -2720,6 +3260,7 @@ function openAddUserModal() {
       <input type="checkbox" id="adduser-admin">
       <span>Grant admin role</span>
     </label>
+    ${orgRoleFieldHtml('ic', [])}
     <label class="field">
       <span class="label-row">Assigned objectives</span>
       <div id="adduser-objectives" class="obj-picker"></div>
@@ -2730,12 +3271,14 @@ function openAddUserModal() {
       <button class="btn btn-primary" data-act="save">Add user</button>
     </div>
   `);
+  bindOrgRoleField(null);
   const pickerPromise = mountObjectivePicker('adduser-objectives', []);
   document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
   document.querySelector('[data-act="save"]').addEventListener('click', async () => {
     const email = document.getElementById('adduser-email').value;
     const pin = document.getElementById('adduser-pin').value;
     const isAdmin = document.getElementById('adduser-admin').checked;
+    const { orgRole, leadOf } = readOrgRoleField();
     if (!normaliseEmail(email)) return showError('add-user-error', 'Enter a valid email.');
     if (!pin || pin.length < STATE.config.pinMinLength) {
       return showError('add-user-error', `PIN must be at least ${STATE.config.pinMinLength} digits.`);
@@ -2752,6 +3295,10 @@ function openAddUserModal() {
       const picker = await pickerPromise;
       const user = await createUserRecord(email, pin, isAdmin ? 'admin' : 'user');
       user.assignedObjectives = picker.getSelected();
+      user.orgRole = orgRole;
+      user.leadOf = orgRole === 'lead' ? leadOf : [];
+      // Single-CTO enforcement: demote any prior CTO before adding this one.
+      const demoted = orgRole === 'cto' ? enforceSingleCTO(record, email) : [];
       record.users.push(user);
       await jbSaveUsers(record);
       STATE.usersRecord = record;
@@ -2760,7 +3307,10 @@ function openAddUserModal() {
         console.warn('Tracker sync failed:', err);
         toast('User added, but tracker sync failed: ' + (err.message || ''), 'error');
       });
-      toast(`${user.email} added`, 'success');
+      const msg = demoted.length
+        ? `${user.email} added; ${demoted.join(', ')} demoted to IC`
+        : `${user.email} added`;
+      toast(msg, 'success');
       closeModal();
       renderUserList();
     } catch (e) {
@@ -2780,6 +3330,7 @@ function openEditUserModal(user) {
       <input type="checkbox" id="edituser-admin" ${user.role === 'admin' ? 'checked' : ''}>
       <span>Admin role</span>
     </label>
+    ${orgRoleFieldHtml(user.orgRole || 'ic', user.leadOf || [])}
     <label class="field">
       <span class="label-row">Assigned objectives</span>
       <div id="edituser-objectives" class="obj-picker"></div>
@@ -2790,10 +3341,12 @@ function openEditUserModal(user) {
       <button class="btn btn-primary" data-act="save">Save changes</button>
     </div>
   `);
+  bindOrgRoleField(user.email);
   const pickerPromise = mountObjectivePicker('edituser-objectives', user.assignedObjectives || []);
   document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
   document.querySelector('[data-act="save"]').addEventListener('click', async () => {
     const isAdmin = document.getElementById('edituser-admin').checked;
+    const { orgRole, leadOf } = readOrgRoleField();
     const btn = document.querySelector('[data-act="save"]');
     btn.disabled = true;
     btn.textContent = 'Saving…';
@@ -2804,13 +3357,19 @@ function openEditUserModal(user) {
       if (!target) throw new Error('User no longer exists.');
       target.role = isAdmin ? 'admin' : 'user';
       target.assignedObjectives = picker.getSelected();
+      target.orgRole = orgRole;
+      target.leadOf = orgRole === 'lead' ? leadOf : [];
+      // Single-CTO enforcement — only triggers if promoting THIS user to CTO.
+      const demoted = orgRole === 'cto' ? enforceSingleCTO(record, target.email) : [];
       await jbSaveUsers(record);
       STATE.usersRecord = record;
       // If the edited user is the current user, refresh the session so the
-      // new objectives take effect immediately on tile clicks.
+      // new objectives/leadership take effect immediately.
       if (STATE.session && normaliseEmail(STATE.session.email) === normaliseEmail(target.email)) {
         STATE.session.assignedObjectives = target.assignedObjectives.slice();
         STATE.session.role = target.role;
+        STATE.session.orgRole = target.orgRole;
+        STATE.session.leadOf = (target.leadOf || []).slice();
         saveSession(STATE.session);
         renderHubChrome();
         renderTiles();
@@ -2819,7 +3378,10 @@ function openEditUserModal(user) {
         console.warn('Tracker sync failed:', err);
         toast('User updated, but tracker sync failed: ' + (err.message || ''), 'error');
       });
-      toast(`${target.email} updated`, 'success');
+      const msg = demoted.length
+        ? `${target.email} updated; ${demoted.join(', ')} demoted to IC`
+        : `${target.email} updated`;
+      toast(msg, 'success');
       closeModal();
       renderUserList();
     } catch (e) {
