@@ -2186,21 +2186,25 @@ async function renderLeadershipPanel(led) {
 
   // Build flat objective list across all owned trackers.
   // Each item: { tracker, id, name, status, progress, daysLeft, isComplete, gates }.
+  // Name resolution: snapshot.name (newest, written by the Gantt) →
+  //   user's own assignedObjectives entry (snapshotted at assign-time) →
+  //   '#<id>' as last resort.
   const items = [];
   results.forEach(({ tracker, snapshot }) => {
     if (!snapshot || !snapshot.objectives) return;
     for (const id of Object.keys(snapshot.objectives)) {
       const obj = snapshot.objectives[id];
-      // Look up display name from the user's assignedObjectives if present;
-      // otherwise the snapshot doesn't carry a name (kept it small on purpose).
       const fromAssignment = (STATE.session.assignedObjectives || []).find(
         a => a.tracker === tracker.id && a.id === id
       );
+      const name = (obj.name && obj.name.trim())
+        || (fromAssignment && fromAssignment.name)
+        || `Objective #${id}`;
       items.push({
         tracker,
         id,
-        name: (fromAssignment && fromAssignment.name) || `Objective #${id}`,
-        ...obj
+        ...obj,
+        name
       });
     }
   });
