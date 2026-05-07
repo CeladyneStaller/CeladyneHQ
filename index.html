@@ -1189,8 +1189,14 @@ function qTrackerUrlFor(tracker, objectiveIds) {
   const csv = (objectiveIds || []).map(String).join(',');
   return appendParams(tracker.trackerUrl, { objective: csv });
 }
-function stageGateUrlFor(tracker, objectiveId) {
+function stageGateUrlFor(tracker, objectiveId, slug) {
   if (!tracker || !tracker.trackerUrl) return null;
+  // Receiving tracker pages match objectives by their generated slug (e.g.
+  // "ez-tera-system-develop-the-electr-10002") via the `?name=` param. Fall
+  // back to `?objective=<id>` only if the snapshot doesn't carry a slug
+  // (older Gantt save). Once every Gantt is on the new code path, the slug
+  // path is the only one actually exercised.
+  if (slug) return appendParams(tracker.trackerUrl, { name: String(slug) });
   return appendParams(tracker.trackerUrl, { objective: String(objectiveId) });
 }
 function ganttUrlFor(tracker) {
@@ -2184,10 +2190,16 @@ async function fetchStageGateStatus(trackerId, objectiveId) {
   }
   const parts = [label, `${obj.progress}%`];
   if (daysText) parts.push(daysText);
+  // If the snapshot supplies a slug, the receiving tracker page expects
+  // ?name=<slug> — return the proper URL so the runner can patch the tile's
+  // href. The slug is the source of truth for cross-app URLs.
+  const tracker = findTracker(trackerId);
+  const url = tracker && obj.slug ? stageGateUrlFor(tracker, objectiveId, obj.slug) : null;
   return {
     text: parts.join(' · '),
     severity: sev,
-    gates: Array.isArray(obj.gates) ? obj.gates : []
+    gates: Array.isArray(obj.gates) ? obj.gates : [],
+    url
   };
 }
 
@@ -2388,7 +2400,7 @@ async function renderLeadershipPanel(led) {
       else if (it.daysLeft === 0) daysText = 'Due today';
       else daysText = `${it.daysLeft}d left`;
     }
-    const url = stageGateUrlFor(it.tracker, it.id);
+    const url = stageGateUrlFor(it.tracker, it.id, it.slug);
     const gatesHtml = renderGateBubblesHtml(it.gates || []);
     return `
       <a class="leadership-card" href="${escAttr(url || '#')}" target="_blank" rel="noopener noreferrer">
@@ -2606,6 +2618,13 @@ async function fetchTileStatuses() {
       if (result.gates) {
         const gatesEl = document.querySelector(`[data-gates="${tool.id}"]`);
         if (gatesEl) gatesEl.innerHTML = renderGateBubblesHtml(result.gates);
+      }
+      // Optional: a fetched URL replaces the tile's initial href. Stage-gate
+      // tiles use this so the slug-based ?name=<slug> URL is applied once the
+      // snapshot loads (the initial href falls back to ?objective=<id>).
+      if (result.url) {
+        const tileEl = document.querySelector(`[data-tool-id="${tool.id}"]`);
+        if (tileEl && tileEl.tagName === 'A') tileEl.href = result.url;
       }
     } catch (e) {
       el.className = 'tile-status danger';
