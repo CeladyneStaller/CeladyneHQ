@@ -2260,7 +2260,7 @@ async function renderLeadershipPanel(led) {
   // Name resolution: snapshot.name (newest, written by the Gantt) →
   //   user's own assignedObjectives entry (snapshotted at assign-time) →
   //   '#<id>' as last resort.
-  const items = [];
+  let items = [];
   results.forEach(({ tracker, snapshot }) => {
     if (!snapshot || !snapshot.objectives) return;
     for (const id of Object.keys(snapshot.objectives)) {
@@ -2278,6 +2278,21 @@ async function renderLeadershipPanel(led) {
         name
       });
     }
+  });
+
+  // Cross-bin dedup: drop company-level entries whose name also appears in
+  // any non-company bin. The non-company bin's copy is treated as the source
+  // of truth; the company bin entry is hidden to avoid double-counting in the
+  // CTO's view. Match is case-insensitive, whitespace-trimmed name.
+  const norm = s => (s || '').toLowerCase().trim();
+  const nonCompanyNames = new Set();
+  items.forEach(it => {
+    if (!it.tracker.companyLevel && it.name) nonCompanyNames.add(norm(it.name));
+  });
+  items = items.filter(it => {
+    if (!it.tracker.companyLevel) return true;          // non-company always shown
+    if (!it.name) return true;                          // can't match without name → keep
+    return !nonCompanyNames.has(norm(it.name));         // suppress duplicate
   });
 
   // Status priority for sorting: at-risk first, then watch, on-track, complete.
@@ -2318,7 +2333,8 @@ async function renderLeadershipPanel(led) {
         ${led.map(t => `<option value="${escAttr(t.id)}">${escText(t.name)}</option>`).join('')}
       </select>
       <select id="leadership-status-filter">
-        <option value="all">All statuses</option>
+        <option value="active" selected>Active only</option>
+        <option value="all">All (incl. complete)</option>
         <option value="atrisk">At risk</option>
         <option value="watch">Watch</option>
         <option value="ontrack">On track</option>
@@ -2340,15 +2356,32 @@ async function renderLeadershipPanel(led) {
   function statusKeyForFilter(item) {
     return item.isComplete ? 'complete' : item.status;
   }
+  // True when the item should appear in the default "Active" view.
+  // Backwards-compat: snapshots written before isActive was added (older
+  // Gantt code) treat undefined as active so the panel doesn't go empty.
+  function isItemActive(item) {
+    return item.isActive !== false && !item.isComplete;
+  }
 
   function renderBody() {
     const trackerFilter = document.getElementById('leadership-tracker-filter').value;
     const statusFilter = document.getElementById('leadership-status-filter').value;
-    const isFiltered = trackerFilter !== 'all' || statusFilter !== 'all';
+    const isFiltered = trackerFilter !== 'all' || statusFilter !== 'active';
     filterBtn.classList.toggle('has-active', isFiltered);
     const visible = items.filter(it => {
       if (trackerFilter !== 'all' && it.tracker.id !== trackerFilter) return false;
-      if (statusFilter !== 'all' && statusKeyForFilter(it) !== statusFilter) return false;
+      // Status semantics:
+      //   'active'   → active (started, not tentative, not complete)
+      //   'all'      → no status restriction (includes complete + tentative)
+      //   'complete' → only complete
+      //   'atrisk' / 'watch' / 'ontrack' → active items with that health
+      if (statusFilter === 'active') {
+        if (!isItemActive(it)) return false;
+      } else if (statusFilter === 'complete') {
+        if (!it.isComplete) return false;
+      } else if (statusFilter !== 'all') {
+        if (!isItemActive(it) || it.status !== statusFilter) return false;
+      }
       return true;
     });
 
