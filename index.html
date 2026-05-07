@@ -12,6 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.4.0/dist/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   :root {
     --bg: #FAF9F5;
@@ -1163,6 +1164,26 @@ const CONFIG_DEFAULTS = {
   failedLoginThrottleMs: 1500
 };
  
+// ---- Safety check-in (Supabase) ----
+// The standalone safety-checkin app uses Supabase, not JSONBin. The hub reads
+// from the same backend to surface "are you currently checked in" on the tile.
+// Match is by email: hub session email → people.email → checkins.person_id.
+// Fill these in and re-deploy. Anon key is safe to ship (RLS gates the data).
+const SAFETY_SUPABASE = {
+  url:     '',  // e.g. 'https://xxxxxxxxxxxx.supabase.co'
+  anonKey: ''   // long eyJ... JWT
+};
+// Lazy-built single client. Returns null if config is missing or supabase-js
+// failed to load (CDN blocked, offline, etc.).
+let _safetySupabase = null;
+function getSafetyClient() {
+  if (_safetySupabase) return _safetySupabase;
+  if (!SAFETY_SUPABASE.url || !SAFETY_SUPABASE.anonKey) return null;
+  if (typeof supabase === 'undefined' || !supabase || !supabase.createClient) return null;
+  _safetySupabase = supabase.createClient(SAFETY_SUPABASE.url, SAFETY_SUPABASE.anonKey);
+  return _safetySupabase;
+}
+ 
 // ============================================================
 //  TOOL REGISTRY
 // ============================================================
@@ -1284,8 +1305,7 @@ const TOOLS = [
     url: 'https://celadyne-safety-checkin.vercel.app/',
     section: 'safety',
     fetchStatus: async () => {
-      // TODO: wire to safety-checkin bin once built
-      return { text: 'Not checked in today', severity: 'warning' };
+      return fetchSafetyCheckinStatus(STATE.session && STATE.session.email);
     }
   },
   {
@@ -2211,6 +2231,95 @@ function fetchTrackerComputedStatus(trackerId) {
       .catch(() => null);
   }
   return _statusCache[trackerId];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Safety check-in status
+//
+// Reads the same Supabase backend the standalone check-in app writes to.
+// Returns a tile-shaped { text, severity } based on the current user's
+// active check-in row (if any).
+//
+// Match strategy: hub session email → people.email → checkins.person_id.
+// Email match is case-insensitive (people.email is stored lowercase per the
+// check-in app's convention, but we normalize on this side too).
+//
+// Returns "subtle" instead of "warning" for failure modes (no client, network
+// error, no person record) so transient issues don't make the tile shout
+// "Not checked in" when we don't actually know.
+// ─────────────────────────────────────────────────────────────────────────────
+const SAFETY_CACHE_TTL_MS = 60 * 1000; // 1 min — tile re-renders on this cadence anyway
+let _safetyCache = null; // { email, when, result }
+
+async function fetchSafetyCheckinStatus(email) {
+  if (!email) return { text: 'Sign in to view', severity: 'subtle' };
+
+  // Lightweight per-email cache so flipping between tabs doesn't fire a query
+  // every time fetchTileStatuses re-runs.
+  const now = Date.now();
+  if (_safetyCache && _safetyCache.email === email && (now - _safetyCache.when) < SAFETY_CACHE_TTL_MS) {
+    return _safetyCache.result;
+  }
+
+  const client = getSafetyClient();
+  if (!client) {
+    return { text: 'Not configured', severity: 'subtle' };
+  }
+
+  const result = await querySafetyStatus(client, email).catch(err => {
+    console.warn('safety check-in query failed:', err);
+    return { text: 'Status unavailable', severity: 'subtle' };
+  });
+  _safetyCache = { email, when: now, result };
+  return result;
+}
+
+async function querySafetyStatus(client, email) {
+  const normalizedEmail = String(email).toLowerCase().trim();
+
+  // Step 1: resolve email → person_id. The check-in app's `people` table has
+  // a lowercase `email` column. ilike() is case-insensitive belt-and-braces.
+  const { data: person, error: pErr } = await client
+    .from('people')
+    .select('id')
+    .ilike('email', normalizedEmail)
+    .maybeSingle();
+  if (pErr) throw pErr;
+  if (!person) return { text: 'No safety profile', severity: 'subtle' };
+
+  // Step 2: fetch the active check-in row, if any. Rows are deleted on
+  // check-out, so presence == currently checked in.
+  const { data: ci, error: cErr } = await client
+    .from('checkins')
+    .select('location, checked_in_at')
+    .eq('person_id', person.id)
+    .maybeSingle();
+  if (cErr) throw cErr;
+
+  if (!ci) {
+    return { text: 'Not checked in today', severity: 'warning' };
+  }
+  const onShift = formatOnShift(ci.checked_in_at);
+  const locText = ci.location ? `Checked in at ${ci.location}` : 'Checked in';
+  return {
+    text: onShift ? `${locText} · ${onShift}` : locText,
+    severity: 'success'
+  };
+}
+
+// Format check-in duration the same way the standalone app does:
+// "Just now" / "Nm on shift" / "Nh on shift" / "Nh Nm on shift".
+function formatOnShift(checkedInAt) {
+  if (!checkedInAt) return '';
+  const ms = Date.now() - new Date(checkedInAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'just checked in';
+  if (mins < 60) return `${mins}m on shift`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (m === 0) return `${h}h on shift`;
+  return `${h}h ${m}m on shift`;
 }
 
 async function fetchStageGateStatus(trackerId, objectiveId) {
