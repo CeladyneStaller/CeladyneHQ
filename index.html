@@ -1347,16 +1347,10 @@ const TOOLS = [
           label: 'Membrane',
           tiles: [
             {
-              name: 'Membrane conductivity model',
-              description: 'x',
-              url: '#',
+              name: 'membrane properties',
+              description: 'bilayer and PFSA membrane RH-dependent properties (conductivity, H2X, EIS, etc)',
+              url: 'https://claude.ai/public/artifacts/5a8a6abd-643f-4367-9a1d-0418fd328a7b',
               icon: 'wave-square'
-            },
-            {
-              name: 'Water uptake (lambda) calculator',
-              description: 'x',
-              url: '#',
-              icon: 'droplet'
             }
           ]
         },
@@ -1365,15 +1359,15 @@ const TOOLS = [
           label: 'Fuel cell',
           tiles: [
             {
-              name: 'Polarization curve fitter',
-              description: 'x',
-              url: '#',
+              name: 'fuel cell performance',
+              description: 'Dura and PFSA CCM fuel cell performance prediction',
+              url: 'https://claude.ai/public/artifacts/0f21e74d-6e9c-409b-aaf5-5d407cbd0a52',
               icon: 'chart-line'
             },
             {
-              name: 'Cell-stack thermal model',
-              description: 'x',
-              url: '#',
+              name: 'fuel cell durability',
+              description: 'Dura and PFSA fuel cell durability prediction',
+              url: 'https://claude.ai/public/artifacts/008075b3-08d9-4271-a01e-60948ef5754b',
               icon: 'temperature'
             }
           ]
@@ -1383,9 +1377,33 @@ const TOOLS = [
           label: 'Electrolyzer',
           tiles: [
             {
-              name: 'PEM cell voltage breakdown',
-              description: 'x',
-              url: '#',
+              name: 'PFSA electrolyzer polarization curve prediction',
+              description: 'PFSA electrolyzer polarization curve with loss breakdown at varied temperature, H2 pressure, and thickness',
+              url: 'https://claude.ai/public/artifacts/501d3f0d-3f18-4ab7-9953-c5bdd11a67f6',
+              icon: 'bolt'
+            },
+            {
+              name: 'PFSA electrolyzer H2-in-O2 prediction',
+              description: 'PFSA electrolyzer minimum operating voltage based on H2-in-O2 at varied temperature, H2 pressure, and RCC loading',
+              url: 'https://claude.ai/public/artifacts/545e5243-de5c-42e8-be3f-eac65932b7a0',
+              icon: 'bolt'
+            },
+            {
+              name: 'PFSA electrolyzer durability prediction',
+              description: 'PFSA electrolyzer testing lifetime predictor for various ASTs',
+              url: 'https://claude.ai/public/artifacts/171423aa-f7b5-4b14-b8fb-a40bee0f1e53',
+              icon: 'bolt'
+            },
+            {
+              name: 'Electra electrolyzer polarization curve prediction',
+              description: 'Electra electrolyzer polarization curve predictor with fully customizable membrane',
+              url: 'https://claude.ai/public/artifacts/62be8a16-849e-45c1-9de9-65b974ff1c6f',
+              icon: 'bolt'
+            },
+            {
+              name: 'Tera stack sizing and cost optimization',
+              description: 'Tera stack size and cost optimizer based on performance requirements',
+              url: 'https://claude.ai/public/artifacts/b03611d0-6fce-4ba7-ae29-c09eeace2d33',
               icon: 'bolt'
             }
           ]
