@@ -1224,7 +1224,7 @@ const TOOLS = [
     name: 'Timesheets',
     description: 'Log hours worked',
     icon: 'clock',
-    url: '#', // TODO: replace with real timesheets URL
+    url: 'https://tsheets.intuit.com/#w_timesheets_v2', // TODO: replace with real timesheets URL
     section: 'links',
     fetchStatus: async () => {
       return { text: 'Log hours', severity: 'subtle' };
@@ -1246,7 +1246,7 @@ const TOOLS = [
     name: 'Insurance',
     description: 'Health and benefits portal',
     icon: 'umbrella',
-    url: '#', // TODO: replace with real insurance portal URL
+    url: 'https://my-ebp.ease.com/', // TODO: replace with real insurance portal URL
     section: 'links',
     fetchStatus: async () => {
       return { text: 'Open portal', severity: 'subtle' };
@@ -1281,7 +1281,7 @@ const TOOLS = [
     name: 'Safety check-in',
     description: 'Lab and field activity logging',
     icon: 'shield-check',
-    url: 'safety-checkin.html',
+    url: 'https://celadyne-safety-checkin.vercel.app/',
     section: 'safety',
     fetchStatus: async () => {
       // TODO: wire to safety-checkin bin once built
@@ -1293,7 +1293,7 @@ const TOOLS = [
     name: 'Report safety incident',
     description: 'Log a near-miss, hazard, or incident',
     icon: 'alert-triangle',
-    url: 'report-safety-incident.html',
+    url: 'https://forms.office.com/g/T6s0sNspag',
     section: 'safety',
     fetchStatus: async () => {
       return { text: 'Open report form', severity: 'subtle' };
@@ -1304,7 +1304,7 @@ const TOOLS = [
     name: 'Analysis portal',
     description: 'Test data and performance review',
     icon: 'chart-line',
-    url: 'analysis-portal.html',
+    url: 'https://analysis-portal-production.up.railway.app/',
     section: 'analysis',
     fetchStatus: async () => {
       // TODO: wire to analysis bin once built
