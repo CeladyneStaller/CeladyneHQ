@@ -292,13 +292,18 @@
     margin-bottom: 0;
   }
   .tile-section-head {
-    font-size: 11px;
+    font-size: 17px;
     font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-subtle);
-    margin: 0 0 12px;
+    letter-spacing: 0.06em;
+    color: var(--text);
+    margin: 0 0 14px;
     padding: 0 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    user-select: none;
   }
 
   /* Sub-sections within a tile section (e.g. Projects → Stage-gates / Meetings / Gantts) */
@@ -309,14 +314,37 @@
     margin-bottom: 0;
   }
   .tile-subsection-head {
-    font-size: 10px;
+    font-size: 15px;
     font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.05em;
     color: var(--text-subtle);
-    margin: 0 0 8px;
+    margin: 0 0 10px;
     padding: 0 4px;
-    opacity: 0.85;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+  }
+
+  /* Collapsible chevron + state */
+  .tile-section-toggle {
+    display: inline-flex;
+    transition: transform 0.15s ease;
+    color: var(--text-subtle);
+    flex-shrink: 0;
+  }
+  .tile-section-head .tile-section-toggle { font-size: 18px; }
+  .tile-subsection-head .tile-section-toggle { font-size: 16px; }
+  /* Hide everything in a collapsed section/subsection except the head itself */
+  .tile-section.collapsed > *:not(.tile-section-head),
+  .tile-subsection.collapsed > *:not(.tile-subsection-head) {
+    display: none;
+  }
+  .tile-section.collapsed > .tile-section-head .tile-section-toggle,
+  .tile-subsection.collapsed > .tile-subsection-head .tile-section-toggle {
+    transform: rotate(-90deg);
   }
 
   /* Tile grid */
@@ -457,6 +485,32 @@
     text-align: center;
     color: var(--text-subtle);
     font-size: 13px;
+  }
+  .leadership-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 8px 12px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--surface-alt);
+  }
+  .btn-leadership-filter {
+    background: var(--surface);
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    line-height: 1.4;
+  }
+  .btn-leadership-filter:hover { background: var(--surface-alt); }
+  .btn-leadership-filter.has-active {
+    border-color: var(--accent);
+    color: var(--accent-text);
+    background: var(--accent-bg);
   }
   .leadership-filters {
     display: flex;
@@ -1155,30 +1209,6 @@ function meetingPageUrlFor(tracker) {
 
 const TOOLS = [
   {
-    id: 'celadyne-confluence',
-    name: 'Celadyne Confluence',
-    description: 'Team wiki and project documentation',
-    icon: 'brand-confluence',
-    url: 'https://celadyne.atlassian.net/wiki/',
-    section: 'links',
-    fetchStatus: async () => {
-      // External site — no live status to fetch.
-      return { text: 'Open workspace', severity: 'subtle' };
-    }
-  },
-  {
-    id: 'profit-co',
-    name: 'Profit.co',
-    description: 'OKR platform for company-level objectives',
-    icon: 'flag-3',
-    url: 'https://app.profit.co/',
-    section: 'links',
-    fetchStatus: async () => {
-      // External site — no live status to fetch.
-      return { text: 'Open OKR dashboard', severity: 'subtle' };
-    }
-  },
-  {
     id: 'timesheets',
     name: 'Timesheets',
     description: 'Log hours worked',
@@ -1209,6 +1239,30 @@ const TOOLS = [
     section: 'links',
     fetchStatus: async () => {
       return { text: 'Open portal', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'celadyne-confluence',
+    name: 'Celadyne Confluence',
+    description: 'Team wiki and project documentation',
+    icon: 'brand-confluence',
+    url: 'https://celadyne.atlassian.net/wiki/',
+    section: 'links',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open workspace', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'profit-co',
+    name: 'Profit.co',
+    description: 'OKR platform for company-level objectives',
+    icon: 'flag-3',
+    url: 'https://app.profit.co/',
+    section: 'links',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open OKR dashboard', severity: 'subtle' };
     }
   },
   {
@@ -2070,7 +2124,7 @@ function buildToolList(session) {
     const display = a.name || `#${a.id}`;
     list.push({
       id: `stage-gate__${a.tracker}__${a.id}`,
-      name: `Stage-gate · ${shortLabel(display, 28)}`,
+      name: shortLabel(display, 32),
       description: `${trackerName} · ${a.name ? `#${a.id} · ` : ''}TRL/MRL progress`,
       icon: 'stack-2',
       url,
@@ -2233,8 +2287,15 @@ async function renderLeadershipPanel(led) {
   }
 
   // Build filter UI. Filters reset to "all" on every render (per spec).
+  // The filter row is hidden behind a "Filter" toggle button to keep the
+  // panel chrome minimal until the user wants to narrow.
   const filtersHtml = `
-    <div class="leadership-filters">
+    <div class="leadership-toolbar">
+      <button type="button" class="btn-leadership-filter" id="leadership-filter-toggle" aria-expanded="false">
+        <i class="ti ti-filter" aria-hidden="true"></i><span>Filter</span>
+      </button>
+    </div>
+    <div class="leadership-filters" id="leadership-filters" hidden>
       <select id="leadership-tracker-filter">
         <option value="all">All trackers</option>
         ${led.map(t => `<option value="${escAttr(t.id)}">${escText(t.name)}</option>`).join('')}
@@ -2251,6 +2312,13 @@ async function renderLeadershipPanel(led) {
   `;
   root.innerHTML = filtersHtml;
   const bodyEl = document.getElementById('leadership-body');
+  const filtersEl = document.getElementById('leadership-filters');
+  const filterBtn = document.getElementById('leadership-filter-toggle');
+  filterBtn.addEventListener('click', () => {
+    const willOpen = filtersEl.hidden;
+    filtersEl.hidden = !willOpen;
+    filterBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  });
 
   function statusKeyForFilter(item) {
     return item.isComplete ? 'complete' : item.status;
@@ -2259,6 +2327,8 @@ async function renderLeadershipPanel(led) {
   function renderBody() {
     const trackerFilter = document.getElementById('leadership-tracker-filter').value;
     const statusFilter = document.getElementById('leadership-status-filter').value;
+    const isFiltered = trackerFilter !== 'all' || statusFilter !== 'all';
+    filterBtn.classList.toggle('has-active', isFiltered);
     const visible = items.filter(it => {
       if (trackerFilter !== 'all' && it.tracker.id !== trackerFilter) return false;
       if (statusFilter !== 'all' && statusKeyForFilter(it) !== statusFilter) return false;
@@ -2404,6 +2474,39 @@ function renderTileEl(tool) {
   return a;
 }
 
+// ---- Collapsible section state ----
+// Persisted across reloads in localStorage. Set holds keys of CURRENTLY-COLLAPSED
+// sections/subsections (default state for any key absent from the set: expanded).
+const COLLAPSED_KEY = 'hub_collapsed_v1';
+function getCollapsedSet() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]');
+    return new Set(Array.isArray(arr) ? arr.filter(s => typeof s === 'string') : []);
+  } catch { return new Set(); }
+}
+function saveCollapsedSet(set) {
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...set])); } catch {}
+}
+function isCollapsed(key) { return getCollapsedSet().has(key); }
+function toggleCollapsed(key, wrapEl) {
+  const s = getCollapsedSet();
+  if (s.has(key)) s.delete(key); else s.add(key);
+  saveCollapsedSet(s);
+  wrapEl.classList.toggle('collapsed', s.has(key));
+}
+
+// Build a collapsible header element. The chevron rotates and CSS hides
+// every sibling of the header when the wrapping element has .collapsed.
+function buildCollapsibleHead(tag, className, label, key, wrapEl) {
+  const head = document.createElement(tag);
+  head.className = className;
+  head.innerHTML = `<i class="ti ti-chevron-down tile-section-toggle" aria-hidden="true"></i><span></span>`;
+  head.querySelector('span').textContent = label;
+  if (isCollapsed(key)) wrapEl.classList.add('collapsed');
+  head.addEventListener('click', () => toggleCollapsed(key, wrapEl));
+  return head;
+}
+
 function renderTiles() {
   const root = document.getElementById('tile-sections');
   root.innerHTML = '';
@@ -2418,9 +2521,7 @@ function renderTiles() {
       const wrap = document.createElement('section');
       wrap.className = 'tile-section';
       wrap.dataset.section = 'leadership';
-      const head = document.createElement('h2');
-      head.className = 'tile-section-head';
-      head.textContent = section.label;
+      const head = buildCollapsibleHead('h2', 'tile-section-head', section.label, `section/leadership`, wrap);
       wrap.appendChild(head);
       const panel = document.createElement('div');
       panel.id = 'leadership-panel';
@@ -2442,9 +2543,7 @@ function renderTiles() {
     wrap.className = 'tile-section';
     wrap.dataset.section = section.id;
 
-    const head = document.createElement('h2');
-    head.className = 'tile-section-head';
-    head.textContent = section.label;
+    const head = buildCollapsibleHead('h2', 'tile-section-head', section.label, `section/${section.id}`, wrap);
     wrap.appendChild(head);
 
     if (section.id === 'projects') {
@@ -2470,9 +2569,7 @@ function renderTiles() {
         const subWrap = document.createElement('div');
         subWrap.className = 'tile-subsection';
         subWrap.dataset.subsection = sub.id;
-        const subHead = document.createElement('h3');
-        subHead.className = 'tile-subsection-head';
-        subHead.textContent = sub.label;
+        const subHead = buildCollapsibleHead('h3', 'tile-subsection-head', sub.label, `section/projects/sub/${sub.id}`, subWrap);
         subWrap.appendChild(subHead);
         const grid = document.createElement('div');
         grid.className = 'tile-grid';
