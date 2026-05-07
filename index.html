@@ -1246,7 +1246,7 @@ const TOOLS = [
     name: 'Insurance',
     description: 'Health and benefits portal',
     icon: 'umbrella',
-    url: 'https://my-ebp.ease.com/', // TODO: replace with real insurance portal URL
+    url: 'https://secure.ease.com/?jh4wPEjnBS9O9+btJV1QGg==_953e3bd00adb06c72d7fe8d83677d02ad6ef68efe762367e8d9fbecf5047fddaec', // TODO: replace with real insurance portal URL
     section: 'links',
     fetchStatus: async () => {
       return { text: 'Open portal', severity: 'subtle' };
@@ -1322,9 +1322,54 @@ const TOOLS = [
       title: 'Models',
       intro: 'Computational models grouped by domain.',
       sections: [
-        { id: 'membrane',    label: 'Membrane',    tiles: [] },
-        { id: 'fuel-cell',   label: 'Fuel cell',   tiles: [] },
-        { id: 'electrolyzer', label: 'Electrolyzer', tiles: [] }
+        {
+          id: 'membrane',
+          label: 'Membrane',
+          tiles: [
+            {
+              name: 'Membrane conductivity model',
+              description: 'x',
+              url: '#',
+              icon: 'wave-square'
+            },
+            {
+              name: 'Water uptake (lambda) calculator',
+              description: 'x',
+              url: '#',
+              icon: 'droplet'
+            }
+          ]
+        },
+        {
+          id: 'fuel-cell',
+          label: 'Fuel cell',
+          tiles: [
+            {
+              name: 'Polarization curve fitter',
+              description: 'x',
+              url: '#',
+              icon: 'chart-line'
+            },
+            {
+              name: 'Cell-stack thermal model',
+              description: 'x',
+              url: '#',
+              icon: 'temperature'
+            }
+          ]
+        },
+        {
+          id: 'electrolyzer',
+          label: 'Electrolyzer',
+          tiles: [
+            {
+              name: 'PEM cell voltage breakdown',
+              description: 'x',
+              url: '#',
+              icon: 'bolt'
+            }
+          ]
+        }
       ]
     },
     fetchStatus: async () => {
