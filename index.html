@@ -520,6 +520,11 @@
     background: var(--surface-alt);
     flex-wrap: wrap;
   }
+  /* The HTML `hidden` attribute defaults to display:none via user-agent CSS,
+     but our `display: flex` rule above overrides it. Restore the hide. */
+  .leadership-filters[hidden] {
+    display: none;
+  }
   .leadership-filters select {
     height: 28px;
     font-size: 12px;
