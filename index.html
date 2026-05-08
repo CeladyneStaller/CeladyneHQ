@@ -1354,7 +1354,7 @@ const TOOLS = [
   {
     id: 'analysis-portal',
     name: 'Analysis portal',
-    description: 'Test data and performance review',
+    description: 'Data analysis portal',
     icon: 'chart-line',
     url: 'https://analysis-portal-production.up.railway.app/',
     section: 'analysis',
@@ -1362,6 +1362,15 @@ const TOOLS = [
       // TODO: wire to analysis bin once built
       return { text: 'Last upload: 2 days ago', severity: 'subtle' };
     }
+  },
+  {
+    id: 'analysis-test-portal',
+    name: 'Analysis test portal',
+    description: 'Test portal for vetting analysis portal patches',
+    icon: 'chart-line',
+    url: 'https://test-portal-production-0181.up.railway.app/',
+    requiresOrgRole: 'cto',
+    fetchStatus: async () => ({ text: 'Open deck', severity: 'subtle' })
   },
   {
     id: 'models-folder',
@@ -2271,7 +2280,27 @@ function buildToolList(session) {
     });
   });
 
-  return list;
+  // Visibility filter: tiles can declare access requirements via two optional
+  // fields, and any tile failing them is dropped before render.
+  //
+  //   requiresOrgRole — string or array. Matches against session.orgRole.
+  //                     Examples: 'cto', ['lead','cto'].
+  //   requiresRole    — string. Matches against session.role.
+  //                     Examples: 'admin'.
+  //
+  // Both are independent — a tile with requiresOrgRole: 'cto' is shown to the
+  // CTO regardless of admin flag, and an admin tile is shown to admins
+  // regardless of org role. To require both, set both fields.
+  return list.filter(tile => {
+    if (tile.requiresOrgRole) {
+      const allowed = Array.isArray(tile.requiresOrgRole) ? tile.requiresOrgRole : [tile.requiresOrgRole];
+      if (!allowed.includes(session && session.orgRole)) return false;
+    }
+    if (tile.requiresRole) {
+      if ((session && session.role) !== tile.requiresRole) return false;
+    }
+    return true;
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
