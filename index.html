@@ -2285,33 +2285,82 @@ function clearStatusCache() {
   for (const k in _statusCache) delete _statusCache[k];
 }
 
-// Snapshot fetches are best-effort — a transient failure (network blip,
-// JSONBin 5xx, rate limit) can return null, which makes the consumer fall
-// back to incomplete data: stage-gate tiles show "View progress" instead of
-// real status, and leadership-panel dedup misses the divisional twin so the
-// company-bin item slips through with the wrong tracker. Retries with
-// backoff make these failures rare enough to not be visible.
+// ─────────────────────────────────────────────────────────────────────────────
+// localStorage-backed snapshot cache
 //
-// Auth errors (401/403) are not retried — the master key won't suddenly
-// become valid. 404s also short-circuit because jbFetchTracker treats them
-// as empty bins, not errors.
+// Every successful snapshot fetch is mirrored here. If a later fetch fails
+// after all retries (sustained JSONBin slowness, eventual-consistency hiccup,
+// network issue), we return the cached snapshot instead of null.
+//
+// Why this matters: when fetchTrackerComputedStatus returns null, downstream
+// consumers see "no data" and degrade in user-visible ways:
+//   - Stage-gate tiles fall back to "View progress" or strip parent name
+//   - Leadership-panel dedup misses the divisional twin → company-bin item
+//     slips through with the wrong tracker
+// With cached fallback, all consumers see *some* valid data (potentially
+// stale) instead of those broken states.
+// ─────────────────────────────────────────────────────────────────────────────
+const SNAPSHOT_CACHE_KEY = 'hub_snapshot_cache_v1';
+const SNAPSHOT_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function _readSnapshotCache() {
+  try { return JSON.parse(localStorage.getItem(SNAPSHOT_CACHE_KEY) || '{}'); }
+  catch { return {}; }
+}
+function _writeSnapshotCache(cache) {
+  try { localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify(cache)); }
+  catch (err) {
+    // Quota exceeded or storage disabled — log but don't crash the fetcher.
+    console.warn('Snapshot cache write failed:', err);
+  }
+}
+function loadCachedSnapshot(trackerId) {
+  const entry = _readSnapshotCache()[trackerId];
+  if (!entry || !entry.snapshot) return null;
+  if (Date.now() - (entry.savedAt || 0) > SNAPSHOT_CACHE_MAX_AGE_MS) return null;
+  return entry.snapshot;
+}
+function saveCachedSnapshot(trackerId, snapshot) {
+  if (!snapshot) return;
+  const cache = _readSnapshotCache();
+  cache[trackerId] = { snapshot, savedAt: Date.now() };
+  _writeSnapshotCache(cache);
+}
+
+// Snapshot fetches are best-effort. Failures cascade into incomplete UI:
+// tiles miss parent names, leadership dedup misses twins, etc. Strategy:
+//   1. Try the live fetch up to 3 times with backoff
+//   2. On any successful fetch, mirror the snapshot to localStorage
+//   3. If all retries exhaust, fall back to the localStorage cache so the
+//      UI degrades to "stale" rather than "broken"
+//
+// Auth errors (401/403) skip the retry loop — the master key won't fix
+// itself. 404s are handled inside jbFetchTracker as empty bins, not errors.
 function fetchTrackerComputedStatus(trackerId) {
   if (!_statusCache[trackerId]) {
     _statusCache[trackerId] = (async () => {
-      const delays = [0, 300, 700]; // attempt 1 immediate, then 300ms, 700ms
+      const delays = [0, 300, 700];
       let lastErr;
       for (let i = 0; i < delays.length; i++) {
         if (delays[i]) await new Promise(r => setTimeout(r, delays[i]));
         try {
           const data = await jbFetchTracker(trackerId);
-          return (data && data.computedStatus) || null;
+          const snapshot = (data && data.computedStatus) || null;
+          if (snapshot) saveCachedSnapshot(trackerId, snapshot);
+          return snapshot;
         } catch (err) {
           lastErr = err;
-          // Don't retry auth errors — they won't fix themselves.
           if (/Invalid bin or key/i.test(err.message || '')) break;
         }
       }
-      console.warn('Snapshot fetch failed after retries:', trackerId, lastErr);
+      // Live fetch failed — fall back to localStorage cache to keep the
+      // UI rendering with last-known-good data.
+      const cached = loadCachedSnapshot(trackerId);
+      if (cached) {
+        console.warn(`Snapshot fetch failed for ${trackerId}; using cached fallback.`, lastErr);
+        return cached;
+      }
+      console.warn('Snapshot fetch failed and no cache available:', trackerId, lastErr);
       return null;
     })();
   }
