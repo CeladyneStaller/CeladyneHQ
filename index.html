@@ -1369,6 +1369,7 @@ const TOOLS = [
     description: 'Test portal for vetting analysis portal patches',
     icon: 'chart-line',
     url: 'https://test-portal-production-0181.up.railway.app/',
+    section: 'analysis',
     requiresOrgRole: 'cto',
     fetchStatus: async () => ({ text: 'Open deck', severity: 'subtle' })
   },
@@ -2969,7 +2970,8 @@ const TILE_SECTIONS = [
   { id: 'projects',   label: 'Projects' },
   { id: 'leadership', label: 'Leadership' },
   { id: 'analysis',   label: 'Analysis' },
-  { id: 'links',      label: 'Useful links' }
+  { id: 'links',      label: 'Useful links' },
+  { id: 'coding',     label: 'Coding resources' }
 ];
 
 // Sub-sections within Projects, in display order. Tiles get sorted into
