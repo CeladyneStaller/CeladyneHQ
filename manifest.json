@@ -1,6 +1,6 @@
 {
-  "name": "R&D Hub",
-  "short_name": "R&D",
+  "name": "Celadyne HQ",
+  "short_name": "Celadyne HQ",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#FAF9F5",
