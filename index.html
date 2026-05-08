@@ -1456,6 +1456,70 @@ const TOOLS = [
       return { text: 'Browse models', severity: 'subtle' };
     }
   }
+  {
+    id: 'claude',
+    name: 'Claude',
+    description: 'Claude AI',
+    icon: 'brain',
+    url: 'https://claude.ai/',
+    section: 'coding',
+    requiresOrgRole: 'cto',
+    fetchStatus: async () => ({ text: 'Open console', severity: 'subtle' })
+  },
+  {
+    id: 'github-org',
+    name: 'GitHub',
+    description: 'Repos for the hub, Gantts, and trackers',
+    icon: 'brand-github',
+    url: 'https://github.com/celadynestaller', // adjust to your org
+    section: 'coding',
+    requiresOrgRole: 'cto',
+    fetchStatus: async () => ({ text: 'Open GitHub', severity: 'subtle' })
+  },
+  {
+    id: 'jsonbin-dashboard',
+    name: 'JSONBin',
+    description: 'Manage tracker bins and master keys',
+    icon: 'database',
+    url: 'https://jsonbin.io/app/bins',
+    section: 'coding',
+    requiresOrgRole: 'cto',
+    fetchStatus: async () => ({ text: 'Open dashboard', severity: 'subtle' })
+  },
+  {
+    id: 'supabase-dashboard',
+    name: 'Supabase',
+    description: 'Safety check-in database',
+    icon: 'database-cog',
+    url: 'https://supabase.com/dashboard/org/ienuehkpvohhuboffbnv',
+    section: 'coding',
+    requiresOrgRole: 'cto',
+    fetchStatus: async () => ({ text: 'Open dashboard', severity: 'subtle' })
+  },
+  {
+  id: 'analysis-portal-resource',
+  name: 'Analysis portal dashboards',
+  description: 'Analysis portal railway and logs',
+  icon: 'folder-lock',
+  section: 'coding',
+  isFolder: true,
+  requiresOrgRole: 'cto',
+  folder: {
+    title: 'Analysis portal dashboards',
+    intro: 'Analysis portal railway and logs',
+    sections: [
+      { id: 'production', label: 'Analysis Portal', tiles: [
+        { name: 'Portal Railway', url: 'https://railway.com/project/b06e9e31-8af9-4cbd-aaa8-7765a5f4c8b8/service/9a6717c4-288d-48ca-95ec-c89d2ffb7f8c?environmentId=0d7ac23e-d18e-4cd9-bc1d-ab3c0d64e513' },
+        { name: 'Portal Logs', url: 'https://analysis-portal-production.up.railway.app/api/jobs' }
+      ]}
+      { id: 'development', label: 'Analysis Test Portal', tiles: [
+        { name: 'Test Portal Railway', url: 'https://railway.com/project/9e93cdf3-c370-4f97-80ac-95c1186ccea5/service/6f1c9b0f-fa53-4b73-b088-011f83d0cb38?environmentId=1f7bb9b1-56ab-4297-a40b-4e87783fb67f' },
+        { name: 'Test Portal Logs', url: 'https://test-portal-production-0181.up.railway.app/api/jobs' }
+      ]}
+    ]
+  },
+  fetchStatus: async () => ({ text: 'Browse', severity: 'subtle' })
+}
 ];
 
 // ============================================================
