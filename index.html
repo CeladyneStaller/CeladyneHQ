@@ -381,12 +381,33 @@
     font-size: 22px;
     color: var(--text-muted);
     line-height: 1;
+    flex-shrink: 0;
   }
   .tile-name {
     font-size: 15px;
     font-weight: 500;
     color: var(--text);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
+  /* Status badge in stage-gate tile heads. Empty by default — populated by
+     the runner once the company-bin snapshot resolves. */
+  .tile-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 10px;
+    flex-shrink: 0;
+    line-height: 1.4;
+  }
+  .tile-badge:empty { display: none; }
+  .tile-badge.ontrack  { background: #EAF3DE; color: #3B6D11; }
+  .tile-badge.watch    { background: #FAEEDA; color: #854F0B; }
+  .tile-badge.atrisk   { background: #FCEBEB; color: #A32D2D; }
+  .tile-badge.complete { background: var(--surface-alt); color: var(--text-subtle); }
   .tile-desc {
     font-size: 13px;
     color: var(--text-muted);
@@ -2219,12 +2240,14 @@ function buildToolList(session) {
     list.push({
       id: `stage-gate__${a.tracker}__${a.id}`,
       name: shortLabel(display, 32),
-      description: `${trackerName} · ${a.name ? `#${a.id} · ` : ''}TRL/MRL progress`,
+      // Initial subtitle: just the bin name. The runner replaces this with
+      // "Bin · Parent" once the company-bin snapshot is fetched.
+      description: trackerName,
       icon: 'stack-2',
       url,
       section: 'projects',
       titleAttr: a.name ? `Stage-gate for: ${a.name} (#${a.id})` : `Stage-gate for #${a.id}`,
-      fetchStatus: async () => fetchStageGateStatus(a.tracker, a.id)
+      fetchStatus: async () => fetchStageGateStatus(a.tracker, a.id, a.name)
     });
   });
 
@@ -2340,43 +2363,183 @@ function formatOnShift(checkedInAt) {
   return `${h}h ${m}m on shift`;
 }
 
-async function fetchStageGateStatus(trackerId, objectiveId) {
-  const snapshot = await fetchTrackerComputedStatus(trackerId);
-  const obj = snapshot && snapshot.objectives && snapshot.objectives[String(objectiveId)];
-  if (!obj) {
-    // Snapshot not present (Gantt hasn't saved since this objective existed,
-    // or the bin pre-dates the snapshot feature). Fall back to a neutral state.
+// ─────────────────────────────────────────────────────────────────────────────
+// Company-bin matching for stage-gate tiles.
+//
+// Tiles display data sourced from the company-wide Gantt (the tracker with
+// `companyLevel: true`), matched to the user's assignment by objective name.
+// Click behavior still uses the divisional bin's slug — the URL goes to the
+// divisional tracker, but the *content* of the tile reflects the company plan.
+//
+// Falls back to the divisional bin when no company match is found, so
+// nothing breaks during rollout while company-bin coverage is incomplete.
+// ─────────────────────────────────────────────────────────────────────────────
+function getCompanyTracker() {
+  const trackers = getConfiguredTrackers();
+  return trackers.find(t => t.companyLevel) || null;
+}
+async function findCompanyMatch(name) {
+  if (!name) return null;
+  const company = getCompanyTracker();
+  if (!company) return null;
+  const snapshot = await fetchTrackerComputedStatus(company.id).catch(() => null);
+  if (!snapshot || !snapshot.objectives) return null;
+  const target = String(name).toLowerCase().trim();
+  for (const id of Object.keys(snapshot.objectives)) {
+    const obj = snapshot.objectives[id];
+    if (obj && obj.name && obj.name.toLowerCase().trim() === target) {
+      return { tracker: company, id, obj };
+    }
+  }
+  return null;
+}
+
+// Build the days line from a gates array. Returns a string like:
+//   "8 days past gate due"    — at least one gate is overdue (most urgent wins)
+//   "5 days ahead · 12 until next gate" — last passed gate was passed early
+//                                          AND there's a future pending gate
+//   "12 days until next gate" — next pending gate is in the future
+//   "5 days ahead"            — last passed gate was passed early, no next gate
+//   "All gates passed"        — every gate passed, objective not yet complete
+//   ""                        — objective is complete (status tag carries this)
+//
+// `gates` items must include endDate; completedDate is optional.
+// `today` is overridable for tests; defaults to actual today midnight.
+function buildGateDaysText(gates, isComplete, today) {
+  if (isComplete) return '';
+  if (!gates || !gates.length) return '';
+  const t = today || startOfTodayMs();
+  const dayMs = 86400000;
+
+  // Past due: any overdue gate. Take the *first* overdue (earliest by index,
+  // which is sort-by-end-date). Use that one's endDate for the count so the
+  // number reflects the longest-stalled gate.
+  const overdue = gates.find(g => g && g.state === 'overdue');
+  if (overdue && overdue.endDate) {
+    const days = Math.max(0, Math.floor((t - parseISODateMs(overdue.endDate)) / dayMs));
+    if (days > 0) return `${days} days past gate due`;
+  }
+
+  // Find the next pending/in-progress gate in chronological order.
+  const next = gates.find(g => g && (g.state === 'pending' || g.state === 'in-progress'));
+
+  // Find the most recent passed gate (last one with state passed/passed-late).
+  // Use it to decide if we're "ahead" — completedDate before endDate.
+  let aheadDays = 0;
+  for (let i = gates.length - 1; i >= 0; i--) {
+    const g = gates[i];
+    if (g && (g.state === 'passed' || g.state === 'passed-late')) {
+      if (g.completedDate && g.endDate) {
+        const delta = Math.floor((parseISODateMs(g.endDate) - parseISODateMs(g.completedDate)) / dayMs);
+        if (delta > 0) aheadDays = delta;
+      }
+      break;
+    }
+  }
+
+  let untilDays = 0;
+  let nextHasDate = false;
+  if (next && next.endDate) {
+    untilDays = Math.max(0, Math.ceil((parseISODateMs(next.endDate) - t) / dayMs));
+    nextHasDate = true;
+  }
+
+  if (aheadDays > 0 && untilDays > 0) return `${aheadDays} days ahead · ${untilDays} until next gate`;
+  if (untilDays > 0)                  return `${untilDays} days until next gate`;
+  if (nextHasDate && untilDays === 0) return 'Next gate due today';
+  if (aheadDays > 0)                  return `${aheadDays} days ahead`;
+  // No overdue, no next, no ahead → all gates passed but objective open.
+  if (gates.every(g => g && (g.state === 'passed' || g.state === 'passed-late'))) {
+    return 'All gates passed';
+  }
+  return '';
+}
+
+function startOfTodayMs() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+function parseISODateMs(s) {
+  if (!s) return NaN;
+  // Match the Gantt's parseDate: 'YYYY-MM-DD' is treated as local midnight.
+  return new Date(String(s) + 'T00:00:00').getTime();
+}
+
+const STATUS_LABELS = {
+  ontrack:  'On track',
+  watch:    'Watch',
+  atrisk:   'At risk',
+  complete: 'Complete'
+};
+const STATUS_SEVERITIES = {
+  ontrack:  'success',
+  watch:    'warning',
+  atrisk:   'danger',
+  complete: 'success'
+};
+
+// `objectiveName` lets fetchStageGateStatus do company-bin matching without
+// re-reading the divisional bin to find the name first. Caller (buildToolList)
+// already has the name from the user's assignment record — pass it through.
+async function fetchStageGateStatus(trackerId, objectiveId, objectiveName) {
+  // Always fetch the divisional bin: it's the source of truth for the slug
+  // (URL routing) and the fallback for content if no company match exists.
+  const divisional = await fetchTrackerComputedStatus(trackerId);
+  const divObj = divisional && divisional.objectives && divisional.objectives[String(objectiveId)];
+
+  // Try company-bin match — but skip if the assignment IS already a company
+  // bin (no need to round-trip a self-match).
+  const company = getCompanyTracker();
+  let match = null;
+  if (company && company.id !== trackerId) {
+    match = await findCompanyMatch(objectiveName || (divObj && divObj.name));
+  } else if (company && company.id === trackerId && divObj) {
+    // The assignment is in the company bin — its own snapshot is the company view.
+    match = { tracker: company, id: String(objectiveId), obj: divObj };
+  }
+
+  // Pick the source of content: company match if found, else divisional fallback.
+  const source = (match && match.obj) || divObj;
+  if (!source) {
+    // Neither bin has a snapshot for this objective. Tile shows neutral fallback.
     return { text: 'View progress', severity: 'subtle' };
   }
-  // Format: "Status · 72% · 4d left" — or "Complete · 100%" when done.
-  const label = obj.isComplete ? 'Complete'
-    : obj.status === 'ontrack' ? 'On track'
-    : obj.status === 'watch'   ? 'Watch'
-    : obj.status === 'atrisk'  ? 'At risk'
-    : 'In progress';
-  const sev = obj.isComplete ? 'success'
-    : obj.status === 'ontrack' ? 'success'
-    : obj.status === 'watch'   ? 'warning'
-    : obj.status === 'atrisk'  ? 'danger'
-    : 'subtle';
-  let daysText = '';
-  if (!obj.isComplete && Number.isFinite(obj.daysLeft)) {
-    if (obj.daysLeft < 0) daysText = `${Math.abs(obj.daysLeft)}d overdue`;
-    else if (obj.daysLeft === 0) daysText = 'Due today';
-    else daysText = `${obj.daysLeft}d left`;
-  }
-  const parts = [label, `${obj.progress}%`];
-  if (daysText) parts.push(daysText);
-  // If the snapshot supplies a slug, the receiving tracker page expects
-  // ?name=<slug> — return the proper URL so the runner can patch the tile's
-  // href. The slug is the source of truth for cross-app URLs.
-  const tracker = findTracker(trackerId);
-  const url = tracker && obj.slug ? stageGateUrlFor(tracker, objectiveId, obj.slug) : null;
+
+  const statusKey = source.isComplete ? 'complete' : (source.status || 'subtle');
+  const badgeLabel = STATUS_LABELS[statusKey] || '';
+  const severity = STATUS_SEVERITIES[statusKey] || 'subtle';
+
+  // Subtitle: "Bin · Parent". Bin is the *assignment*'s tracker (where the user
+  // expects to be sent on click), not where the data was found.
+  const assignmentTracker = findTracker(trackerId);
+  const binName = (assignmentTracker && assignmentTracker.name) || '';
+  const parentName = (source.parentName || '').trim();
+  const meta = [binName, parentName].filter(Boolean).join(' · ');
+
+  // Days text from gates. Falls back gracefully when gates lack date metadata
+  // (older snapshots saved before this schema landed).
+  const gates = Array.isArray(source.gates) ? source.gates : [];
+  const daysText = buildGateDaysText(gates, !!source.isComplete, startOfTodayMs());
+
+  // Status line: "Health 72 · 8 days past gate due" (or just "Health 72" if no
+  // days info, or just the days text for older snapshots without health).
+  const healthText = Number.isFinite(source.score) ? `Health ${source.score}` : '';
+  const text = [healthText, daysText].filter(Boolean).join(' · ') || 'View progress';
+
+  // URL always uses the divisional bin's slug — clicks go to the divisional
+  // tracker page, not the company plan. (The "where do I act on this?" URL.)
+  const url = (assignmentTracker && divObj && divObj.slug)
+    ? stageGateUrlFor(assignmentTracker, objectiveId, divObj.slug)
+    : null;
+
   return {
-    text: parts.join(' · '),
-    severity: sev,
-    gates: Array.isArray(obj.gates) ? obj.gates : [],
-    url
+    text,
+    severity,
+    gates,
+    url,
+    badge: badgeLabel ? { label: badgeLabel, key: statusKey } : null,
+    meta
   };
 }
 
@@ -2681,12 +2844,17 @@ function renderTileEl(tool) {
   if (tool.titleAttr) a.title = tool.titleAttr;
   a.dataset.toolId = tool.id;
   const isStageGate = typeof tool.id === 'string' && tool.id.startsWith('stage-gate__');
+  // Stage-gate tiles get extra slots populated async by fetchTileStatuses:
+  //   data-badge — status tag (On track / Watch / At risk / Complete)
+  //   data-meta  — subtitle becomes "Bin · Parent Initiative"
+  // Non-stage-gate tiles use the static description.
   a.innerHTML = `
     <div class="tile-head">
       <i class="ti ti-${tool.icon} tile-icon" aria-hidden="true"></i>
       <span class="tile-name">${tool.name}</span>
+      ${isStageGate ? `<span class="tile-badge" data-badge="${tool.id}"></span>` : ''}
     </div>
-    <p class="tile-desc">${tool.description}</p>
+    <p class="tile-desc"${isStageGate ? ` data-meta="${tool.id}"` : ''}>${tool.description}</p>
     <div class="tile-status loading" data-status="${tool.id}">
       <span class="dot" style="opacity: 0.4;"></span>
       Loading status…
@@ -2828,6 +2996,24 @@ async function fetchTileStatuses() {
       if (result.gates) {
         const gatesEl = document.querySelector(`[data-gates="${tool.id}"]`);
         if (gatesEl) gatesEl.innerHTML = renderGateBubblesHtml(result.gates);
+      }
+      // Optional: status tag in the tile head (stage-gate tiles only).
+      if (result.badge !== undefined) {
+        const badgeEl = document.querySelector(`[data-badge="${tool.id}"]`);
+        if (badgeEl) {
+          if (result.badge && result.badge.label) {
+            badgeEl.textContent = result.badge.label;
+            badgeEl.className = 'tile-badge ' + (result.badge.key || '');
+          } else {
+            badgeEl.textContent = '';
+            badgeEl.className = 'tile-badge';
+          }
+        }
+      }
+      // Optional: subtitle replacement (stage-gate tiles use "Bin · Parent").
+      if (result.meta !== undefined) {
+        const metaEl = document.querySelector(`[data-meta="${tool.id}"]`);
+        if (metaEl && result.meta) metaEl.textContent = result.meta;
       }
       // Optional: a fetched URL replaces the tile's initial href. Stage-gate
       // tiles use this so the slug-based ?name=<slug> URL is applied once the
