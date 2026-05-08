@@ -2285,11 +2285,35 @@ function clearStatusCache() {
   for (const k in _statusCache) delete _statusCache[k];
 }
 
+// Snapshot fetches are best-effort — a transient failure (network blip,
+// JSONBin 5xx, rate limit) can return null, which makes the consumer fall
+// back to incomplete data: stage-gate tiles show "View progress" instead of
+// real status, and leadership-panel dedup misses the divisional twin so the
+// company-bin item slips through with the wrong tracker. Retries with
+// backoff make these failures rare enough to not be visible.
+//
+// Auth errors (401/403) are not retried — the master key won't suddenly
+// become valid. 404s also short-circuit because jbFetchTracker treats them
+// as empty bins, not errors.
 function fetchTrackerComputedStatus(trackerId) {
   if (!_statusCache[trackerId]) {
-    _statusCache[trackerId] = jbFetchTracker(trackerId)
-      .then(data => (data && data.computedStatus) || null)
-      .catch(() => null);
+    _statusCache[trackerId] = (async () => {
+      const delays = [0, 300, 700]; // attempt 1 immediate, then 300ms, 700ms
+      let lastErr;
+      for (let i = 0; i < delays.length; i++) {
+        if (delays[i]) await new Promise(r => setTimeout(r, delays[i]));
+        try {
+          const data = await jbFetchTracker(trackerId);
+          return (data && data.computedStatus) || null;
+        } catch (err) {
+          lastErr = err;
+          // Don't retry auth errors — they won't fix themselves.
+          if (/Invalid bin or key/i.test(err.message || '')) break;
+        }
+      }
+      console.warn('Snapshot fetch failed after retries:', trackerId, lastErr);
+      return null;
+    })();
   }
   return _statusCache[trackerId];
 }
