@@ -651,11 +651,18 @@
     text-align: right;
   }
   .leadership-card-meta {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-subtle);
-    margin-bottom: 6px;
-    display: flex;
-    justify-content: space-between;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .leadership-card-stats {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-bottom: 4px;
   }
   .leadership-card-gates {
     margin-top: 8px;
@@ -2585,18 +2592,38 @@ async function renderLeadershipPanel(led) {
   root.innerHTML = '<div class="leadership-panel-loading">Loading leadership view…</div>';
 
   // Fetch snapshots in parallel, sharing the per-render cache with stage-gate tiles.
-  const results = await Promise.all(led.map(async t => {
+  // Always include the company tracker — it's the source of truth for card content
+  // (status, health, parent, gates), even if the user isn't a Lead of it.
+  const company = getCompanyTracker();
+  const fetchSet = led.slice();
+  if (company && !fetchSet.find(t => t.id === company.id)) {
+    fetchSet.push(company);
+  }
+  const results = await Promise.all(fetchSet.map(async t => {
     const snapshot = await fetchTrackerComputedStatus(t.id).catch(() => null);
     return { tracker: t, snapshot };
   }));
 
-  // Build flat objective list across all owned trackers.
-  // Each item: { tracker, id, name, status, progress, daysLeft, isComplete, gates }.
-  // Name resolution: snapshot.name (newest, written by the Gantt) →
-  //   user's own assignedObjectives entry (snapshotted at assign-time) →
-  //   '#<id>' as last resort.
+  // Build name → company-objective map. Used to overlay company-bin data
+  // onto each card (matched by case-insensitive, trimmed name).
+  const companyByName = new Map();
+  if (company) {
+    const cr = results.find(r => r.tracker.id === company.id);
+    const cobjs = cr && cr.snapshot && cr.snapshot.objectives;
+    if (cobjs) {
+      Object.values(cobjs).forEach(obj => {
+        if (obj && obj.name) companyByName.set(obj.name.toLowerCase().trim(), obj);
+      });
+    }
+  }
+
+  // Build flat objective list from the trackers the user actually leads.
+  // (The company bin is fetched above for enrichment, but only included as a
+  // source bin if it's in the user's `led` set.)
+  const ledIds = new Set(led.map(t => t.id));
   let items = [];
   results.forEach(({ tracker, snapshot }) => {
+    if (!ledIds.has(tracker.id)) return;
     if (!snapshot || !snapshot.objectives) return;
     for (const id of Object.keys(snapshot.objectives)) {
       const obj = snapshot.objectives[id];
@@ -2628,6 +2655,26 @@ async function renderLeadershipPanel(led) {
     if (!it.tracker.companyLevel) return true;          // non-company always shown
     if (!it.name) return true;                          // can't match without name → keep
     return !nonCompanyNames.has(norm(it.name));         // suppress duplicate
+  });
+
+  // Company-bin enrichment: overlay the company bin's view on every card.
+  // Display fields (badge, parent, health, days, gates) come from company;
+  // routing fields (tracker, id, slug, name) stay so click URLs go to the
+  // divisional bin where the user actually does the work. No company match
+  // → graceful fallback to divisional data (this card's bin already supplied it).
+  items.forEach(it => {
+    if (it.tracker.companyLevel) return; // already company data
+    const cobj = companyByName.get(norm(it.name));
+    if (!cobj) return;
+    it.score      = cobj.score;
+    it.status     = cobj.status;
+    it.progress   = cobj.progress;
+    it.daysLeft   = cobj.daysLeft;
+    it.delayDays  = cobj.delayDays;
+    it.isComplete = cobj.isComplete;
+    it.isActive   = cobj.isActive;
+    it.parentName = cobj.parentName;
+    it.gates      = cobj.gates;
   });
 
   // Status priority for sorting: at-risk first, then watch, on-track, complete.
@@ -2762,17 +2809,19 @@ async function renderLeadershipPanel(led) {
 
   function renderObjectiveCard(it) {
     const statusKey = it.isComplete ? 'complete' : it.status;
-    const statusLabel = it.isComplete ? 'Complete'
-      : it.status === 'ontrack' ? 'On track'
-      : it.status === 'watch'   ? 'Watch'
-      : it.status === 'atrisk'  ? 'At risk'
-      : '';
-    let daysText = '';
-    if (!it.isComplete && Number.isFinite(it.daysLeft)) {
-      if (it.daysLeft < 0) daysText = `${Math.abs(it.daysLeft)}d overdue`;
-      else if (it.daysLeft === 0) daysText = 'Due today';
-      else daysText = `${it.daysLeft}d left`;
-    }
+    const statusLabel = STATUS_LABELS[statusKey] || '';
+
+    // Subtitle: "Bin · Parent" — same shape as new stage-gate tiles. Bin is the
+    // *card*'s tracker (where clicks go); parent comes from the company-bin overlay.
+    const binName = (it.tracker && it.tracker.name) || '';
+    const parentName = (it.parentName || '').trim();
+    const meta = [binName, parentName].filter(Boolean).join(' · ');
+
+    // Status line: "Health 72 · 8 days past gate due". Same builder as the tile.
+    const daysText = buildGateDaysText(it.gates || [], !!it.isComplete, startOfTodayMs());
+    const healthText = Number.isFinite(it.score) ? `Health ${it.score}` : '';
+    const statusLine = [healthText, daysText].filter(Boolean).join(' · ');
+
     const url = stageGateUrlFor(it.tracker, it.id, it.slug);
     const gatesHtml = renderGateBubblesHtml(it.gates || []);
     return `
@@ -2781,16 +2830,8 @@ async function renderLeadershipPanel(led) {
           <span class="leadership-card-name" title="${escAttr(it.name)}">${escText(it.name)}</span>
           ${statusLabel ? `<span class="leadership-status-badge ${statusKey}">${statusLabel}</span>` : ''}
         </div>
-        <div class="leadership-card-progress">
-          <div class="leadership-card-bar">
-            <div class="leadership-card-bar-fill ${statusKey}" style="width: ${Math.min(100, Math.max(0, it.progress || 0))}%;"></div>
-          </div>
-          <span class="leadership-card-pct">${it.progress || 0}%</span>
-        </div>
-        <div class="leadership-card-meta">
-          <span>${escText(it.tracker.name)}</span>
-          <span>${escText(daysText)}</span>
-        </div>
+        ${meta ? `<div class="leadership-card-meta">${escText(meta)}</div>` : ''}
+        ${statusLine ? `<div class="leadership-card-stats">${escText(statusLine)}</div>` : ''}
         ${gatesHtml ? `<div class="leadership-card-gates">${gatesHtml}</div>` : ''}
       </a>
     `;
