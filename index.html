@@ -664,6 +664,10 @@
     color: var(--text-muted);
     margin-bottom: 4px;
   }
+  .leadership-card-stats.ontrack  { color: var(--success); }
+  .leadership-card-stats.watch    { color: var(--warning); }
+  .leadership-card-stats.atrisk   { color: var(--danger); }
+  .leadership-card-stats.complete { color: var(--text-subtle); }
   .leadership-card-gates {
     margin-top: 8px;
     padding-top: 8px;
@@ -2831,7 +2835,7 @@ async function renderLeadershipPanel(led) {
           ${statusLabel ? `<span class="leadership-status-badge ${statusKey}">${statusLabel}</span>` : ''}
         </div>
         ${meta ? `<div class="leadership-card-meta">${escText(meta)}</div>` : ''}
-        ${statusLine ? `<div class="leadership-card-stats">${escText(statusLine)}</div>` : ''}
+        ${statusLine ? `<div class="leadership-card-stats ${statusKey}">${escText(statusLine)}</div>` : ''}
         ${gatesHtml ? `<div class="leadership-card-gates">${gatesHtml}</div>` : ''}
       </a>
     `;
