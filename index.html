@@ -1560,7 +1560,12 @@ async function jbFetchUsers() {
   if (!cfg || !cfg.usersBinId || !cfg.masterKey) {
     throw new Error('Hub is not configured for this device.');
   }
-  const r = await fetch(`${JSONBIN_BASE}/${cfg.usersBinId}/latest`, {
+  // Cache-busting query param: defeats both the browser HTTP cache (already
+  // bypassed by `cache: 'no-store'`) AND any intermediate CDN cache (which
+  // `no-store` doesn't reach). Without this, JSONBin's edge cache can serve
+  // stale snapshots on soft refresh — only Ctrl+F5 worked because it sends
+  // Cache-Control: no-cache on the request, forcing CDN revalidation.
+  const r = await fetch(`${JSONBIN_BASE}/${cfg.usersBinId}/latest?_=${Date.now()}`, {
     headers: {
       'X-Master-Key': cfg.masterKey,
       'X-Bin-Meta': 'false'
@@ -1699,7 +1704,8 @@ async function jbFetchTracker(trackerId) {
   const cfg = STATE.config;
   const tracker = findTracker(trackerId);
   if (!tracker) throw new Error(`Tracker "${trackerId}" is not configured.`);
-  const r = await fetch(`${JSONBIN_BASE}/${tracker.binId}/latest`, {
+  // Cache-busting query param — see jbFetchUsers for the why.
+  const r = await fetch(`${JSONBIN_BASE}/${tracker.binId}/latest?_=${Date.now()}`, {
     headers: { 'X-Master-Key': cfg.masterKey, 'X-Bin-Meta': 'false' },
     cache: 'no-store'
   });
