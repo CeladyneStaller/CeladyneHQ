@@ -1186,10 +1186,11 @@
 //  per-device setup. localStorage values always take precedence.
 //  Per project convention: do NOT commit usersBinId or masterKey here.
 const CONFIG_DEFAULTS = {
-  usersBinId: '69fb85d2250b1311c3127660',
+  usersBinId: '',
   trackerBinId: '',         // LEGACY: single-tracker config (auto-migrated to trackers[0])
-  trackers: [],             // [{ id: 'celadyne', name: 'Celadyne', binId: '...' }, ...]
-  masterKey: '$2a$10$yJlmc9C76UAAdqpnsNR0oeboCCOK/VS1YJnFU4kH4kJrySTg2Ue92',
+  trackers: [],             // localStorage CACHE — source of truth lives in hubConfigBin
+  hubConfigBinId: 'PASTE_YOUR_HUB_CONFIG_BIN_ID_HERE',  // shared config bin
+  masterKey: '',
   logoPath: 'logo.png',     // drop a logo.png or logo.svg next to index.html
   sessionDays: 30,
   pinMinLength: 6,
@@ -1723,6 +1724,23 @@ async function jbSaveUsers(record) {
 function isLeadership(session) {
   return !!(session && (session.orgRole === 'lead' || session.orgRole === 'cto'));
 }
+// Admin save: optimistic local save, then push to shared bin so all users
+// see the change on their next page load. If the bin push fails, the admin
+// keeps working locally — the toast tells them the sharing step failed.
+async function adminSaveTrackers(trackers) {
+  saveConfig({ trackers });
+  try {
+    await jbSaveHubConfig({
+      version: 1,
+      trackers,
+      updatedAt: new Date().toISOString(),
+      updatedBy: (STATE.session && STATE.session.email) || 'unknown'
+    });
+    toast('Tracker config saved and shared with all users', 'success');
+  } catch (err) {
+    toast(`Saved locally; failed to share: ${err.message}`, 'error');
+  }
+}
 function leadsTracker(session, trackerId) {
   if (!session) return false;
   if (session.orgRole === 'cto') return true; // CTO leads everything
@@ -1775,26 +1793,65 @@ function trackersConfigured() {
 // Backwards-compatible name retained for any callers that pre-date the rename.
 function trackerConfigured() { return trackersConfigured(); }
 
-async function jbFetchTracker(trackerId) {
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared hub config (Option C — tracker list lives in JSONBin, not localStorage).
+//
+// All users read from the hub config bin on load; admins write to it from the
+// Hub configuration UI. localStorage holds a last-known-good cache for resilience
+// when the bin is briefly unreachable.
+// ─────────────────────────────────────────────────────────────────────────────
+async function jbFetchHubConfig() {
   const cfg = STATE.config;
-  const tracker = findTracker(trackerId);
-  if (!tracker) throw new Error(`Tracker "${trackerId}" is not configured.`);
-  // Cache-busting query param — see jbFetchUsers for the why.
-  const r = await fetch(`${JSONBIN_BASE}/${tracker.binId}/latest?_=${Date.now()}`, {
+  if (!cfg || !cfg.hubConfigBinId || !cfg.masterKey) return null;
+  const r = await fetch(`${JSONBIN_BASE}/${cfg.hubConfigBinId}/latest?_=${Date.now()}`, {
     headers: { 'X-Master-Key': cfg.masterKey, 'X-Bin-Meta': 'false' },
     cache: 'no-store'
   });
-  if (!r.ok) {
-    if (r.status === 401 || r.status === 403) throw new Error(`Invalid bin or key for tracker "${tracker.name}".`);
-    if (r.status === 404) return { projects: [] };
-    throw new Error(`Tracker fetch failed (${tracker.name}): ${r.status}`);
-  }
-  const data = await r.json();
-  if (!data || typeof data !== 'object') return { projects: [] };
-  // Tracker bin stores work items under `projects`. Legacy fallback: `objectives`.
-  if (!Array.isArray(data.projects)) data.projects = Array.isArray(data.objectives) ? data.objectives : [];
-  return data;
+  if (r.status === 404) return null;     // bin not initialized yet
+  if (!r.ok) throw new Error(`Hub config fetch failed: ${r.status}`);
+  return r.json();
 }
+
+async function jbSaveHubConfig(payload) {
+  const cfg = STATE.config;
+  if (!cfg || !cfg.hubConfigBinId || !cfg.masterKey) throw new Error('Hub config bin not set');
+  const r = await fetch(`${JSONBIN_BASE}/${cfg.hubConfigBinId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Master-Key': cfg.masterKey
+      // No X-Bin-Private header — including it causes new bins to be created
+      // instead of updating the existing one.
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!r.ok) throw new Error(`Hub config save failed: ${r.status}`);
+  return r.json();
+}
+
+// localStorage-backed cache for the hub config. Falls back to this if the
+// live fetch fails (network, JSONBin slowdown). No TTL: a stale cache is
+// always better than no hub at all.
+const HUB_CONFIG_CACHE_KEY = 'hub_config_cache_v1';
+
+async function loadHubConfig() {
+  try {
+    const data = await jbFetchHubConfig();
+    if (data && Array.isArray(data.trackers)) {
+      try { localStorage.setItem(HUB_CONFIG_CACHE_KEY, JSON.stringify(data)); } catch {}
+      return data;
+    }
+  } catch (err) {
+    console.warn('Hub config fetch failed; falling back to cache.', err);
+  }
+  try {
+    const cached = JSON.parse(localStorage.getItem(HUB_CONFIG_CACHE_KEY) || 'null');
+    if (cached && Array.isArray(cached.trackers)) return cached;
+  } catch {}
+  return null;
+}
+
+async function jbFetchTracker(trackerId) {
 async function jbSaveTracker(trackerId, record) {
   const cfg = STATE.config;
   const tracker = findTracker(trackerId);
@@ -2129,6 +2186,26 @@ function enterHub() {
   renderTiles();
   fetchTileStatuses();
   installStatusRefresh();
+  // Pull the shared tracker config from the hub config bin. Initial render
+  // above uses whatever's in localStorage (could be empty on a new device).
+  // If the fetch returns a different tracker list, re-render with it.
+  refreshHubConfig().catch(err => {
+    console.warn('Hub config refresh failed; using cached/local trackers.', err);
+  });
+}
+
+async function refreshHubConfig() {
+  const data = await loadHubConfig();
+  if (!data) return;
+  const before = JSON.stringify(STATE.config.trackers || []);
+  const after = JSON.stringify(data.trackers || []);
+  if (before === after) return;
+  STATE.config.trackers = data.trackers;
+  // Persist to localStorage so next page load starts with correct trackers.
+  saveConfig({ trackers: data.trackers });
+  renderHubChrome();
+  renderTiles();
+  fetchTileStatuses();
 }
  
 // Status refresh: 5-minute interval + immediate refresh on tab focus.
@@ -2142,7 +2219,12 @@ function installStatusRefresh() {
   const start = () => {
     if (STATE._refreshTimer) return;
     STATE._refreshTimer = setInterval(() => {
-      if (document.visibilityState === 'visible') fetchTileStatuses();
+      if (document.visibilityState === 'visible') {
+        fetchTileStatuses();
+        // Catch any tracker config changes made by an admin while this tab
+        // has been open. Silent on no-change.
+        refreshHubConfig().catch(() => {});
+      }
     }, STATUS_REFRESH_MS);
   };
   const stop = () => {
