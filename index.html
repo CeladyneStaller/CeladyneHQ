@@ -1851,6 +1851,25 @@ async function loadHubConfig() {
   return null;
 }
 
+async function jbFetchTracker(trackerId) {
+  const cfg = STATE.config;
+  const tracker = findTracker(trackerId);
+  if (!cfg || !tracker || !tracker.binId || !cfg.masterKey) {
+    throw new Error('Tracker not configured.');
+  }
+  // Cache-busting query param — see jbFetchUsers for the why.
+  const r = await fetch(`${JSONBIN_BASE}/${tracker.binId}/latest?_=${Date.now()}`, {
+    headers: { 'X-Master-Key': cfg.masterKey, 'X-Bin-Meta': 'false' },
+    cache: 'no-store'
+  });
+  if (!r.ok) {
+    if (r.status === 401 || r.status === 403) throw new Error('Invalid bin or master key.');
+    if (r.status === 404) return null;
+    throw new Error(`Tracker fetch failed: ${r.status}`);
+  }
+  return r.json();
+}                                            
+
 async function jbSaveTracker(trackerId, record) {
   const cfg = STATE.config;
   const tracker = findTracker(trackerId);
