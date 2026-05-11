@@ -2215,12 +2215,23 @@ function enterHub() {
 async function refreshHubConfig() {
   const data = await loadHubConfig();
   if (!data) return;
-  const before = JSON.stringify(STATE.config.trackers || []);
-  const after = JSON.stringify(data.trackers || []);
+  // Defensive: if the bin returned an empty trackers list but localStorage
+  // has trackers, treat the bin as "not yet initialized" rather than
+  // accepting it as the new truth. Without this, an unsaved seed bin (or
+  // an accidental clear) wipes every user's working config on refresh.
+  // Genuinely wanting to remove all trackers requires an admin to make
+  // the change via the Hub configuration UI, which is the right gate.
+  const bin = data.trackers || [];
+  const local = STATE.config.trackers || [];
+  if (bin.length === 0 && local.length > 0) {
+    console.warn('Hub config bin is empty but localStorage has trackers — ignoring bin to avoid wipe.');
+    return;
+  }
+  const before = JSON.stringify(local);
+  const after = JSON.stringify(bin);
   if (before === after) return;
-  STATE.config.trackers = data.trackers;
-  // Persist to localStorage so next page load starts with correct trackers.
-  saveConfig({ trackers: data.trackers });
+  STATE.config.trackers = bin;
+  saveConfig({ trackers: bin });
   renderHubChrome();
   renderTiles();
   fetchTileStatuses();
