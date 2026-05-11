@@ -2231,7 +2231,7 @@ async function refreshHubConfig() {
   const after = JSON.stringify(bin);
   if (before === after) return;
   STATE.config.trackers = bin;
-  saveConfig({ trackers: bin });
+  await adminSaveTrackers(bin );
   renderHubChrome();
   renderTiles();
   fetchTileStatuses();
@@ -3498,16 +3498,15 @@ function openManageTrackersModal() {
       });
     });
     document.querySelectorAll('[data-act="remove-tracker"]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const idx = parseInt(btn.dataset.idx, 10);
         const trackers = getConfiguredTrackers();
         const t = trackers[idx];
         if (!confirm(`Remove tracker "${t.name}"? Existing user assignments referencing it will become unrouted.`)) return;
         const next = trackers.filter((_, i) => i !== idx);
-        saveConfig({ trackers: next, trackerBinId: '' });
+        await adminSaveTrackers(next);
         document.getElementById('modal-content').innerHTML = renderBody();
         wireBody();
-        toast(`Removed ${t.name}`, 'success');
       });
     });
   };
@@ -3603,7 +3602,7 @@ function openTrackerEditModal(existing, onDone) {
     const idx = trackers.findIndex(t => t.id === id);
     const updated = { id, name, binId, trackerUrl, ganttUrl, meetingPageUrl, companyLevel };
     if (idx >= 0) trackers[idx] = updated; else trackers.push(updated);
-    saveConfig({ trackers, trackerBinId: '' });
+    await adminSaveTrackers(trackers);
 
     try {
       await jbFetchTracker(id);
@@ -3614,7 +3613,7 @@ function openTrackerEditModal(existing, onDone) {
       // Roll back the config change
       const reverted = getConfiguredTrackers().filter(t => t.id !== id);
       if (existing) reverted.push(existing);
-      saveConfig({ trackers: reverted });
+      await adminSaveTrackers(reverted );
       showError('tracker-edit-error', e.message || 'Could not reach the tracker bin.');
       btn.disabled = false;
       btn.textContent = 'Save';
