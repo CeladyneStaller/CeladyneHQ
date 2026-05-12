@@ -2249,9 +2249,10 @@ function installStatusRefresh() {
     if (STATE._refreshTimer) return;
     STATE._refreshTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
+        // Explicit cache clear here — fetchTileStatuses doesn't clear by default
+        // anymore, so this is where periodic freshness is enforced.
+        clearStatusCache();
         fetchTileStatuses();
-        // Catch any tracker config changes made by an admin while this tab
-        // has been open. Silent on no-change.
         refreshHubConfig().catch(() => {});
       }
     }, STATUS_REFRESH_MS);
@@ -3313,8 +3314,11 @@ function renderTiles() {
   });
 }
 async function fetchTileStatuses() {
-  // Drop the per-render cache so the periodic refresh actually re-fetches.
-  clearStatusCache();
+  // No clearStatusCache() here — it would race with concurrent leadership
+  // panel renders and force duplicate JSONBin fetches on every page load.
+  // The periodic refresh in installStatusRefresh clears the cache explicitly
+  // before re-calling this function, so freshness on scheduled refreshes is
+  // preserved without the every-call wipe.
   let urgentCount = 0;
   const tools = STATE._currentTools || TOOLS;
   await Promise.all(tools.map(async (tool) => {
