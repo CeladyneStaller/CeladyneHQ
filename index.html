@@ -2270,9 +2270,9 @@ function installStatusRefresh() {
     STATE._refreshTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
         // Re-hydrate snapshots from the bins, then re-render. This is where
-        // periodic freshness comes from now — hydrateSnapshots overwrites
-        // STATE.snapshots with fresh data and the cache is updated as a
-        // side effect. No clearStatusCache() dance needed.
+        // periodic freshness comes from — hydrateSnapshots overwrites
+        // STATE.snapshots with fresh data and mirrors it to the localStorage
+        // cache as a side effect.
         hydrateSnapshots(STATE.session).then(() => {
           renderTiles();
           fetchTileStatuses();
@@ -2511,25 +2511,14 @@ function buildToolList(session) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Stage-gate status — reads the `computedStatus` snapshot the Gantt writes
-// into each tracker bin on save. Per-render cache so multiple stage-gate
-// tiles for the same tracker share one fetch.
-// ─────────────────────────────────────────────────────────────────────────────
-const _statusCache = {}; // trackerId → Promise<computedStatus | null>
-
-function clearStatusCache() {
-  for (const k in _statusCache) delete _statusCache[k];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // localStorage-backed snapshot cache
 //
 // Every successful snapshot fetch is mirrored here. If a later fetch fails
 // after all retries (sustained JSONBin slowness, eventual-consistency hiccup,
-// network issue), we return the cached snapshot instead of null.
+// network issue), hydration returns the cached snapshot instead of null.
 //
-// Why this matters: when fetchTrackerComputedStatus returns null, downstream
-// consumers see "no data" and degrade in user-visible ways:
+// Why this matters: when a snapshot is missing, downstream consumers degrade
+// in user-visible ways:
 //   - Stage-gate tiles fall back to "View progress" or strip parent name
 //   - Leadership-panel dedup misses the divisional twin → company-bin item
 //     slips through with the wrong tracker
@@ -2561,46 +2550,6 @@ function saveCachedSnapshot(trackerId, snapshot) {
   const cache = _readSnapshotCache();
   cache[trackerId] = { snapshot, savedAt: Date.now() };
   _writeSnapshotCache(cache);
-}
-
-// Snapshot fetches are best-effort. Failures cascade into incomplete UI:
-// tiles miss parent names, leadership dedup misses twins, etc. Strategy:
-//   1. Try the live fetch up to 3 times with backoff
-//   2. On any successful fetch, mirror the snapshot to localStorage
-//   3. If all retries exhaust, fall back to the localStorage cache so the
-//      UI degrades to "stale" rather than "broken"
-//
-// Auth errors (401/403) skip the retry loop — the master key won't fix
-// itself. 404s are handled inside jbFetchTracker as empty bins, not errors.
-function fetchTrackerComputedStatus(trackerId) {
-  if (!_statusCache[trackerId]) {
-    _statusCache[trackerId] = (async () => {
-      const delays = [0, 300, 700];
-      let lastErr;
-      for (let i = 0; i < delays.length; i++) {
-        if (delays[i]) await new Promise(r => setTimeout(r, delays[i]));
-        try {
-          const data = await jbFetchTracker(trackerId);
-          const snapshot = (data && data.computedStatus) || null;
-          if (snapshot) saveCachedSnapshot(trackerId, snapshot);
-          return snapshot;
-        } catch (err) {
-          lastErr = err;
-          if (/Invalid bin or key/i.test(err.message || '')) break;
-        }
-      }
-      // Live fetch failed — fall back to localStorage cache to keep the
-      // UI rendering with last-known-good data.
-      const cached = loadCachedSnapshot(trackerId);
-      if (cached) {
-        console.warn(`Snapshot fetch failed for ${trackerId}; using cached fallback.`, lastErr);
-        return cached;
-      }
-      console.warn('Snapshot fetch failed and no cache available:', trackerId, lastErr);
-      return null;
-    })();
-  }
-  return _statusCache[trackerId];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3452,11 +3401,10 @@ function renderTiles() {
   });
 }
 async function fetchTileStatuses() {
-  // No clearStatusCache() here — it would race with concurrent leadership
-  // panel renders and force duplicate JSONBin fetches on every page load.
-  // The periodic refresh in installStatusRefresh clears the cache explicitly
-  // before re-calling this function, so freshness on scheduled refreshes is
-  // preserved without the every-call wipe.
+  // Renders each tile's status badge/text. Stage-gate tiles read from the
+  // already-hydrated STATE.snapshots (no fetching here); other tiles (safety
+  // check-in, static links) do their own thing. Snapshot freshness is owned
+  // by hydrateSnapshots, called on load / focus / periodic refresh.
   let urgentCount = 0;
   const tools = STATE._currentTools || TOOLS;
   await Promise.all(tools.map(async (tool) => {
