@@ -352,10 +352,47 @@
   }
 
   /* Tile grid */
+  /* Base tile grid. Safety keeps the responsive auto-fit behavior (its sizing
+     is intentionally left alone). Objective and link tiles get fixed column
+     counts by type — see the scoped rules below. */
   .tile-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 14px;
+  }
+  /* Tile widths standardized by TILE TYPE, not section:
+       Objective tiles (stage-gates / OKR / KPI subsections) → 3 per row.
+       Link tiles (meetings / gantts subsections, and the flat links /
+       analysis / coding sections) → 4 per row.
+     This holds even when both types appear in one section (e.g. Projects),
+     because the rules target the subsection / section data-attributes.
+     minmax(0, 1fr) lets columns shrink below content width so the count stays
+     fixed. Mobile collapses both to a single column (below). */
+  .tile-subsection[data-subsection="stage-gates"] > .tile-grid,
+  .tile-subsection[data-subsection="okr"] > .tile-grid,
+  .tile-subsection[data-subsection="kpi"] > .tile-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .tile-subsection[data-subsection="meetings"] > .tile-grid,
+  .tile-subsection[data-subsection="gantts"] > .tile-grid,
+  .tile-section[data-section="links"] > .tile-grid,
+  .tile-section[data-section="analysis"] > .tile-grid,
+  .tile-section[data-section="coding"] > .tile-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  /* Mobile: collapse the fixed-count grids so tiles aren't cramped. Safety's
+     auto-fit grid already handles narrow widths on its own. */
+  @media (max-width: 640px) {
+    .tile-subsection[data-subsection="stage-gates"] > .tile-grid,
+    .tile-subsection[data-subsection="okr"] > .tile-grid,
+    .tile-subsection[data-subsection="kpi"] > .tile-grid,
+    .tile-subsection[data-subsection="meetings"] > .tile-grid,
+    .tile-subsection[data-subsection="gantts"] > .tile-grid,
+    .tile-section[data-section="links"] > .tile-grid,
+    .tile-section[data-section="analysis"] > .tile-grid,
+    .tile-section[data-section="coding"] > .tile-grid {
+      grid-template-columns: 1fr;
+    }
   }
   .tile {
     display: block;
@@ -489,6 +526,26 @@
   .addtile-vt.selected { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-text); }
   .addtile-vt.disabled { opacity: 0.4; cursor: not-allowed; }
   .addtile-search { width: 100%; margin-bottom: 8px; }
+  /* Bar above the list: select-all button + selection count. */
+  .addtile-listbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .addtile-selectall {
+    font-size: 12px;
+    padding: 3px 10px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .addtile-selectall:hover { border-color: var(--accent); color: var(--accent-text); }
+  .addtile-selectall:disabled { opacity: 0.4; cursor: not-allowed; }
+  .addtile-selcount { font-size: 12px; color: var(--text-subtle); }
   .addtile-list {
     max-height: 280px;
     overflow-y: auto;
@@ -496,7 +553,9 @@
     border-radius: var(--radius);
   }
   .addtile-obj {
-    display: block;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
     width: 100%;
     text-align: left;
     padding: 9px 12px;
@@ -509,6 +568,8 @@
   .addtile-obj:last-child { border-bottom: none; }
   .addtile-obj:hover { background: var(--surface-alt); }
   .addtile-obj.selected { background: var(--accent-bg); color: var(--accent-text); }
+  .addtile-check { margin-top: 2px; flex-shrink: 0; cursor: pointer; }
+  .addtile-obj-text { flex: 1; }
   .addtile-obj .meta { font-size: 11px; color: var(--text-subtle); display: block; margin-top: 2px; }
   .addtile-toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
 
@@ -4295,34 +4356,76 @@ async function addConfiguredTile(tracker, objectiveId, viewType, name) {
   fetchTileStatuses();
 }
 
-// Add-tile modal: pick an objective (single-select, searchable, with an
-// "assigned to me" toggle default-on) and a view type (stage-gate only in
-// Stage 1), then create the tile. Reuses the picker's bin-fetch pattern.
+// Add multiple configured tiles at once for a batch of objectives sharing one
+// view type. Dedups against existing tiles AND within the batch, persists once,
+// hydrates once, renders once. Returns { added, skipped } counts.
+async function addConfiguredTilesBatch(picks, viewType) {
+  if (!STATE.session || !Array.isArray(picks) || !picks.length) return { added: 0, skipped: 0 };
+  const vt = (viewType === 'okr' || viewType === 'kpi') ? viewType : 'stagegate';
+  const tiles = (STATE.session.configuredTiles || []).slice();
+  // Triple-key set of what already exists (and what we add as we go).
+  const seen = new Set(tiles.map(t => `${t.tracker}__${String(t.objectiveId)}__${t.viewType || 'stagegate'}`));
+  let added = 0, skipped = 0;
+  picks.forEach(p => {
+    if (!p || !p.tracker || p.id == null) return;
+    const key = `${p.tracker}__${String(p.id)}__${vt}`;
+    if (seen.has(key)) { skipped++; return; }
+    seen.add(key);
+    tiles.push({ tracker: p.tracker, objectiveId: String(p.id), viewType: vt, name: p.name || '' });
+    added++;
+  });
+  if (!added) return { added: 0, skipped };
+  await saveConfiguredTiles(tiles);
+  // Newly-referenced trackers may not be hydrated yet; hydrate once for all.
+  await hydrateSnapshots(STATE.session);
+  renderTiles();
+  fetchTileStatuses();
+  return { added, skipped };
+}
+
+// Add-tile modal: pick one or more objectives (multi-select with tick boxes +
+// select-all), choose a view type for the batch, and create tiles for all
+// selected. Two independent filter toggles narrow the list: "assigned to me"
+// and (leadership only) "under my leadership" — both apply together (AND).
 async function openAddTileModal() {
+  const leadership = isLeadership(STATE.session);
   openModal(`
-    <h3>Add a tile</h3>
-    <p class="intro">Pick an objective to watch and how to view it. The tile lands in Projects if it's your assigned work, otherwise in Watching.</p>
+    <h3>Add tiles</h3>
+    <p class="intro">Pick one or more objectives to watch and how to view them. Tiles land in Projects if they're your assigned work, otherwise in Watching.</p>
     <div class="addtile-section">
       <span class="addtile-label">View type</span>
       <div class="addtile-viewtypes" id="addtile-viewtypes"></div>
     </div>
     <div class="addtile-section">
-      <span class="addtile-label">Objective</span>
+      <span class="addtile-label">Objectives</span>
       <div class="addtile-toggle-row">
         <input type="checkbox" id="addtile-assigned-only" checked>
         <label for="addtile-assigned-only">Only show objectives assigned to me</label>
       </div>
+      ${leadership ? `
+      <div class="addtile-toggle-row">
+        <input type="checkbox" id="addtile-leadership-only">
+        <label for="addtile-leadership-only">Only show objectives under my leadership</label>
+      </div>` : ''}
       <input type="text" class="addtile-search" id="addtile-search" placeholder="Search objectives…" autocomplete="off">
+      <div class="addtile-listbar">
+        <button type="button" class="addtile-selectall" id="addtile-selectall">Select all</button>
+        <span class="addtile-selcount" id="addtile-selcount"></span>
+      </div>
       <div class="addtile-list" id="addtile-list"><div class="obj-empty">Loading objectives…</div></div>
     </div>
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
-      <button class="btn btn-primary" data-act="add" disabled>Add tile</button>
+      <button class="btn btn-primary" data-act="add" disabled>Add tiles</button>
     </div>
   `, { wide: true });
 
   let selectedView = 'stagegate';
-  let selectedObj = null; // { tracker, id, name }
+  // Multi-select state: Set of "tracker::id" keys. Persists across search/filter
+  // changes (a ticked item that scrolls out of the filtered view stays ticked).
+  const selected = new Set();
+  // Lookup for selected keys → {tracker, id, name} so we can add them later.
+  const itemByKey = new Map();
 
   // Render view-type chips (only ACTIVE_VIEW_TYPES are enabled).
   const vtContainer = document.getElementById('addtile-viewtypes');
@@ -4357,57 +4460,114 @@ async function openAddTileModal() {
     objectives.forEach(obj => {
       const id = projectId(obj);
       if (!id) return;
-      allItems.push({ tracker: tracker.id, trackerName: tracker.name, id: String(id), name: projectName(obj) || `#${id}`, division: obj.division || '' });
+      const item = { tracker: tracker.id, trackerName: tracker.name, id: String(id), name: projectName(obj) || `#${id}`, division: obj.division || '' };
+      allItems.push(item);
+      itemByKey.set(`${tracker.id}::${id}`, { tracker: item.tracker, id: item.id, name: item.name });
     });
   });
 
   const assignedSet = new Set((STATE.session.assignedObjectives || []).map(a => `${a.tracker}::${a.id}`));
+  // Trackers the user leads (for the leadership-only filter).
+  const ledTrackerIds = new Set(trackersLed(STATE.session).map(t => t.id));
+
   const addBtn = document.querySelector('[data-act="add"]');
   const searchEl = document.getElementById('addtile-search');
   const assignedOnlyEl = document.getElementById('addtile-assigned-only');
+  const leadershipOnlyEl = document.getElementById('addtile-leadership-only'); // null if not leadership
+  const selectAllBtn = document.getElementById('addtile-selectall');
+  const selCountEl = document.getElementById('addtile-selcount');
 
-  function renderList() {
+  // Compute the currently visible items given search + both toggles.
+  function visibleItems() {
     const q = (searchEl.value || '').toLowerCase().trim();
     const assignedOnly = assignedOnlyEl.checked;
+    const leadershipOnly = !!(leadershipOnlyEl && leadershipOnlyEl.checked);
     let items = allItems;
     if (assignedOnly) items = items.filter(it => assignedSet.has(`${it.tracker}::${it.id}`));
+    if (leadershipOnly) items = items.filter(it => ledTrackerIds.has(it.tracker));
     if (q) items = items.filter(it =>
       it.name.toLowerCase().includes(q) ||
       it.trackerName.toLowerCase().includes(q) ||
       (it.division && it.division.toLowerCase().includes(q))
     );
+    return items;
+  }
+
+  // Update the Add button, selection count, and select-all label/state to
+  // reflect current selection and the visible set.
+  function syncControls(items) {
+    const vis = items || visibleItems();
+    addBtn.disabled = selected.size === 0;
+    addBtn.textContent = selected.size > 1 ? `Add ${selected.size} tiles` : 'Add tiles';
+    selCountEl.textContent = selected.size ? `${selected.size} selected` : '';
+    // Select-all flips to Unselect-all when every visible item is selected.
+    const allVisibleSelected = vis.length > 0 && vis.every(it => selected.has(`${it.tracker}::${it.id}`));
+    selectAllBtn.textContent = allVisibleSelected ? 'Unselect all' : 'Select all';
+    selectAllBtn.disabled = vis.length === 0;
+    selectAllBtn.dataset.mode = allVisibleSelected ? 'unselect' : 'select';
+  }
+
+  function renderList() {
+    const items = visibleItems();
     if (!items.length) {
-      listEl.innerHTML = `<div class="obj-empty">${assignedOnly ? 'No assigned objectives match. Uncheck the filter to watch others.' : 'No objectives match.'}</div>`;
+      const assignedOnly = assignedOnlyEl.checked;
+      const leadershipOnly = !!(leadershipOnlyEl && leadershipOnlyEl.checked);
+      const hint = (assignedOnly || leadershipOnly)
+        ? 'No objectives match the current filters. Loosen them to see more.'
+        : 'No objectives match.';
+      listEl.innerHTML = `<div class="obj-empty">${hint}</div>`;
+      syncControls(items);
       return;
     }
     listEl.innerHTML = items.map(it => {
       const key = `${it.tracker}::${it.id}`;
-      const sel = selectedObj && `${selectedObj.tracker}::${selectedObj.id}` === key ? ' selected' : '';
+      const checked = selected.has(key) ? ' checked' : '';
+      const selCls = selected.has(key) ? ' selected' : '';
       const metaBits = [it.trackerName, it.division].filter(Boolean).join(' · ');
-      return `<button type="button" class="addtile-obj${sel}" data-key="${escAttr(key)}" data-tracker="${escAttr(it.tracker)}" data-id="${escAttr(it.id)}" data-name="${escAttr(it.name)}">
-        ${escText(it.name)}<span class="meta">${escText(metaBits)}</span>
-      </button>`;
+      return `<label class="addtile-obj${selCls}" data-key="${escAttr(key)}">
+        <input type="checkbox" class="addtile-check"${checked}>
+        <span class="addtile-obj-text">${escText(it.name)}<span class="meta">${escText(metaBits)}</span></span>
+      </label>`;
     }).join('');
-    listEl.querySelectorAll('.addtile-obj').forEach(btn => {
-      btn.addEventListener('click', () => {
-        selectedObj = { tracker: btn.dataset.tracker, id: btn.dataset.id, name: btn.dataset.name };
-        listEl.querySelectorAll('.addtile-obj').forEach(b => b.classList.toggle('selected', b === btn));
-        addBtn.disabled = false;
+    listEl.querySelectorAll('.addtile-obj').forEach(row => {
+      const key = row.dataset.key;
+      const check = row.querySelector('.addtile-check');
+      check.addEventListener('change', () => {
+        if (check.checked) selected.add(key); else selected.delete(key);
+        row.classList.toggle('selected', check.checked);
+        syncControls();
       });
     });
+    syncControls(items);
   }
+
   renderList();
   searchEl.addEventListener('input', renderList);
-  assignedOnlyEl.addEventListener('change', () => { selectedObj = null; addBtn.disabled = true; renderList(); });
+  assignedOnlyEl.addEventListener('change', renderList);
+  if (leadershipOnlyEl) leadershipOnlyEl.addEventListener('change', renderList);
+
+  // Select-all / unselect-all toggles every CURRENTLY VISIBLE item.
+  selectAllBtn.addEventListener('click', () => {
+    const vis = visibleItems();
+    const mode = selectAllBtn.dataset.mode;
+    vis.forEach(it => {
+      const key = `${it.tracker}::${it.id}`;
+      if (mode === 'unselect') selected.delete(key); else selected.add(key);
+    });
+    renderList();
+  });
 
   document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
   addBtn.addEventListener('click', async () => {
-    if (!selectedObj) return;
+    if (selected.size === 0) return;
     addBtn.disabled = true;
     addBtn.textContent = 'Adding…';
-    await addConfiguredTile(selectedObj.tracker, selectedObj.id, selectedView, selectedObj.name);
+    const picks = [...selected].map(k => itemByKey.get(k)).filter(Boolean);
+    const { added, skipped } = await addConfiguredTilesBatch(picks, selectedView);
     closeModal();
-    toast('Tile added.', 'success');
+    if (added && skipped) toast(`Added ${added} tile${added === 1 ? '' : 's'} (${skipped} already present).`, 'success');
+    else if (added) toast(`Added ${added} tile${added === 1 ? '' : 's'}.`, 'success');
+    else toast('Those tiles already exist.', 'subtle');
   });
 }
 
