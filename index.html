@@ -409,6 +409,106 @@
   .tile-badge.watch    { background: #FAEEDA; color: #854F0B; }
   .tile-badge.atrisk   { background: #FCEBEB; color: #A32D2D; }
   .tile-badge.complete { background: var(--surface-alt); color: var(--text-subtle); }
+
+  /* ---- Edit mode ---- */
+  .edit-banner {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    background: var(--accent-bg);
+    border: 0.5px solid var(--accent);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--accent-text);
+  }
+  body.edit-mode .edit-banner { display: flex; }
+  #header-edit-btn.active {
+    background: var(--accent-bg);
+    color: var(--accent-text);
+  }
+  /* Per-tile remove control — only visible in edit mode, only on removable tiles. */
+  .tile-remove {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: none;
+    background: var(--danger);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    padding: 0;
+  }
+  body.edit-mode .tile.removable { position: relative; }
+  body.edit-mode .tile.removable .tile-remove { display: flex; }
+  body.edit-mode .tile.removable { outline: 1px dashed var(--border-strong); outline-offset: 2px; }
+  /* Add-tile button — a dashed placeholder tile shown in edit mode. */
+  .tile-add {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 90px;
+    border: 1.5px dashed var(--border-strong);
+    border-radius: var(--radius-lg);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    width: 100%;
+  }
+  .tile-add:hover { border-color: var(--accent); color: var(--accent-text); background: var(--accent-bg); }
+  body.edit-mode .tile-add { display: flex; }
+  /* Add-tile modal bits */
+  .addtile-section { margin-bottom: 16px; }
+  .addtile-label { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 8px; display: block; }
+  .addtile-viewtypes { display: flex; gap: 8px; flex-wrap: wrap; }
+  .addtile-vt {
+    flex: 1;
+    min-width: 100px;
+    padding: 10px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    text-align: center;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .addtile-vt.selected { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-text); }
+  .addtile-vt.disabled { opacity: 0.4; cursor: not-allowed; }
+  .addtile-search { width: 100%; margin-bottom: 8px; }
+  .addtile-list {
+    max-height: 280px;
+    overflow-y: auto;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+  }
+  .addtile-obj {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 9px 12px;
+    border: none;
+    border-bottom: 0.5px solid var(--border);
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .addtile-obj:last-child { border-bottom: none; }
+  .addtile-obj:hover { background: var(--surface-alt); }
+  .addtile-obj.selected { background: var(--accent-bg); color: var(--accent-text); }
+  .addtile-obj .meta { font-size: 11px; color: var(--text-subtle); display: block; margin-top: 2px; }
+  .addtile-toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
   .tile-desc {
     font-size: 13px;
     color: var(--text-muted);
@@ -1086,6 +1186,9 @@
       <span class="brand-name">Celadyne Employee Hub</span>
     </div>
     <div class="header-right">
+      <button class="btn btn-icon" id="header-edit-btn" aria-label="Edit dashboard" title="Edit dashboard">
+        <i class="ti ti-pencil" aria-hidden="true" style="font-size: 18px;"></i>
+      </button>
       <div class="user-pill" id="header-user-pill">
         <span class="avatar" id="header-avatar">--</span>
         <span id="header-email">&mdash;</span>
@@ -1099,6 +1202,10 @@
     <div class="greeting-row">
       <h1 id="hub-greeting">Welcome back</h1>
       <div class="meta" id="hub-greeting-meta">&nbsp;</div>
+    </div>
+    <div class="edit-banner" id="edit-banner">
+      <span>Edit mode — add tiles to watch objectives, or remove tiles you've added. Assigned-project tiles can't be removed.</span>
+      <button class="btn btn-sm" id="edit-done-btn">Done</button>
     </div>
     <div id="tile-sections"></div>
   </div>
@@ -1533,6 +1640,7 @@ const STATE = {
   usersRecord: null,    // { users: [...], schemaVersion }
   snapshots: {},        // trackerId → computedStatus | null (aggregate-fetch pool)
   snapshotsHydratedAt: 0, // timestamp of last successful hydration
+  editMode: false,      // dashboard edit mode (add/remove configured tiles)
   bootstrapping: false,
   loginThrottleUntil: 0
 };
@@ -1675,6 +1783,19 @@ async function jbFetchUsers() {
     if (u.orgRole !== 'lead' && u.orgRole !== 'cto') u.orgRole = 'ic';
     u.leadOf = Array.isArray(u.leadOf) ? u.leadOf.filter(x => typeof x === 'string') : [];
 
+    // Configured tiles (custom-tile build). Each entry:
+    //   { tracker, objectiveId, viewType, name }
+    // viewType ∈ 'stagegate' | 'okr' | 'kpi' (only 'stagegate' active in Stage 1).
+    // `name` is the snapshot-at-add-time display fallback (like assignedObjectives).
+    // Normalised defensively: drop malformed entries, coerce id to string.
+    u.configuredTiles = Array.isArray(u.configuredTiles)
+      ? u.configuredTiles.map(t => {
+          if (!t || typeof t !== 'object' || t.tracker == null || t.objectiveId == null) return null;
+          const vt = (t.viewType === 'okr' || t.viewType === 'kpi') ? t.viewType : 'stagegate';
+          return { tracker: String(t.tracker), objectiveId: String(t.objectiveId), viewType: vt, name: t.name || '' };
+        }).filter(Boolean)
+      : [];
+
     if (!Array.isArray(u.assignedObjectives)) {
       u.assignedObjectives = [];
       return;
@@ -1748,6 +1869,23 @@ function leadsTracker(session, trackerId) {
   if (session.orgRole === 'cto') return true; // CTO leads everything
   if (session.orgRole !== 'lead') return false;
   return Array.isArray(session.leadOf) && session.leadOf.includes(trackerId);
+}
+// True if the user has at least one assignment in the given tracker.
+function isAssignedToTracker(session, trackerId) {
+  if (!session || !Array.isArray(session.assignedObjectives)) return false;
+  return session.assignedObjectives.some(a => a && a.tracker === trackerId);
+}
+// Route an objective tile to a section based on the user's relationship to its
+// tracker. Computed fresh each render (stored tiles are relationship-agnostic):
+//   assigned to the tracker → 'projects'
+//   else leads the tracker  → 'leadership'
+//   else                    → 'watching'
+// Stage 1 note: 'leadership' routing is computed but those tiles are suppressed
+// at generation time until Stage 2 restructures the Leadership section.
+function objectiveTileSection(session, trackerId) {
+  if (isAssignedToTracker(session, trackerId)) return 'projects';
+  if (leadsTracker(session, trackerId)) return 'leadership';
+  return 'watching';
 }
 // Trackers this user has leadership over (CTO → all configured; Lead → leadOf).
 function trackersLed(session) {
@@ -1959,6 +2097,7 @@ async function createUserRecord(email, pin, role) {
     salt,
     iterations: STATE.config.pbkdf2Iterations,
     assignedObjectives: [],
+    configuredTiles: [],
     createdAt: Date.now(),
     lastLogin: null,
     disabled: false
@@ -1979,6 +2118,7 @@ function makeSession(user, days) {
     orgRole: (user.orgRole === 'lead' || user.orgRole === 'cto') ? user.orgRole : 'ic',
     leadOf: Array.isArray(user.leadOf) ? user.leadOf.slice() : [],
     assignedObjectives: Array.isArray(user.assignedObjectives) ? user.assignedObjectives.slice() : [],
+    configuredTiles: Array.isArray(user.configuredTiles) ? user.configuredTiles.slice() : [],
     issuedAt: now,
     expiresAt: now + sessionDays * 24 * 60 * 60 * 1000,
     tokenId: (crypto.randomUUID && crypto.randomUUID()) || generateSalt(8)
@@ -2461,30 +2601,71 @@ function buildToolList(session) {
     });
   }
 
-  if (!assignments.length) return list;
+  // 4) Objective tiles — assignment auto-tiles + user-configured tiles.
+  //
+  // Each objective tile is keyed by the triple {tracker, objectiveId, viewType}.
+  // Auto-tiles (one stage-gate tile per assignment, Path A) are generated first;
+  // configured tiles that duplicate an existing triple are suppressed.
+  //
+  // Section is derived per tile via objectiveTileSection (assigned→projects,
+  // leads→leadership, else→watching). Stage 1: leadership-routed tiles and
+  // non-stagegate view types are suppressed (handled in Stage 2 / Stage 4).
+  const seenTriples = new Set();
+  const tripleKey = (tracker, objId, viewType) => `${tracker}__${objId}__${viewType}`;
 
-  // 4) Stage-gate tiles: one per assigned objective
-  assignments.forEach(a => {
-    const tracker = findTracker(a.tracker);
-    const trackerName = tracker ? tracker.name : a.tracker;
-    // Prefer the tracker's stage-gate page; fall back to the Gantt page when
-    // no trackerUrl is configured (e.g., company-wide bins that don't have
-    // a per-bin receiving page). Skips entirely only if neither URL exists.
-    const url = stageGateUrlFor(tracker, a.id) || ganttUrlFor(tracker);
-    if (!url) return;
-    const display = a.name || `#${a.id}`;
-    list.push({
-      id: `stage-gate__${a.tracker}__${a.id}`,
+  // Helper: build one objective tile object (or null if it can't/shouldn't render).
+  // `removable` marks user-configured tiles (vs assignment auto-tiles) — only
+  // those get a remove control in edit mode.
+  function buildObjectiveTile(tracker, objId, viewType, nameFallback, removable) {
+    const trackerObj = findTracker(tracker);
+    if (!trackerObj) return null; // tracker no longer configured
+    const section = objectiveTileSection(session, tracker);
+    // Stage 1 limits: only stagegate view renders, and leadership routing is
+    // deferred to Stage 2 (those tiles are suppressed for now).
+    if (viewType !== 'stagegate') return null;
+    if (section === 'leadership') return null;
+    const url = stageGateUrlFor(trackerObj, objId) || ganttUrlFor(trackerObj);
+    if (!url) return null;
+    const display = nameFallback || `#${objId}`;
+    const vt = VIEW_TYPES[viewType] || VIEW_TYPES.stagegate;
+    return {
+      id: `obj__${viewType}__${tracker}__${objId}`,
       name: shortLabel(display, 32),
-      // Initial subtitle: just the bin name. The runner replaces this with
-      // "Bin · Parent" once the company-bin snapshot is fetched.
-      description: trackerName,
-      icon: 'stack-2',
+      description: trackerObj.name,
+      icon: vt.icon,
       url,
-      section: 'projects',
-      titleAttr: a.name ? `Stage-gate for: ${a.name} (#${a.id})` : `Stage-gate for #${a.id}`,
-      fetchStatus: async () => fetchStageGateStatus(a.tracker, a.id, a.name)
-    });
+      section,
+      removable: !!removable,
+      // Carry the triple so edit-mode remove can identify this tile.
+      objTriple: { tracker, objectiveId: String(objId), viewType },
+      titleAttr: nameFallback ? `${vt.label} for: ${nameFallback} (#${objId})` : `${vt.label} for #${objId}`,
+      fetchStatus: async () => fetchStageGateStatus(tracker, objId, nameFallback)
+    };
+  }
+
+  // 4a) Assignment auto-tiles (Path A): one stage-gate tile per assignment.
+  // Not removable (removing would just regenerate from the assignment).
+  assignments.forEach(a => {
+    const key = tripleKey(a.tracker, a.id, 'stagegate');
+    if (seenTriples.has(key)) return;
+    const tile = buildObjectiveTile(a.tracker, a.id, 'stagegate', a.name, false);
+    if (!tile) return;
+    seenTriples.add(key);
+    list.push(tile);
+  });
+
+  // 4b) User-configured tiles. Dedup against auto-tiles and each other.
+  // Removable in edit mode.
+  const configured = (session && session.configuredTiles) || [];
+  configured.forEach(ct => {
+    if (!ct || !ct.tracker || ct.objectiveId == null) return;
+    const viewType = ct.viewType || 'stagegate';
+    const key = tripleKey(ct.tracker, ct.objectiveId, viewType);
+    if (seenTriples.has(key)) return;
+    const tile = buildObjectiveTile(ct.tracker, ct.objectiveId, viewType, ct.name, true);
+    if (!tile) return;
+    seenTriples.add(key);
+    list.push(tile);
   });
 
   // Visibility filter: tiles can declare access requirements via two optional
@@ -2572,7 +2753,7 @@ function saveCachedSnapshot(trackerId, snapshot) {
 //   - the company tracker (always — powers the health overlay on every tile)
 //   - trackers the user is assigned objectives in (their stage-gate tiles)
 //   - trackers the user leads (the leadership panel)
-//   - (future) trackers referenced by watched objectives
+//   - trackers referenced by configured (watch/custom) tiles
 // Returns an array of unique tracker IDs that actually exist in config.
 function computeNeededTrackers(session) {
   const ids = new Set();
@@ -2583,8 +2764,11 @@ function computeNeededTrackers(session) {
       if (a && a.tracker) ids.add(a.tracker);
     });
     trackersLed(session).forEach(t => ids.add(t.id));
-    // FUTURE (watch tiles): add trackers referenced by session.watchedObjectives
-    // (session.watchedObjectives || []).forEach(w => { if (w && w.tracker) ids.add(w.tracker); });
+    // Configured tiles (custom-tile build): include each tile's tracker so its
+    // snapshot is hydrated and the tile can render from STATE.snapshots.
+    (session.configuredTiles || []).forEach(t => {
+      if (t && t.tracker) ids.add(t.tracker);
+    });
   }
   // Keep only IDs that resolve to a configured tracker.
   const configured = new Set(getConfiguredTrackers().map(t => t.id));
@@ -3233,6 +3417,7 @@ const TILE_SECTIONS = [
   { id: 'safety',     label: 'Safety' },
   { id: 'projects',   label: 'Projects' },
   { id: 'leadership', label: 'Leadership' },
+  { id: 'watching',   label: 'Watching' },
   { id: 'analysis',   label: 'Analysis' },
   { id: 'links',      label: 'Useful links' },
   { id: 'coding',     label: 'Coding resources' }
@@ -3242,10 +3427,31 @@ const TILE_SECTIONS = [
 // these by id prefix; anything that doesn't match falls into a fallback
 // unlabeled grid before the labeled subsections (so future tiles won't be lost).
 const PROJECTS_SUBSECTIONS = [
-  { id: 'stage-gates', label: 'Stage-gates', match: id => id.startsWith('stage-gate__') },
+  { id: 'stage-gates', label: 'Stage-gates', match: id => id.startsWith('stage-gate__') || id.startsWith('obj__stagegate__') },
+  { id: 'okr',         label: 'OKR',         match: id => id.startsWith('obj__okr__') },
+  { id: 'kpi',         label: 'KPIs',        match: id => id.startsWith('obj__kpi__') },
   { id: 'meetings',    label: 'Meetings',    match: id => id.startsWith('meeting__') },
   { id: 'gantts',      label: 'Gantts',      match: id => id.startsWith('gantt__') }
 ];
+
+// Sub-sections for objective tiles in the Watching section (and, in Stage 2,
+// Leadership). Same view-type grouping as Projects, minus the tracker-level
+// meetings/gantts (which never route to Watching).
+const OBJECTIVE_SUBSECTIONS = [
+  { id: 'stage-gates', label: 'Stage-gates', match: id => id.startsWith('stage-gate__') || id.startsWith('obj__stagegate__') },
+  { id: 'okr',         label: 'OKR',         match: id => id.startsWith('obj__okr__') },
+  { id: 'kpi',         label: 'KPIs',        match: id => id.startsWith('obj__kpi__') }
+];
+
+// View type labels/icons for objective tiles.
+const VIEW_TYPES = {
+  stagegate: { label: 'Stage-gates', icon: 'stack-2' },
+  okr:       { label: 'OKR',         icon: 'target-arrow' },
+  kpi:       { label: 'KPIs',        icon: 'chart-dots' }
+};
+// View types selectable in the picker right now. Stage 1: stage-gate only.
+// Stage 4 expands this to ['stagegate', 'okr', 'kpi'].
+const ACTIVE_VIEW_TYPES = ['stagegate'];
 
 // Renders a single tile element and returns it. Shared between flat sections
 // and Projects subsections.
@@ -3265,12 +3471,21 @@ function renderTileEl(tool) {
   }
   if (tool.titleAttr) a.title = tool.titleAttr;
   a.dataset.toolId = tool.id;
-  const isStageGate = typeof tool.id === 'string' && tool.id.startsWith('stage-gate__');
+  // Removable (user-configured) tiles get a class + remove button, shown only
+  // in edit mode via CSS. The button carries the triple for removal.
+  if (tool.removable && tool.objTriple) {
+    a.classList.add('removable');
+  }
+  // Stage-gate-style tiles (assignment auto-tiles AND configured stagegate-view
+  // tiles) get the badge + gate-dot slots populated async by fetchTileStatuses.
+  const isStageGate = typeof tool.id === 'string' &&
+    (tool.id.startsWith('stage-gate__') || tool.id.startsWith('obj__stagegate__'));
   // Stage-gate tiles get extra slots populated async by fetchTileStatuses:
   //   data-badge — status tag (On track / Watch / At risk / Complete)
   //   data-meta  — subtitle becomes "Bin · Parent Initiative"
   // Non-stage-gate tiles use the static description.
   a.innerHTML = `
+    ${tool.removable && tool.objTriple ? `<button class="tile-remove" data-remove-tile aria-label="Remove tile" title="Remove tile">&times;</button>` : ''}
     <div class="tile-head">
       <i class="ti ti-${tool.icon} tile-icon" aria-hidden="true"></i>
       <span class="tile-name">${tool.name}</span>
@@ -3283,6 +3498,18 @@ function renderTileEl(tool) {
     </div>
     ${isStageGate ? `<div class="tile-gates" data-gates="${tool.id}"></div>` : ''}
   `;
+  // Wire the remove button (edit mode). Stop the click from following the tile
+  // link, then remove the configured tile and re-render.
+  if (tool.removable && tool.objTriple) {
+    const btn = a.querySelector('[data-remove-tile]');
+    if (btn) {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        removeConfiguredTile(tool.objTriple);
+      });
+    }
+  }
   return a;
 }
 
@@ -3349,7 +3576,12 @@ function renderTiles() {
     }
 
     const sectionTools = tools.filter(t => (t.section || 'links') === section.id);
-    if (!sectionTools.length) return; // hide empty sections
+    // Sections that support adding tiles via edit mode (Projects, Watching).
+    // These render even when empty *if* edit mode is on, so the user has an
+    // add-tile entry point (otherwise an empty Watching section would be hidden
+    // and there'd be nowhere to add the first watch tile).
+    const supportsAdd = section.id === 'projects' || section.id === 'watching';
+    if (!sectionTools.length && !(supportsAdd && STATE.editMode)) return; // hide empty sections
 
     const wrap = document.createElement('section');
     wrap.className = 'tile-section';
@@ -3358,18 +3590,23 @@ function renderTiles() {
     const head = buildCollapsibleHead('h2', 'tile-section-head', section.label, `section/${section.id}`, wrap);
     wrap.appendChild(head);
 
-    if (section.id === 'projects') {
-      // Projects has subsections (Stage-gates / Meetings / Gantts).
+    // Sections that render as type-grouped subsections rather than a flat grid.
+    // Projects uses the full set (stage-gates/okr/kpi/meetings/gantts); Watching
+    // uses the objective-only set (stage-gates/okr/kpi). Others render flat.
+    const subsectionDef =
+      section.id === 'projects' ? PROJECTS_SUBSECTIONS :
+      section.id === 'watching' ? OBJECTIVE_SUBSECTIONS :
+      null;
+
+    if (subsectionDef) {
       // Bucket tiles by id prefix; anything unmatched goes into a leading
       // unlabeled grid so future tile types aren't accidentally hidden.
-      const buckets = PROJECTS_SUBSECTIONS.map(sub => ({ sub, tiles: [] }));
+      const buckets = subsectionDef.map(sub => ({ sub, tiles: [] }));
       const other = [];
       sectionTools.forEach(t => {
         const bucket = buckets.find(b => b.sub.match(t.id));
         (bucket ? bucket.tiles : other).push(t);
       });
-      // Unmatched tiles render first (no header) so users see them but they
-      // don't pretend to belong to a known group.
       if (other.length) {
         const grid = document.createElement('div');
         grid.className = 'tile-grid';
@@ -3381,7 +3618,7 @@ function renderTiles() {
         const subWrap = document.createElement('div');
         subWrap.className = 'tile-subsection';
         subWrap.dataset.subsection = sub.id;
-        const subHead = buildCollapsibleHead('h3', 'tile-subsection-head', sub.label, `section/projects/sub/${sub.id}`, subWrap);
+        const subHead = buildCollapsibleHead('h3', 'tile-subsection-head', sub.label, `section/${section.id}/sub/${sub.id}`, subWrap);
         subWrap.appendChild(subHead);
         const grid = document.createElement('div');
         grid.className = 'tile-grid';
@@ -3397,9 +3634,213 @@ function renderTiles() {
       wrap.appendChild(grid);
     }
 
+    // Edit-mode add-tile button for Projects and Watching. Hidden by CSS unless
+    // body.edit-mode is set; we render it whenever the section supports adding
+    // so toggling edit mode doesn't require a re-render to reveal it.
+    if (supportsAdd) {
+      const addBtn = document.createElement('button');
+      addBtn.className = 'tile-add';
+      addBtn.innerHTML = `<i class="ti ti-plus" aria-hidden="true"></i> Add a tile`;
+      addBtn.addEventListener('click', () => openAddTileModal());
+      wrap.appendChild(addBtn);
+    }
+
     root.appendChild(wrap);
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edit mode — add/remove configured (watch/custom) tiles.
+//
+// Stage 1 scope: add stage-gate watch tiles for any objective; remove tiles the
+// user previously added. Assignment auto-tiles are not removable. Toggling edit
+// mode flips body.edit-mode (CSS reveals remove buttons + add-tile placeholders)
+// and the header button's active state.
+// ─────────────────────────────────────────────────────────────────────────────
+function setEditMode(on) {
+  STATE.editMode = !!on;
+  document.body.classList.toggle('edit-mode', STATE.editMode);
+  const btn = document.getElementById('header-edit-btn');
+  if (btn) btn.classList.toggle('active', STATE.editMode);
+  // Re-render so empty Projects/Watching sections appear (or disappear) with
+  // their add-tile entry points as edit mode turns on/off.
+  renderTiles();
+  fetchTileStatuses();
+}
+function toggleEditMode() { setEditMode(!STATE.editMode); }
+
+// Persist the current session's configuredTiles to the user record, update the
+// in-memory session, and re-render. Shared by add and remove.
+async function saveConfiguredTiles(nextTiles) {
+  // Update session immediately so the UI reflects the change without waiting
+  // on the network round-trip.
+  STATE.session.configuredTiles = nextTiles;
+  saveSession(STATE.session);
+  // Persist to the user record.
+  try {
+    const record = STATE.usersRecord || await jbFetchUsers();
+    const me = findUser(record, STATE.session.email);
+    if (me) {
+      me.configuredTiles = nextTiles.slice();
+      await jbSaveUsers(record);
+      STATE.usersRecord = record;
+    }
+  } catch (err) {
+    console.warn('Failed to persist configured tiles:', err);
+    toast('Saved on this device; sync failed. Will retry on next change.', 'error');
+  }
+}
+
+// Remove a configured tile matching the given triple.
+async function removeConfiguredTile(triple) {
+  if (!triple || !STATE.session) return;
+  const tiles = (STATE.session.configuredTiles || []).filter(t =>
+    !(t.tracker === triple.tracker &&
+      String(t.objectiveId) === String(triple.objectiveId) &&
+      (t.viewType || 'stagegate') === triple.viewType)
+  );
+  await saveConfiguredTiles(tiles);
+  renderTiles();
+  fetchTileStatuses();
+}
+
+// Add a configured tile. No-op if the triple already exists (dedup). May need
+// to hydrate a newly-referenced tracker before the tile can show real data.
+async function addConfiguredTile(tracker, objectiveId, viewType, name) {
+  if (!STATE.session) return;
+  const vt = (viewType === 'okr' || viewType === 'kpi') ? viewType : 'stagegate';
+  const exists = (STATE.session.configuredTiles || []).some(t =>
+    t.tracker === tracker &&
+    String(t.objectiveId) === String(objectiveId) &&
+    (t.viewType || 'stagegate') === vt
+  );
+  if (exists) { toast('That tile already exists.', 'subtle'); return; }
+  const tiles = (STATE.session.configuredTiles || []).slice();
+  tiles.push({ tracker, objectiveId: String(objectiveId), viewType: vt, name: name || '' });
+  await saveConfiguredTiles(tiles);
+  // The new tile's tracker may not have been hydrated yet (watching a tracker
+  // the user has no other relationship to). Hydrate, then render.
+  await hydrateSnapshots(STATE.session);
+  renderTiles();
+  fetchTileStatuses();
+}
+
+// Add-tile modal: pick an objective (single-select, searchable, with an
+// "assigned to me" toggle default-on) and a view type (stage-gate only in
+// Stage 1), then create the tile. Reuses the picker's bin-fetch pattern.
+async function openAddTileModal() {
+  openModal(`
+    <h3>Add a tile</h3>
+    <p class="intro">Pick an objective to watch and how to view it. The tile lands in Projects if it's your assigned work, otherwise in Watching.</p>
+    <div class="addtile-section">
+      <span class="addtile-label">View type</span>
+      <div class="addtile-viewtypes" id="addtile-viewtypes"></div>
+    </div>
+    <div class="addtile-section">
+      <span class="addtile-label">Objective</span>
+      <div class="addtile-toggle-row">
+        <input type="checkbox" id="addtile-assigned-only" checked>
+        <label for="addtile-assigned-only">Only show objectives assigned to me</label>
+      </div>
+      <input type="text" class="addtile-search" id="addtile-search" placeholder="Search objectives…" autocomplete="off">
+      <div class="addtile-list" id="addtile-list"><div class="obj-empty">Loading objectives…</div></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" data-act="cancel">Cancel</button>
+      <button class="btn btn-primary" data-act="add" disabled>Add tile</button>
+    </div>
+  `, { wide: true });
+
+  let selectedView = 'stagegate';
+  let selectedObj = null; // { tracker, id, name }
+
+  // Render view-type chips (only ACTIVE_VIEW_TYPES are enabled).
+  const vtContainer = document.getElementById('addtile-viewtypes');
+  vtContainer.innerHTML = Object.keys(VIEW_TYPES).map(vt => {
+    const active = ACTIVE_VIEW_TYPES.includes(vt);
+    const sel = vt === selectedView ? ' selected' : '';
+    const dis = active ? '' : ' disabled';
+    const soon = active ? '' : ' <span style="font-size:10px;">(soon)</span>';
+    return `<div class="addtile-vt${sel}${dis}" data-vt="${vt}">${VIEW_TYPES[vt].label}${soon}</div>`;
+  }).join('');
+  vtContainer.querySelectorAll('.addtile-vt').forEach(chip => {
+    chip.addEventListener('click', () => {
+      if (chip.classList.contains('disabled')) return;
+      selectedView = chip.dataset.vt;
+      vtContainer.querySelectorAll('.addtile-vt').forEach(c => c.classList.toggle('selected', c === chip));
+    });
+  });
+
+  // Fetch objectives from all configured trackers (same pattern as the picker).
+  const trackers = getConfiguredTrackers();
+  const listEl = document.getElementById('addtile-list');
+  const results = await Promise.all(trackers.map(async t => {
+    try {
+      const data = await jbFetchTracker(t.id);
+      return { tracker: t, objectives: objectivesIn(data) };
+    } catch (e) {
+      return { tracker: t, objectives: [] };
+    }
+  }));
+  const allItems = [];
+  results.forEach(({ tracker, objectives }) => {
+    objectives.forEach(obj => {
+      const id = projectId(obj);
+      if (!id) return;
+      allItems.push({ tracker: tracker.id, trackerName: tracker.name, id: String(id), name: projectName(obj) || `#${id}`, division: obj.division || '' });
+    });
+  });
+
+  const assignedSet = new Set((STATE.session.assignedObjectives || []).map(a => `${a.tracker}::${a.id}`));
+  const addBtn = document.querySelector('[data-act="add"]');
+  const searchEl = document.getElementById('addtile-search');
+  const assignedOnlyEl = document.getElementById('addtile-assigned-only');
+
+  function renderList() {
+    const q = (searchEl.value || '').toLowerCase().trim();
+    const assignedOnly = assignedOnlyEl.checked;
+    let items = allItems;
+    if (assignedOnly) items = items.filter(it => assignedSet.has(`${it.tracker}::${it.id}`));
+    if (q) items = items.filter(it =>
+      it.name.toLowerCase().includes(q) ||
+      it.trackerName.toLowerCase().includes(q) ||
+      (it.division && it.division.toLowerCase().includes(q))
+    );
+    if (!items.length) {
+      listEl.innerHTML = `<div class="obj-empty">${assignedOnly ? 'No assigned objectives match. Uncheck the filter to watch others.' : 'No objectives match.'}</div>`;
+      return;
+    }
+    listEl.innerHTML = items.map(it => {
+      const key = `${it.tracker}::${it.id}`;
+      const sel = selectedObj && `${selectedObj.tracker}::${selectedObj.id}` === key ? ' selected' : '';
+      const metaBits = [it.trackerName, it.division].filter(Boolean).join(' · ');
+      return `<button type="button" class="addtile-obj${sel}" data-key="${escAttr(key)}" data-tracker="${escAttr(it.tracker)}" data-id="${escAttr(it.id)}" data-name="${escAttr(it.name)}">
+        ${escText(it.name)}<span class="meta">${escText(metaBits)}</span>
+      </button>`;
+    }).join('');
+    listEl.querySelectorAll('.addtile-obj').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedObj = { tracker: btn.dataset.tracker, id: btn.dataset.id, name: btn.dataset.name };
+        listEl.querySelectorAll('.addtile-obj').forEach(b => b.classList.toggle('selected', b === btn));
+        addBtn.disabled = false;
+      });
+    });
+  }
+  renderList();
+  searchEl.addEventListener('input', renderList);
+  assignedOnlyEl.addEventListener('change', () => { selectedObj = null; addBtn.disabled = true; renderList(); });
+
+  document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
+  addBtn.addEventListener('click', async () => {
+    if (!selectedObj) return;
+    addBtn.disabled = true;
+    addBtn.textContent = 'Adding…';
+    await addConfiguredTile(selectedObj.tracker, selectedObj.id, selectedView, selectedObj.name);
+    closeModal();
+    toast('Tile added.', 'success');
+  });
+}
+
 async function fetchTileStatuses() {
   // Renders each tile's status badge/text. Stage-gate tiles read from the
   // already-hydrated STATE.snapshots (no fetching here); other tiles (safety
@@ -3473,6 +3914,12 @@ function bindDrawer() {
   document.getElementById('header-settings-btn').addEventListener('click', openDrawer);
   document.getElementById('drawer-close').addEventListener('click', closeDrawer);
   document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
+
+  // Edit-mode toggle (header pencil) + Done button in the edit banner.
+  const editBtn = document.getElementById('header-edit-btn');
+  if (editBtn) editBtn.addEventListener('click', toggleEditMode);
+  const editDone = document.getElementById('edit-done-btn');
+  if (editDone) editDone.addEventListener('click', () => setEditMode(false));
  
   document.getElementById('drawer-signout').addEventListener('click', () => {
     confirmModal({
