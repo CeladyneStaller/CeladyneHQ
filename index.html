@@ -37,6 +37,7 @@
     --radius: 8px;
     --radius-lg: 12px;
     --radius-pill: 999px;
+    --indent-step: 16px;
     --shadow-card: 0 1px 0 rgba(15,15,14,0.04);
     --shadow-elev: 0 1px 2px rgba(15,15,14,0.04), 0 12px 32px rgba(15,15,14,0.08);
   }
@@ -311,6 +312,7 @@
   /* Sub-sections within a tile section (e.g. Projects → Stage-gates / Meetings / Gantts) */
   .tile-subsection {
     margin-bottom: 1.25rem;
+    margin-left: var(--indent-step);
   }
   .tile-subsection:last-child {
     margin-bottom: 0;
@@ -543,7 +545,7 @@
   .grouping-chip.available:hover { border-color: var(--accent); color: var(--accent-text); }
   .grouping-x { font-size: 13px; opacity: 0.7; }
   /* Nested group wrappers + headers. Indent and de-emphasize with depth. */
-  .tile-group { margin-bottom: 8px; }
+  .tile-group { margin-bottom: 8px; margin-left: var(--indent-step); }
   .tile-group-head {
     display: flex;
     align-items: center;
@@ -554,11 +556,13 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text);
-    padding: 6px 0;
+    padding: 6px 4px;
     user-select: none;
   }
-  .tile-group-d1 { margin-left: 14px; }
-  .tile-group-d2 { margin-left: 14px; }
+  /* Each nested group/subsection indents one step relative to its parent. The
+     DOM is genuinely nested (group→group→subsection), so a uniform margin-left
+     on each wrapper compounds into correct per-level indentation. Font size
+     still steps down by depth for hierarchy. */
   .tile-group-d1 > .tile-group-head { font-size: 15px; color: var(--text-muted); }
   .tile-group-d2 > .tile-group-head { font-size: 14px; color: var(--text-subtle); }
   .tile-group-head .tile-section-toggle { transition: transform 0.15s; }
