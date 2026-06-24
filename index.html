@@ -526,6 +526,23 @@
   .addtile-vt.selected { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-text); }
   .addtile-vt.disabled { opacity: 0.4; cursor: not-allowed; }
   .addtile-search { width: 100%; margin-bottom: 8px; }
+  /* Division + product filter dropdowns. */
+  .addtile-filters {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .addtile-filters select {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    font-size: 12px;
+    padding: 0 26px 0 10px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+  }
   /* Bar above the list: select-all button + selection count. */
   .addtile-listbar {
     display: flex;
@@ -4399,6 +4416,10 @@ async function openAddTileModal() {
     <div class="addtile-section">
       <span class="addtile-label">Objectives</span>
       <div class="addtile-toggle-row">
+        <input type="checkbox" id="addtile-active-only" checked>
+        <label for="addtile-active-only">Only show active objectives</label>
+      </div>
+      <div class="addtile-toggle-row">
         <input type="checkbox" id="addtile-assigned-only" checked>
         <label for="addtile-assigned-only">Only show objectives assigned to me</label>
       </div>
@@ -4407,6 +4428,14 @@ async function openAddTileModal() {
         <input type="checkbox" id="addtile-leadership-only">
         <label for="addtile-leadership-only">Only show objectives under my leadership</label>
       </div>` : ''}
+      <div class="addtile-filters">
+        <select id="addtile-filter-division" aria-label="Filter by division">
+          <option value="">All divisions</option>
+        </select>
+        <select id="addtile-filter-product" aria-label="Filter by product">
+          <option value="">All products</option>
+        </select>
+      </div>
       <input type="text" class="addtile-search" id="addtile-search" placeholder="Search objectives…" autocomplete="off">
       <div class="addtile-listbar">
         <button type="button" class="addtile-selectall" id="addtile-selectall">Select all</button>
@@ -4445,26 +4474,51 @@ async function openAddTileModal() {
   });
 
   // Fetch objectives from all configured trackers (same pattern as the picker).
+  // Each bin's payload also carries its computedStatus snapshot, so we read the
+  // Gantt-computed `isActive` straight from it — no recompute, no drift. We also
+  // capture productLine (+ a product-id→name map) for the product filter.
   const trackers = getConfiguredTrackers();
   const listEl = document.getElementById('addtile-list');
   const results = await Promise.all(trackers.map(async t => {
     try {
       const data = await jbFetchTracker(t.id);
-      return { tracker: t, objectives: objectivesIn(data) };
+      const snapObjs = (data && data.computedStatus && data.computedStatus.objectives) || {};
+      const products = Array.isArray(data && data.products) ? data.products : [];
+      return { tracker: t, objectives: objectivesIn(data), snapObjs, products };
     } catch (e) {
-      return { tracker: t, objectives: [] };
+      return { tracker: t, objectives: [], snapObjs: {}, products: [] };
     }
   }));
+  // Product id → display name, across all bins (for the product filter labels).
+  const productNames = {};
+  results.forEach(({ products }) => {
+    products.forEach(p => { if (p && p.id) productNames[p.id] = p.name || p.id; });
+  });
   const allItems = [];
-  results.forEach(({ tracker, objectives }) => {
+  results.forEach(({ tracker, objectives, snapObjs }) => {
     objectives.forEach(obj => {
       const id = projectId(obj);
       if (!id) return;
-      const item = { tracker: tracker.id, trackerName: tracker.name, id: String(id), name: projectName(obj) || `#${id}`, division: obj.division || '' };
+      // Active = the Gantt's snapshot isActive (started, not tentative, not
+      // complete). If the objective isn't in the snapshot (e.g. snapshot not yet
+      // regenerated), default to active so it isn't hidden by the default filter.
+      const snap = snapObjs[String(id)];
+      const isActive = snap ? snap.isActive !== false : true;
+      const item = {
+        tracker: tracker.id, trackerName: tracker.name, id: String(id),
+        name: projectName(obj) || `#${id}`,
+        division: obj.division || '',
+        productLine: obj.productLine || '',
+        isActive
+      };
       allItems.push(item);
       itemByKey.set(`${tracker.id}::${id}`, { tracker: item.tracker, id: item.id, name: item.name });
     });
   });
+
+  // Distinct divisions / products present (for the filter dropdowns).
+  const distinctDivisions = Array.from(new Set(allItems.map(i => i.division).filter(Boolean))).sort();
+  const distinctProducts = Array.from(new Set(allItems.map(i => i.productLine).filter(Boolean))).sort();
 
   const assignedSet = new Set((STATE.session.assignedObjectives || []).map(a => `${a.tracker}::${a.id}`));
   // Trackers the user leads (for the leadership-only filter).
@@ -4472,19 +4526,34 @@ async function openAddTileModal() {
 
   const addBtn = document.querySelector('[data-act="add"]');
   const searchEl = document.getElementById('addtile-search');
+  const activeOnlyEl = document.getElementById('addtile-active-only');
   const assignedOnlyEl = document.getElementById('addtile-assigned-only');
   const leadershipOnlyEl = document.getElementById('addtile-leadership-only'); // null if not leadership
+  const divisionEl = document.getElementById('addtile-filter-division');
+  const productEl = document.getElementById('addtile-filter-product');
   const selectAllBtn = document.getElementById('addtile-selectall');
   const selCountEl = document.getElementById('addtile-selcount');
 
-  // Compute the currently visible items given search + both toggles.
+  // Populate division/product dropdowns from the distinct values present.
+  divisionEl.innerHTML = `<option value="">All divisions</option>` +
+    distinctDivisions.map(d => `<option value="${escAttr(d)}">${escText(d)}</option>`).join('');
+  productEl.innerHTML = `<option value="">All products</option>` +
+    distinctProducts.map(p => `<option value="${escAttr(p)}">${escText(productNames[p] || p)}</option>`).join('');
+
+  // Compute the currently visible items given search + all toggles + dropdowns.
   function visibleItems() {
     const q = (searchEl.value || '').toLowerCase().trim();
+    const activeOnly = activeOnlyEl.checked;
     const assignedOnly = assignedOnlyEl.checked;
     const leadershipOnly = !!(leadershipOnlyEl && leadershipOnlyEl.checked);
+    const division = divisionEl.value;
+    const product = productEl.value;
     let items = allItems;
+    if (activeOnly) items = items.filter(it => it.isActive);
     if (assignedOnly) items = items.filter(it => assignedSet.has(`${it.tracker}::${it.id}`));
     if (leadershipOnly) items = items.filter(it => ledTrackerIds.has(it.tracker));
+    if (division) items = items.filter(it => it.division === division);
+    if (product) items = items.filter(it => it.productLine === product);
     if (q) items = items.filter(it =>
       it.name.toLowerCase().includes(q) ||
       it.trackerName.toLowerCase().includes(q) ||
@@ -4510,9 +4579,9 @@ async function openAddTileModal() {
   function renderList() {
     const items = visibleItems();
     if (!items.length) {
-      const assignedOnly = assignedOnlyEl.checked;
-      const leadershipOnly = !!(leadershipOnlyEl && leadershipOnlyEl.checked);
-      const hint = (assignedOnly || leadershipOnly)
+      const anyFilter = activeOnlyEl.checked || assignedOnlyEl.checked ||
+        !!(leadershipOnlyEl && leadershipOnlyEl.checked) || divisionEl.value || productEl.value;
+      const hint = anyFilter
         ? 'No objectives match the current filters. Loosen them to see more.'
         : 'No objectives match.';
       listEl.innerHTML = `<div class="obj-empty">${hint}</div>`;
@@ -4543,8 +4612,11 @@ async function openAddTileModal() {
 
   renderList();
   searchEl.addEventListener('input', renderList);
+  activeOnlyEl.addEventListener('change', renderList);
   assignedOnlyEl.addEventListener('change', renderList);
   if (leadershipOnlyEl) leadershipOnlyEl.addEventListener('change', renderList);
+  divisionEl.addEventListener('change', renderList);
+  productEl.addEventListener('change', renderList);
 
   // Select-all / unselect-all toggles every CURRENTLY VISIBLE item.
   selectAllBtn.addEventListener('click', () => {
