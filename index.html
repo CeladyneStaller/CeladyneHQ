@@ -2751,10 +2751,18 @@ function buildToolList(session) {
         productLine: odata.productLine || '',
         productModel: odata.productModel || ''
       };
+      // Display labels (resolved by the gantt at snapshot-write time). Fall back
+      // to the raw value if a label is missing (pre-label-update snapshot).
+      tile.groupLabels = {
+        division: odata.divisionLabel || odata.division || '',
+        productLine: odata.productLineLabel || odata.productLine || '',
+        productModel: odata.productModelLabel || odata.productModel || ''
+      };
       tile.keyResults = Array.isArray(odata.keyResults) ? odata.keyResults : [];
       tile.kpis = Array.isArray(odata.kpis) ? odata.kpis : [];
     } else {
       tile.groupAttrs = { division: '', productLine: '', productModel: '' };
+      tile.groupLabels = { division: '', productLine: '', productModel: '' };
       tile.keyResults = [];
       tile.kpis = [];
     }
@@ -3387,8 +3395,11 @@ function gatherLeadershipObjectives(led) {
     // don't). Copied here so divisional tiles inherit them. Guarded so a
     // pre-Stage-3 company snapshot (missing these) doesn't clobber with undefined.
     if (cobj.division != null) it.division = cobj.division;
+    if (cobj.divisionLabel != null) it.divisionLabel = cobj.divisionLabel;
     if (cobj.productLine != null) it.productLine = cobj.productLine;
+    if (cobj.productLineLabel != null) it.productLineLabel = cobj.productLineLabel;
     if (cobj.productModel != null) it.productModel = cobj.productModel;
+    if (cobj.productModelLabel != null) it.productModelLabel = cobj.productModelLabel;
     if (cobj.keyResults != null) it.keyResults = cobj.keyResults;
     if (cobj.kpis != null) it.kpis = cobj.kpis;
   });
@@ -3457,26 +3468,27 @@ const GROUP_ATTRS = [
 ];
 const GROUP_ATTR_LABEL = Object.fromEntries(GROUP_ATTRS.map(a => [a.key, a.label]));
 
-// Read a grouping attribute value off a tile (stamped in buildObjectiveTile as
-// tile.groupAttrs). Empty/missing → '' (the "Other" bucket).
+// Read a grouping attribute's raw value off a tile (the stable grouping key).
 function tileGroupValue(tile, attrKey) {
   return (tile.groupAttrs && tile.groupAttrs[attrKey]) || '';
 }
+// Read a grouping attribute's display label off a tile (falls back to raw value).
+function tileGroupLabel(tile, attrKey) {
+  return (tile.groupLabels && tile.groupLabels[attrKey]) || tileGroupValue(tile, attrKey);
+}
 
 // Recursively group a list of tiles by an ordered list of attribute keys.
-// Returns a tree: at each level, an array of { key (attrKey), value (group
-// value), label (display), tiles?, children? }. When attrKeys is exhausted,
-// returns a leaf marker { leaf: true, tiles }. Empty attribute values bucket
-// under value '' which renders last as "Other".
+// Groups by raw value (stable key) but carries the display label for headers.
+// Empty values bucket under '' which renders last as "Other".
 function groupTilesByAttrs(tiles, attrKeys) {
   if (!attrKeys.length) return { leaf: true, tiles };
   const [attr, ...rest] = attrKeys;
-  // Preserve first-seen order of group values, but push '' (Other) to the end.
   const order = [];
   const buckets = new Map();
+  const labels = new Map();
   tiles.forEach(t => {
     const v = tileGroupValue(t, attr);
-    if (!buckets.has(v)) { buckets.set(v, []); order.push(v); }
+    if (!buckets.has(v)) { buckets.set(v, []); order.push(v); labels.set(v, tileGroupLabel(t, attr)); }
     buckets.get(v).push(t);
   });
   order.sort((a, b) => {
@@ -3489,7 +3501,7 @@ function groupTilesByAttrs(tiles, attrKeys) {
     attr,
     groups: order.map(v => ({
       value: v,
-      label: v || 'Other',
+      label: v ? (labels.get(v) || v) : 'Other',
       child: groupTilesByAttrs(buckets.get(v), rest)
     }))
   };
