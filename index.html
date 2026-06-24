@@ -597,6 +597,127 @@
   .tile-gates:empty {
     display: none;
   }
+
+  /* ---- OKR view tile body ---- */
+  .tile-okr {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0.5px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .tile-okr-empty {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0.5px solid var(--border);
+    font-size: 12px;
+    color: var(--text-subtle);
+    font-style: italic;
+  }
+  .okr-kr-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .okr-kr-name {
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.35;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .okr-kr-score {
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .okr-kr-score.ontrack { color: #3B6D11; }
+  .okr-kr-score.watch   { color: #854F0B; }
+  .okr-kr-score.atrisk  { color: #A32D2D; }
+  .okr-kr-bar {
+    height: 5px;
+    background: var(--surface-alt);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .okr-kr-fill { height: 100%; border-radius: 3px; transition: width 0.2s; }
+  .okr-kr-fill.ontrack { background: #4E9A2A; }
+  .okr-kr-fill.watch   { background: #C68A1E; }
+  .okr-kr-fill.atrisk  { background: #C0453E; }
+  .okr-kr-sub {
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin-top: 3px;
+  }
+  .okr-kr-cue { opacity: 0.7; }
+
+  /* ---- KPI view tile body ---- */
+  .tile-kpi {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0.5px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .kpi-group-head {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-subtle);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .kpi-group-tag {
+    font-size: 9px;
+    background: var(--surface-alt);
+    color: var(--text-muted);
+    padding: 1px 5px;
+    border-radius: 6px;
+    letter-spacing: 0.03em;
+  }
+  .kpi-row { margin-bottom: 6px; }
+  .kpi-row:last-child { margin-bottom: 0; }
+  .kpi-row-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 3px;
+  }
+  .kpi-row-name {
+    font-size: 12px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .kpi-row-val {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .kpi-row-cue { opacity: 0.7; }
+  .kpi-row-bar {
+    height: 4px;
+    background: var(--surface-alt);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .kpi-row-fill { height: 100%; border-radius: 3px; transition: width 0.2s; }
+  .kpi-row-fill.ontrack { background: #4E9A2A; }
+  .kpi-row-fill.watch   { background: #C68A1E; }
+  .kpi-row-fill.atrisk  { background: #C0453E; }
   .tile-gates-head {
     display: flex;
     align-items: center;
@@ -2714,8 +2835,10 @@ function buildToolList(session) {
     const trackerObj = findTracker(tracker);
     if (!trackerObj) return null; // tracker no longer configured
     const section = objectiveTileSection(session, tracker);
-    // Stage limit: only stagegate view renders (OKR/KPI arrive in Stage 4).
-    if (viewType !== 'stagegate') return null;
+    // All three view types render (Stage 4). Guard against unknown view types.
+    if (!VIEW_TYPES[viewType]) return null;
+    // All views link to the same objective destination — the view changes what
+    // the tile body shows, not where clicking it goes.
     const url = stageGateUrlFor(trackerObj, objId) || ganttUrlFor(trackerObj);
     if (!url) return null;
     const display = nameFallback || `#${objId}`;
@@ -3449,9 +3572,8 @@ const VIEW_TYPES = {
   okr:       { label: 'OKR',         icon: 'target-arrow' },
   kpi:       { label: 'KPIs',        icon: 'chart-dots' }
 };
-// View types selectable in the picker right now. Stage 1: stage-gate only.
-// Stage 4 expands this to ['stagegate', 'okr', 'kpi'].
-const ACTIVE_VIEW_TYPES = ['stagegate'];
+// View types selectable in the picker. Stage 4 unlocks all three.
+const ACTIVE_VIEW_TYPES = ['stagegate', 'okr', 'kpi'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Layered grouping
@@ -3564,6 +3686,123 @@ function renderViewTypeSubsections(tiles, container, sectionId, subsectionDef, p
 
 // Renders a single tile element and returns it. Shared between flat sections
 // and Projects subsections.
+// Map a 0-100 score to a status key, using the same thresholds the Gantt uses
+// (healthStatusKey: >=70 ontrack, >=40 watch, else atrisk). Drives the green/
+// amber/red coloring of KR and KPI progress bars so they match health badges.
+function scoreToStatus(score) {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return 'watch';
+  return n >= 70 ? 'ontrack' : n >= 40 ? 'watch' : 'atrisk';
+}
+
+// Direction → a subtle cue glyph for KPI rows. Increase/decrease/maintain.
+function kpiDirectionCue(direction) {
+  if (direction === 'decrease') return '↓';
+  if (direction === 'maintain') return '±';
+  return '↑'; // increase (default)
+}
+
+// Render the OKR-view tile body: one row per Key Result, each with a mini
+// progress bar + score number (color-coded by score), and a target/current
+// sub-line for KPI-type KRs. Shows all KRs (no truncation).
+function renderOkrBody(keyResults) {
+  const krs = Array.isArray(keyResults) ? keyResults : [];
+  if (!krs.length) {
+    return `<div class="tile-okr-empty">No key results defined.</div>`;
+  }
+  const rows = krs.map(kr => {
+    const score = Math.max(0, Math.min(100, Math.round(Number(kr.score) || 0)));
+    const status = scoreToStatus(score);
+    // Target/current sub-line only for KPI-type KRs that carry both.
+    let sub = '';
+    if (kr.target != null && kr.current != null) {
+      const cue = kpiDirectionCue(kr.direction);
+      sub = `<div class="okr-kr-sub">${escText(String(kr.current))} → ${escText(String(kr.target))} <span class="okr-kr-cue">${cue}</span></div>`;
+    }
+    return `
+      <div class="okr-kr">
+        <div class="okr-kr-top">
+          <span class="okr-kr-name" title="${escAttr(kr.name)}">${escText(kr.name)}</span>
+          <span class="okr-kr-score ${status}">${score}%</span>
+        </div>
+        <div class="okr-kr-bar"><div class="okr-kr-fill ${status}" style="width:${score}%"></div></div>
+        ${sub}
+      </div>`;
+  }).join('');
+  return `<div class="tile-okr">${rows}</div>`;
+}
+
+// Render the KPI-view tile body: all measurable KPIs, grouped by source (the KR
+// name or stage-gate name they came from). Each KPI row shows name, current →
+// target, a direction cue, and a mini progress bar colored by progress.
+function renderKpiBody(kpis) {
+  const list = Array.isArray(kpis) ? kpis : [];
+  if (!list.length) {
+    return `<div class="tile-okr-empty">No KPIs defined.</div>`;
+  }
+  // Group by source label: KR name for source 'kr', gate name for 'gate'.
+  // Preserve first-seen order of groups.
+  const order = [];
+  const groups = new Map();
+  list.forEach(kpi => {
+    const label = kpi.source === 'gate'
+      ? `${kpi.gateName || 'Stage-gate'}`
+      : `${kpi.krName || 'Key result'}`;
+    const groupKey = `${kpi.source || 'kr'}:${label}`;
+    if (!groups.has(groupKey)) { groups.set(groupKey, { label, source: kpi.source || 'kr', items: [] }); order.push(groupKey); }
+    groups.get(groupKey).items.push(kpi);
+  });
+  const sections = order.map(gk => {
+    const g = groups.get(gk);
+    const tag = g.source === 'gate' ? 'Gate' : 'KR';
+    const rows = g.items.map(kpi => {
+      const pct = Math.max(0, Math.min(100, Math.round(kpiProgressPct(kpi))));
+      const status = scoreToStatus(pct);
+      const cue = kpiDirectionCue(kpi.direction);
+      const cur = kpi.current != null ? String(kpi.current) : '—';
+      const tgt = kpi.target != null ? String(kpi.target) : '—';
+      return `
+        <div class="kpi-row">
+          <div class="kpi-row-top">
+            <span class="kpi-row-name" title="${escAttr(kpi.name)}">${escText(kpi.name)}</span>
+            <span class="kpi-row-val">${escText(cur)} → ${escText(tgt)} <span class="kpi-row-cue">${cue}</span></span>
+          </div>
+          <div class="kpi-row-bar"><div class="kpi-row-fill ${status}" style="width:${pct}%"></div></div>
+        </div>`;
+    }).join('');
+    return `
+      <div class="kpi-group">
+        <div class="kpi-group-head"><span class="kpi-group-tag">${tag}</span> ${escText(g.label)}</div>
+        ${rows}
+      </div>`;
+  }).join('');
+  return `<div class="tile-kpi">${sections}</div>`;
+}
+
+// Compute a single KPI's progress %, mirroring the Gantt's calculateKpiProgress
+// for one KPI (increase/decrease/maintain). Used to color KPI-tile rows.
+function kpiProgressPct(kpi) {
+  if (!kpi) return 0;
+  if (kpi.notMeasured) return 0;
+  if (kpi.target == null || kpi.current == null) return 0;
+  const target = parseFloat(kpi.target) || 0;
+  const current = parseFloat(kpi.current) || 0;
+  if (kpi.direction === 'maintain') {
+    if (target === current) return 100;
+    const deviation = Math.abs(current - target);
+    const tolerance = Math.abs(target) * 0.1 || 1;
+    return Math.max(0, 100 - (deviation / tolerance) * 50);
+  }
+  if (kpi.direction === 'decrease') {
+    if (current <= target) return 100;
+    const baseline = Math.max(current, target * 2);
+    return Math.min(100, Math.max(0, ((baseline - current) / (baseline - target)) * 100));
+  }
+  // increase (default)
+  if (target === 0) return current >= 0 ? 100 : 0;
+  return Math.min(100, Math.max(0, (current / target) * 100));
+}
+
 function renderTileEl(tool) {
   const a = document.createElement('a');
   a.className = 'tile';
@@ -3585,27 +3824,41 @@ function renderTileEl(tool) {
   if (tool.removable && tool.objTriple) {
     a.classList.add('removable');
   }
-  // Stage-gate-style tiles (assignment auto-tiles AND configured stagegate-view
-  // tiles) get the badge + gate-dot slots populated async by fetchTileStatuses.
-  const isStageGate = typeof tool.id === 'string' &&
-    (tool.id.startsWith('stage-gate__') || tool.id.startsWith('obj__stagegate__'));
-  // Stage-gate tiles get extra slots populated async by fetchTileStatuses:
-  //   data-badge — status tag (On track / Watch / At risk / Complete)
-  //   data-meta  — subtitle becomes "Bin · Parent Initiative"
-  // Non-stage-gate tiles use the static description.
+  // Objective tiles come in three view types, detected by id prefix:
+  //   stage-gate / obj__stagegate__ → gate dots (async-populated)
+  //   obj__okr__                    → key-results list (static from tile.keyResults)
+  //   obj__kpi__                    → KPI list (static from tile.kpis)
+  // All three share the header (badge + "Bin · Parent" subtitle) populated by
+  // fetchTileStatuses — the objective's overall health is the same regardless
+  // of which lens the body shows.
+  const idStr = typeof tool.id === 'string' ? tool.id : '';
+  const isStageGate = idStr.startsWith('stage-gate__') || idStr.startsWith('obj__stagegate__');
+  const isOkr = idStr.startsWith('obj__okr__');
+  const isKpi = idStr.startsWith('obj__kpi__');
+  const isObjective = isStageGate || isOkr || isKpi;
+  // Body slot varies by view type; header (badge + meta + status) is shared by
+  // all objective tiles.
+  let bodyHtml = '';
+  if (isStageGate) {
+    bodyHtml = `<div class="tile-gates" data-gates="${tool.id}"></div>`;
+  } else if (isOkr) {
+    bodyHtml = renderOkrBody(tool.keyResults);
+  } else if (isKpi) {
+    bodyHtml = renderKpiBody(tool.kpis);
+  }
   a.innerHTML = `
     ${tool.removable && tool.objTriple ? `<button class="tile-remove" data-remove-tile aria-label="Remove tile" title="Remove tile">&times;</button>` : ''}
     <div class="tile-head">
       <i class="ti ti-${tool.icon} tile-icon" aria-hidden="true"></i>
       <span class="tile-name">${tool.name}</span>
-      ${isStageGate ? `<span class="tile-badge" data-badge="${tool.id}"></span>` : ''}
+      ${isObjective ? `<span class="tile-badge" data-badge="${tool.id}"></span>` : ''}
     </div>
-    <p class="tile-desc"${isStageGate ? ` data-meta="${tool.id}"` : ''}>${tool.description}</p>
+    <p class="tile-desc"${isObjective ? ` data-meta="${tool.id}"` : ''}>${tool.description}</p>
     <div class="tile-status loading" data-status="${tool.id}">
       <span class="dot" style="opacity: 0.4;"></span>
       Loading status…
     </div>
-    ${isStageGate ? `<div class="tile-gates" data-gates="${tool.id}"></div>` : ''}
+    ${bodyHtml}
   `;
   // Wire the remove button (edit mode). Stop the click from following the tile
   // link, then remove the configured tile and re-render.
