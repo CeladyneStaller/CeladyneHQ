@@ -835,19 +835,42 @@
     margin-bottom: 14px;
     flex-wrap: wrap;
   }
-  .leadership-filter-bar select {
-    height: 30px;
-    font-size: 12px;
-    padding: 0 26px 0 10px;
-    border: 0.5px solid var(--border-strong);
-    border-radius: var(--radius);
-    background: var(--surface);
-    color: var(--text);
+  /* Filter button — opens the filter modal. Active state when a non-default
+     filter is applied (accent ring + tint). */
+  .leadership-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .leadership-filter-btn .ti { font-size: 14px; }
+  .leadership-filter-btn.has-active {
+    background: var(--accent-bg);
+    color: var(--accent-text);
+    border-color: var(--accent);
   }
   .leadership-filter-count {
     font-size: 12px;
     color: var(--text-subtle);
     margin-left: auto;
+  }
+  /* Filter modal fields (status + tracker selects). */
+  .filter-modal-field { margin-bottom: 14px; }
+  .filter-modal-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .filter-modal-field select {
+    width: 100%;
+    height: 34px;
+    font-size: 13px;
+    padding: 0 28px 0 10px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
   }
   .leadership-tracker-block {
     padding: 12px 14px;
@@ -4055,42 +4078,43 @@ async function setSectionGrouping(sectionId, nextChain) {
   }
 }
 
-// Append the Leadership filter header (status + tracker) and wire it to filter
-// the already-rendered tiles in this section. Filters reset every render (per
-// spec — a transient triage action, not a durable preference).
+// Append the Leadership filter control: a compact "Filter" button in the section
+// that opens a small modal with status + tracker dropdowns. Filter state lives in
+// closure (persists across modal open/close) but resets every render — a
+// transient triage action, not a durable preference. The button surfaces the
+// active filter (a dot + the visible count) so you can see a filter is on
+// without opening the modal.
 function appendLeadershipFilter(wrap, sectionTools) {
   // Distinct trackers present among these tiles (in config order).
   const presentTrackerIds = new Set(sectionTools.map(t => t.filterTracker).filter(Boolean));
   const trackers = getConfiguredTrackers().filter(t => presentTrackerIds.has(t.id));
 
+  // Filter state — defaults each render (active status, all trackers).
+  const state = { status: 'active', tracker: 'all' };
+
   const bar = document.createElement('div');
   bar.className = 'leadership-filter-bar';
   bar.innerHTML = `
-    <select class="leadership-filter-status" aria-label="Filter by status">
-      <option value="active">Active only</option>
-      <option value="all">All (incl. complete)</option>
-      <option value="atrisk">At risk</option>
-      <option value="watch">Watch</option>
-      <option value="ontrack">On track</option>
-      <option value="complete">Complete</option>
-    </select>
-    <select class="leadership-filter-tracker" aria-label="Filter by tracker">
-      <option value="all">All trackers</option>
-      ${trackers.map(t => `<option value="${escAttr(t.id)}">${escText(t.name)}</option>`).join('')}
-    </select>
+    <button type="button" class="btn btn-sm leadership-filter-btn" aria-haspopup="dialog">
+      <i class="ti ti-filter" aria-hidden="true"></i>
+      <span class="leadership-filter-btn-label">Filter</span>
+    </button>
     <span class="leadership-filter-count" aria-live="polite"></span>
   `;
   wrap.appendChild(bar);
 
-  const statusSel = bar.querySelector('.leadership-filter-status');
-  const trackerSel = bar.querySelector('.leadership-filter-tracker');
+  const btn = bar.querySelector('.leadership-filter-btn');
+  const btnLabel = bar.querySelector('.leadership-filter-btn-label');
   const countEl = bar.querySelector('.leadership-filter-count');
 
+  // True when the current filter differs from the default view.
+  const isFiltered = () => state.status !== 'active' || state.tracker !== 'all';
+
+  // Apply the current filter state to the rendered tiles, hide emptied
+  // subsections/groups, and update the button + count.
   function apply() {
-    const status = statusSel.value;
-    const tracker = trackerSel.value;
+    const { status, tracker } = state;
     let shown = 0, total = 0;
-    // Iterate the rendered tiles in this section and toggle visibility.
     wrap.querySelectorAll('.tile').forEach(tileEl => {
       const id = tileEl.dataset.toolId || '';
       const tool = sectionTools.find(t => t.id === id);
@@ -4123,11 +4147,59 @@ function appendLeadershipFilter(wrap, sectionTools) {
       const anyVisible = Array.from(g.querySelectorAll('.tile')).some(t => t.style.display !== 'none');
       g.style.display = anyVisible ? '' : 'none';
     });
+    // Reflect state on the button + count.
+    const filtered = isFiltered();
+    btn.classList.toggle('has-active', filtered);
+    btnLabel.textContent = filtered ? 'Filtered' : 'Filter';
     countEl.textContent = total ? `${shown} of ${total}` : '';
   }
 
-  statusSel.addEventListener('change', apply);
-  trackerSel.addEventListener('change', apply);
+  // Open the filter modal. The dropdowns reflect current state; changes apply
+  // live (so you see the effect behind the modal). "Clear" resets to defaults.
+  function openFilterModal() {
+    const STATUS_OPTS = [
+      ['active', 'Active only'],
+      ['all', 'All (incl. complete)'],
+      ['atrisk', 'At risk'],
+      ['watch', 'Watch'],
+      ['ontrack', 'On track'],
+      ['complete', 'Complete']
+    ];
+    openModal(`
+      <h3>Filter leadership</h3>
+      <div class="filter-modal-field">
+        <label class="filter-modal-label" for="lead-filter-status">Status</label>
+        <select id="lead-filter-status">
+          ${STATUS_OPTS.map(([v, l]) => `<option value="${v}"${state.status === v ? ' selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div class="filter-modal-field">
+        <label class="filter-modal-label" for="lead-filter-tracker">Tracker</label>
+        <select id="lead-filter-tracker">
+          <option value="all"${state.tracker === 'all' ? ' selected' : ''}>All trackers</option>
+          ${trackers.map(t => `<option value="${escAttr(t.id)}"${state.tracker === t.id ? ' selected' : ''}>${escText(t.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" data-act="clear">Clear</button>
+        <button class="btn btn-primary" data-act="done">Done</button>
+      </div>
+    `);
+    const statusSel = document.getElementById('lead-filter-status');
+    const trackerSel = document.getElementById('lead-filter-tracker');
+    statusSel.addEventListener('change', () => { state.status = statusSel.value; apply(); });
+    trackerSel.addEventListener('change', () => { state.tracker = trackerSel.value; apply(); });
+    document.querySelector('[data-act="clear"]').addEventListener('click', () => {
+      state.status = 'active';
+      state.tracker = 'all';
+      statusSel.value = 'active';
+      trackerSel.value = 'all';
+      apply();
+    });
+    document.querySelector('[data-act="done"]').addEventListener('click', closeModal);
+  }
+
+  btn.addEventListener('click', openFilterModal);
   // Apply once on render so the default "Active only" filter takes effect.
   // Deferred to next tick so the tiles exist in the DOM first.
   setTimeout(apply, 0);
