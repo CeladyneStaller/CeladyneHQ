@@ -3553,14 +3553,25 @@ function renderGateBubblesHtml(gates) {
 // power the Stage-gate tile indicators (no extra computation hub-side).
 // Filters reset on each render (no persistence).
 // ─────────────────────────────────────────────────────────────────────────────
-// Gather the enriched objective list for a leader's tracker set. Returns items
-// with company-bin overlay applied and company-vs-divisional dedup done. This
-// is the data layer behind Leadership tiles (extracted from the old panel).
+// Core: gather an enriched objective list from snapshots for a given set of
+// trackers, with company-bin overlay applied and company-vs-divisional dedup
+// (the divisional copy wins). Sourcing from snapshots (not raw bin `projects`)
+// is essential — the company gantt strips imported objectives from its raw
+// projects on save but keeps them in its computedStatus snapshot, so only the
+// snapshot is the complete, import-inclusive view. Both the Leadership section
+// and the add-tile modal read through this so they always agree on what exists.
+//
+//   includeTrackers — the trackers whose objectives should appear in the result.
+//                     The company tracker is always pulled in additionally for
+//                     overlay, but only emitted if it's in includeTrackers.
+//
 // Each item: { tracker, id, name, score, status, progress, daysLeft, delayDays,
-//              isComplete, isActive, parentName, gates, slug }.
-function gatherLeadershipObjectives(led) {
+//              isComplete, isActive, parentName, gates, slug, division,
+//              productLine, productModel, ...labels, keyResults, kpis }.
+function gatherObjectivesFromSnapshots(includeTrackers) {
   const company = getCompanyTracker();
-  const fetchSet = led.slice();
+  // Fetch snapshots for the include set plus the company (for overlay), deduped.
+  const fetchSet = includeTrackers.slice();
   if (company && !fetchSet.find(t => t.id === company.id)) {
     fetchSet.push(company);
   }
@@ -3579,11 +3590,11 @@ function gatherLeadershipObjectives(led) {
     }
   }
 
-  // Flat list from the trackers the user actually leads.
-  const ledIds = new Set(led.map(t => t.id));
+  // Flat list from the trackers in the include set.
+  const includeIds = new Set(includeTrackers.map(t => t.id));
   let items = [];
   results.forEach(({ tracker, snapshot }) => {
-    if (!ledIds.has(tracker.id)) return;
+    if (!includeIds.has(tracker.id)) return;
     if (!snapshot || !snapshot.objectives) return;
     for (const id of Object.keys(snapshot.objectives)) {
       const obj = snapshot.objectives[id];
@@ -3639,6 +3650,13 @@ function gatherLeadershipObjectives(led) {
   });
 
   return items;
+}
+
+// Gather the enriched objective list for a leader's tracker set — the data layer
+// behind Leadership tiles. Thin wrapper over gatherObjectivesFromSnapshots with
+// the include set scoped to the trackers the user leads.
+function gatherLeadershipObjectives(led) {
+  return gatherObjectivesFromSnapshots(led);
 }
 
 function escAttr(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
@@ -4473,50 +4491,53 @@ async function openAddTileModal() {
     });
   });
 
-  // Fetch objectives from all configured trackers (same pattern as the picker).
-  // Each bin's payload also carries its computedStatus snapshot, so we read the
-  // Gantt-computed `isActive` straight from it — no recompute, no drift. We also
-  // capture productLine (+ a product-id→name map) for the product filter.
+  // Source objectives from snapshots (NOT raw bin projects) via the shared
+  // gather used by the Leadership section, so the modal shows exactly what
+  // Leadership does — including imported divisional objectives, which the
+  // company gantt strips from its raw projects but keeps in its snapshot.
+  // Company-vs-divisional dedup (divisional wins) and company overlay are
+  // applied by the gather.
   const trackers = getConfiguredTrackers();
   const listEl = document.getElementById('addtile-list');
-  const results = await Promise.all(trackers.map(async t => {
-    try {
-      const data = await jbFetchTracker(t.id);
-      const snapObjs = (data && data.computedStatus && data.computedStatus.objectives) || {};
-      const products = Array.isArray(data && data.products) ? data.products : [];
-      return { tracker: t, objectives: objectivesIn(data), snapObjs, products };
-    } catch (e) {
-      return { tracker: t, objectives: [], snapObjs: {}, products: [] };
+  // The hub only hydrates the snapshots it needs for the current view (company
+  // + assigned + led + configured-tile trackers). The modal lets you tile ANY
+  // configured tracker, so ensure every configured tracker's snapshot is loaded
+  // first — otherwise objectives in un-hydrated trackers would be invisible.
+  await Promise.all(trackers.map(async t => {
+    if (STATE.snapshots[t.id] === undefined || STATE.snapshots[t.id] === null) {
+      const snap = await _fetchSnapshotForHydration(t.id);
+      STATE.snapshots[t.id] = snap;
     }
   }));
-  // Product id → display name, across all bins (for the product filter labels).
-  const productNames = {};
-  results.forEach(({ products }) => {
-    products.forEach(p => { if (p && p.id) productNames[p.id] = p.name || p.id; });
-  });
+  const gathered = gatherObjectivesFromSnapshots(trackers);
+  // Build the flat item list for the modal. division/productLine (raw values)
+  // drive the filters; their *Label fields drive display. isActive comes from
+  // the snapshot (Gantt's definition). name carries the company-overlay value.
+  const productNames = {}; // raw productLine id → display label
   const allItems = [];
-  results.forEach(({ tracker, objectives, snapObjs }) => {
-    objectives.forEach(obj => {
-      const id = projectId(obj);
-      if (!id) return;
-      // Active = the Gantt's snapshot isActive (started, not tentative, not
-      // complete). If the objective isn't in the snapshot (e.g. snapshot not yet
-      // regenerated), default to active so it isn't hidden by the default filter.
-      const snap = snapObjs[String(id)];
-      const isActive = snap ? snap.isActive !== false : true;
-      const item = {
-        tracker: tracker.id, trackerName: tracker.name, id: String(id),
-        name: projectName(obj) || `#${id}`,
-        division: obj.division || '',
-        productLine: obj.productLine || '',
-        isActive
-      };
-      allItems.push(item);
-      itemByKey.set(`${tracker.id}::${id}`, { tracker: item.tracker, id: item.id, name: item.name });
-    });
+  gathered.forEach(g => {
+    const trackerId = g.tracker.id;
+    const id = String(g.id);
+    const productLine = g.productLine || '';
+    if (productLine) productNames[productLine] = g.productLineLabel || productLine;
+    const item = {
+      tracker: trackerId,
+      trackerName: g.tracker.name,
+      id,
+      name: g.name || `#${id}`,
+      division: g.division || '',
+      divisionLabel: g.divisionLabel || g.division || '',
+      productLine,
+      isActive: g.isActive !== false
+    };
+    allItems.push(item);
+    itemByKey.set(`${trackerId}::${id}`, { tracker: trackerId, id, name: item.name });
   });
 
-  // Distinct divisions / products present (for the filter dropdowns).
+  // Distinct divisions / products present (for the filter dropdowns). Divisions
+  // map raw value → label so the dropdown shows the label but filters on raw.
+  const divisionLabels = {};
+  allItems.forEach(it => { if (it.division) divisionLabels[it.division] = it.divisionLabel || it.division; });
   const distinctDivisions = Array.from(new Set(allItems.map(i => i.division).filter(Boolean))).sort();
   const distinctProducts = Array.from(new Set(allItems.map(i => i.productLine).filter(Boolean))).sort();
 
@@ -4535,8 +4556,9 @@ async function openAddTileModal() {
   const selCountEl = document.getElementById('addtile-selcount');
 
   // Populate division/product dropdowns from the distinct values present.
+  // Options display labels but carry raw values (filters compare raw).
   divisionEl.innerHTML = `<option value="">All divisions</option>` +
-    distinctDivisions.map(d => `<option value="${escAttr(d)}">${escText(d)}</option>`).join('');
+    distinctDivisions.map(d => `<option value="${escAttr(d)}">${escText(divisionLabels[d] || d)}</option>`).join('');
   productEl.innerHTML = `<option value="">All products</option>` +
     distinctProducts.map(p => `<option value="${escAttr(p)}">${escText(productNames[p] || p)}</option>`).join('');
 
