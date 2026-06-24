@@ -509,6 +509,59 @@
   .addtile-obj.selected { background: var(--accent-bg); color: var(--accent-text); }
   .addtile-obj .meta { font-size: 11px; color: var(--text-subtle); display: block; margin-top: 2px; }
   .addtile-toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
+
+  /* ---- Layered grouping ---- */
+  /* Grouping control (chip-chain) — shown only in edit mode. */
+  .grouping-control {
+    display: none;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+    padding: 8px 10px;
+    background: var(--surface-alt);
+    border-radius: var(--radius);
+  }
+  body.edit-mode .grouping-control { display: flex; }
+  .grouping-label { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-right: 2px; }
+  .grouping-chain { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .grouping-avail { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-left: 6px; }
+  .grouping-sep { color: var(--text-subtle); font-size: 12px; margin: 0 1px; }
+  .grouping-none { font-size: 12px; color: var(--text-subtle); font-style: italic; }
+  .grouping-chip {
+    font-size: 12px;
+    padding: 3px 9px;
+    border-radius: 12px;
+    border: 0.5px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    line-height: 1.6;
+  }
+  .grouping-chip.in-chain { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent); }
+  .grouping-chip.available { color: var(--text-muted); }
+  .grouping-chip.available:hover { border-color: var(--accent); color: var(--accent-text); }
+  .grouping-x { font-size: 13px; opacity: 0.7; }
+  /* Nested group wrappers + headers. Indent and de-emphasize with depth. */
+  .tile-group { margin-bottom: 8px; }
+  .tile-group-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    padding: 6px 0;
+    user-select: none;
+  }
+  .tile-group-d1 { margin-left: 14px; }
+  .tile-group-d2 { margin-left: 14px; }
+  .tile-group-d1 > .tile-group-head { font-size: 12px; color: var(--text-muted); }
+  .tile-group-d2 > .tile-group-head { font-size: 12px; color: var(--text-subtle); }
+  .tile-group-head .tile-section-toggle { transition: transform 0.15s; }
+  .tile-group.collapsed > .tile-group-head .tile-section-toggle { transform: rotate(-90deg); }
+  .tile-group.collapsed > *:not(.tile-group-head) { display: none; }
   .tile-desc {
     font-size: 13px;
     color: var(--text-muted);
@@ -1818,6 +1871,20 @@ async function jbFetchUsers() {
         }).filter(Boolean)
       : [];
 
+    // Grouping config (layered grouping build). Per-section ordered list of
+    // attribute keys to group tiles by (e.g. ['division','productLine']). Empty
+    // array = no attribute grouping (view-type subsections only — prior behavior).
+    // Only 'projects' and 'leadership' are groupable. Unknown keys filtered out.
+    const VALID_GROUP_KEYS = ['division', 'productLine', 'productModel'];
+    const normGroupList = arr => Array.isArray(arr)
+      ? arr.filter(k => VALID_GROUP_KEYS.includes(k))
+      : [];
+    const gc = (u.groupingConfig && typeof u.groupingConfig === 'object') ? u.groupingConfig : {};
+    u.groupingConfig = {
+      projects: normGroupList(gc.projects),
+      leadership: normGroupList(gc.leadership)
+    };
+
     if (!Array.isArray(u.assignedObjectives)) {
       u.assignedObjectives = [];
       return;
@@ -2120,6 +2187,7 @@ async function createUserRecord(email, pin, role) {
     iterations: STATE.config.pbkdf2Iterations,
     assignedObjectives: [],
     configuredTiles: [],
+    groupingConfig: { projects: [], leadership: [] },
     createdAt: Date.now(),
     lastLogin: null,
     disabled: false
@@ -2141,6 +2209,9 @@ function makeSession(user, days) {
     leadOf: Array.isArray(user.leadOf) ? user.leadOf.slice() : [],
     assignedObjectives: Array.isArray(user.assignedObjectives) ? user.assignedObjectives.slice() : [],
     configuredTiles: Array.isArray(user.configuredTiles) ? user.configuredTiles.slice() : [],
+    groupingConfig: (user.groupingConfig && typeof user.groupingConfig === 'object')
+      ? { projects: (user.groupingConfig.projects || []).slice(), leadership: (user.groupingConfig.leadership || []).slice() }
+      : { projects: [], leadership: [] },
     issuedAt: now,
     expiresAt: now + sessionDays * 24 * 60 * 60 * 1000,
     tokenId: (crypto.randomUUID && crypto.randomUUID()) || generateSalt(8)
@@ -3371,6 +3442,114 @@ const VIEW_TYPES = {
 // Stage 4 expands this to ['stagegate', 'okr', 'kpi'].
 const ACTIVE_VIEW_TYPES = ['stagegate'];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Layered grouping
+//
+// Projects and Leadership can group their tiles by a user-chosen ordered chain
+// of objective attributes (e.g. Division › Product › Generation), with the
+// view-type subsections (Stage-gates/OKR/KPIs) always as the innermost level.
+// The grouping chain per section lives in session.groupingConfig.
+// ─────────────────────────────────────────────────────────────────────────────
+const GROUP_ATTRS = [
+  { key: 'division',     label: 'Division' },
+  { key: 'productLine',  label: 'Product' },
+  { key: 'productModel', label: 'Generation' }
+];
+const GROUP_ATTR_LABEL = Object.fromEntries(GROUP_ATTRS.map(a => [a.key, a.label]));
+
+// Read a grouping attribute value off a tile (stamped in buildObjectiveTile as
+// tile.groupAttrs). Empty/missing → '' (the "Other" bucket).
+function tileGroupValue(tile, attrKey) {
+  return (tile.groupAttrs && tile.groupAttrs[attrKey]) || '';
+}
+
+// Recursively group a list of tiles by an ordered list of attribute keys.
+// Returns a tree: at each level, an array of { key (attrKey), value (group
+// value), label (display), tiles?, children? }. When attrKeys is exhausted,
+// returns a leaf marker { leaf: true, tiles }. Empty attribute values bucket
+// under value '' which renders last as "Other".
+function groupTilesByAttrs(tiles, attrKeys) {
+  if (!attrKeys.length) return { leaf: true, tiles };
+  const [attr, ...rest] = attrKeys;
+  // Preserve first-seen order of group values, but push '' (Other) to the end.
+  const order = [];
+  const buckets = new Map();
+  tiles.forEach(t => {
+    const v = tileGroupValue(t, attr);
+    if (!buckets.has(v)) { buckets.set(v, []); order.push(v); }
+    buckets.get(v).push(t);
+  });
+  order.sort((a, b) => {
+    if (a === '' && b !== '') return 1;   // Other last
+    if (b === '' && a !== '') return -1;
+    return 0;                              // otherwise stable (first-seen)
+  });
+  return {
+    leaf: false,
+    attr,
+    groups: order.map(v => ({
+      value: v,
+      label: v || 'Other',
+      child: groupTilesByAttrs(buckets.get(v), rest)
+    }))
+  };
+}
+
+// Render a grouping tree into a container. `pathKey` accumulates the collapse-
+// state key as we descend (so each group level is independently collapsible).
+// At a leaf, renders the view-type subsections (the existing innermost grouping).
+function renderGroupTree(node, container, sectionId, subsectionDef, pathKey, depth) {
+  if (node.leaf) {
+    renderViewTypeSubsections(node.tiles, container, sectionId, subsectionDef, pathKey);
+    return;
+  }
+  node.groups.forEach(g => {
+    const groupKey = `${pathKey}/g/${node.attr}:${g.value}`;
+    const groupWrap = document.createElement('div');
+    groupWrap.className = `tile-group tile-group-d${depth}`;
+    groupWrap.dataset.groupAttr = node.attr;
+    groupWrap.dataset.groupValue = g.value;
+    // Group header label: "Division: Electrolyzer" style, with the attr name
+    // as a quiet prefix so nested levels are readable.
+    const headLabel = `${GROUP_ATTR_LABEL[node.attr] || node.attr}: ${g.label}`;
+    const head = buildCollapsibleHead('div', 'tile-group-head', headLabel, groupKey, groupWrap);
+    groupWrap.appendChild(head);
+    renderGroupTree(g.child, groupWrap, sectionId, subsectionDef, groupKey, depth + 1);
+    container.appendChild(groupWrap);
+  });
+}
+
+// Render the view-type subsections (Stage-gates/OKR/KPIs) for a set of tiles.
+// This is the innermost grouping level — the leaf of the grouping tree, and
+// also the whole render when no attribute grouping is configured.
+function renderViewTypeSubsections(tiles, container, sectionId, subsectionDef, pathKey) {
+  const buckets = subsectionDef.map(sub => ({ sub, tiles: [] }));
+  const other = [];
+  tiles.forEach(t => {
+    const bucket = buckets.find(b => b.sub.match(t.id));
+    (bucket ? bucket.tiles : other).push(t);
+  });
+  if (other.length) {
+    const grid = document.createElement('div');
+    grid.className = 'tile-grid';
+    other.forEach(t => grid.appendChild(renderTileEl(t)));
+    container.appendChild(grid);
+  }
+  buckets.forEach(({ sub, tiles }) => {
+    if (!tiles.length) return;
+    const subWrap = document.createElement('div');
+    subWrap.className = 'tile-subsection';
+    subWrap.dataset.subsection = sub.id;
+    const subHead = buildCollapsibleHead('h3', 'tile-subsection-head', sub.label, `${pathKey}/sub/${sub.id}`, subWrap);
+    subWrap.appendChild(subHead);
+    const grid = document.createElement('div');
+    grid.className = 'tile-grid';
+    tiles.forEach(t => grid.appendChild(renderTileEl(t)));
+    subWrap.appendChild(grid);
+    container.appendChild(subWrap);
+  });
+}
+
 // Renders a single tile element and returns it. Shared between flat sections
 // and Projects subsections.
 function renderTileEl(tool) {
@@ -3506,34 +3685,25 @@ function renderTiles() {
       (section.id === 'watching' || section.id === 'leadership') ? OBJECTIVE_SUBSECTIONS :
       null;
 
+    // Sections that support layered grouping (Projects, Leadership). The grouping
+    // control (edit mode) and the attribute-nested rendering apply only here.
+    const groupable = section.id === 'projects' || section.id === 'leadership';
+
+    if (groupable) {
+      // Grouping control — chip-chain shown in edit mode.
+      appendGroupingControl(wrap, section.id);
+    }
+
     if (subsectionDef) {
-      // Bucket tiles by id prefix; anything unmatched goes into a leading
-      // unlabeled grid so future tile types aren't accidentally hidden.
-      const buckets = subsectionDef.map(sub => ({ sub, tiles: [] }));
-      const other = [];
-      sectionTools.forEach(t => {
-        const bucket = buckets.find(b => b.sub.match(t.id));
-        (bucket ? bucket.tiles : other).push(t);
-      });
-      if (other.length) {
-        const grid = document.createElement('div');
-        grid.className = 'tile-grid';
-        other.forEach(t => grid.appendChild(renderTileEl(t)));
-        wrap.appendChild(grid);
-      }
-      buckets.forEach(({ sub, tiles }) => {
-        if (!tiles.length) return;
-        const subWrap = document.createElement('div');
-        subWrap.className = 'tile-subsection';
-        subWrap.dataset.subsection = sub.id;
-        const subHead = buildCollapsibleHead('h3', 'tile-subsection-head', sub.label, `section/${section.id}/sub/${sub.id}`, subWrap);
-        subWrap.appendChild(subHead);
-        const grid = document.createElement('div');
-        grid.className = 'tile-grid';
-        tiles.forEach(t => grid.appendChild(renderTileEl(t)));
-        subWrap.appendChild(grid);
-        wrap.appendChild(subWrap);
-      });
+      // Determine the grouping chain for this section (groupable sections only;
+      // others always render flat view-type subsections via empty chain).
+      const chain = groupable
+        ? ((STATE.session && STATE.session.groupingConfig && STATE.session.groupingConfig[section.id]) || [])
+        : [];
+      // Build the grouping tree (empty chain → single leaf = current behavior),
+      // then render it recursively. View-type subsections are the leaves.
+      const tree = groupTilesByAttrs(sectionTools, chain);
+      renderGroupTree(tree, wrap, section.id, subsectionDef, `section/${section.id}`, 0);
     } else {
       // Flat grid for all other sections.
       const grid = document.createElement('div');
@@ -3555,6 +3725,69 @@ function renderTiles() {
 
     root.appendChild(wrap);
   });
+}
+
+// Append the grouping control (a "Group by:" chip-chain) for a groupable
+// section. Shown only in edit mode (CSS). Clicking an available attribute
+// appends it to the chain; clicking a chain chip removes it. Changes save to
+// the user record and re-render the section live.
+function appendGroupingControl(wrap, sectionId) {
+  const chain = (STATE.session && STATE.session.groupingConfig && STATE.session.groupingConfig[sectionId]) || [];
+  const bar = document.createElement('div');
+  bar.className = 'grouping-control';
+
+  const chainKeys = new Set(chain);
+  const available = GROUP_ATTRS.filter(a => !chainKeys.has(a.key));
+
+  // Current chain (ordered, each removable) then available attributes to add.
+  const chainHtml = chain.length
+    ? chain.map(k => `<button type="button" class="grouping-chip in-chain" data-remove="${escAttr(k)}">${escText(GROUP_ATTR_LABEL[k] || k)} <span class="grouping-x">&times;</span></button>`).join('<span class="grouping-sep">›</span>')
+    : '<span class="grouping-none">No grouping</span>';
+  const availHtml = available.map(a =>
+    `<button type="button" class="grouping-chip available" data-add="${escAttr(a.key)}">+ ${escText(a.label)}</button>`
+  ).join('');
+
+  bar.innerHTML = `
+    <span class="grouping-label">Group by:</span>
+    <span class="grouping-chain">${chainHtml}</span>
+    ${available.length ? `<span class="grouping-avail">${availHtml}</span>` : ''}
+  `;
+  wrap.appendChild(bar);
+
+  bar.querySelectorAll('[data-add]').forEach(btn => {
+    btn.addEventListener('click', () => setSectionGrouping(sectionId, [...chain, btn.dataset.add]));
+  });
+  bar.querySelectorAll('[data-remove]').forEach(btn => {
+    btn.addEventListener('click', () => setSectionGrouping(sectionId, chain.filter(k => k !== btn.dataset.remove)));
+  });
+}
+
+// Update a section's grouping chain, persist to the user record, and re-render.
+async function setSectionGrouping(sectionId, nextChain) {
+  if (!STATE.session) return;
+  const gc = STATE.session.groupingConfig || { projects: [], leadership: [] };
+  gc[sectionId] = nextChain;
+  STATE.session.groupingConfig = gc;
+  saveSession(STATE.session);
+  // Re-render immediately so the grouping change is visible without waiting.
+  renderTiles();
+  fetchTileStatuses();
+  // Persist to the user record in the background.
+  try {
+    const record = STATE.usersRecord || await jbFetchUsers();
+    const me = findUser(record, STATE.session.email);
+    if (me) {
+      me.groupingConfig = {
+        projects: (gc.projects || []).slice(),
+        leadership: (gc.leadership || []).slice()
+      };
+      await jbSaveUsers(record);
+      STATE.usersRecord = record;
+    }
+  } catch (err) {
+    console.warn('Failed to persist grouping config:', err);
+    toast('Grouping saved on this device; sync failed.', 'error');
+  }
 }
 
 // Append the Leadership filter header (status + tracker) and wire it to filter
@@ -3616,6 +3849,14 @@ function appendLeadershipFilter(wrap, sectionTools) {
     wrap.querySelectorAll('.tile-subsection').forEach(sub => {
       const anyVisible = Array.from(sub.querySelectorAll('.tile')).some(t => t.style.display !== 'none');
       sub.style.display = anyVisible ? '' : 'none';
+    });
+    // Hide group wrappers (grouping levels) that have no visible tiles. Process
+    // deepest-first so parent groups see their children's updated visibility.
+    const groups = Array.from(wrap.querySelectorAll('.tile-group'));
+    groups.sort((a, b) => b.className.localeCompare(a.className)); // deeper d-N last → reverse
+    groups.reverse().forEach(g => {
+      const anyVisible = Array.from(g.querySelectorAll('.tile')).some(t => t.style.display !== 'none');
+      g.style.display = anyVisible ? '' : 'none';
     });
     countEl.textContent = total ? `${shown} of ${total}` : '';
   }
