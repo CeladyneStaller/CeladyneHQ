@@ -960,6 +960,30 @@
     background: var(--surface);
     color: var(--text);
   }
+  /* View multiselect — checkbox chips in the leadership filter modal. */
+  .filter-modal-checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .filter-modal-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    padding: 6px 12px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    cursor: pointer;
+    user-select: none;
+  }
+  .filter-modal-check:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+    color: var(--accent-text);
+  }
+  .filter-modal-check input { cursor: pointer; margin: 0; }
   .leadership-tracker-block {
     padding: 12px 14px;
     border-bottom: 0.5px solid var(--border);
@@ -4195,8 +4219,23 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
   const presentTrackerIds = new Set(sectionTools.map(t => t.filterTracker).filter(Boolean));
   const trackers = getConfiguredTrackers().filter(t => presentTrackerIds.has(t.id));
 
-  // Filter state — defaults each render (active status, all trackers).
-  const state = { status: 'active', tracker: 'all' };
+  // Map a tile ID to its view type (same prefixes the subsections use).
+  const viewTypeOf = (id) => {
+    if (typeof id !== 'string') return 'stagegate';
+    if (id.startsWith('obj__okr__')) return 'okr';
+    if (id.startsWith('obj__kpi__')) return 'kpi';
+    return 'stagegate'; // obj__stagegate__ or legacy stage-gate__
+  };
+  // View types actually present among Leadership tiles, in canonical order.
+  const VIEW_ORDER = ['stagegate', 'okr', 'kpi'];
+  const presentViews = VIEW_ORDER.filter(v =>
+    sectionTools.some(t => viewTypeOf(t.id) === v)
+  );
+
+  // Filter state — defaults each render (active status, all trackers, all views).
+  // `views` is a Set of selected view types; default = every present view (no
+  // view filtering). Multiselect: a tile shows only if its view is in the set.
+  const state = { status: 'active', tracker: 'all', views: new Set(presentViews) };
 
   // The filter controls live inside the section header, right-aligned. The
   // header itself toggles collapse on click, so we stop propagation from the
@@ -4217,13 +4256,17 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
   const btnLabel = ctrls.querySelector('.leadership-filter-btn-label');
   const countEl = ctrls.querySelector('.leadership-filter-count');
 
-  // True when the current filter differs from the default view.
-  const isFiltered = () => state.status !== 'active' || state.tracker !== 'all';
+  // True when the current filter differs from the default view. For views, the
+  // default is "all present selected"; anything fewer is a filter.
+  const isFiltered = () =>
+    state.status !== 'active' ||
+    state.tracker !== 'all' ||
+    state.views.size !== presentViews.length;
 
   // Apply the current filter state to the rendered tiles, hide emptied
   // subsections/groups, and update the button + count.
   function apply() {
-    const { status, tracker } = state;
+    const { status, tracker, views } = state;
     let shown = 0, total = 0;
     wrap.querySelectorAll('.tile').forEach(tileEl => {
       const id = tileEl.dataset.toolId || '';
@@ -4231,7 +4274,9 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
       if (!tool) return; // not an objective tile (shouldn't happen in leadership)
       total++;
       let visible = true;
-      if (tracker !== 'all' && tool.filterTracker !== tracker) visible = false;
+      // View-type filter (multiselect).
+      if (!views.has(viewTypeOf(id))) visible = false;
+      if (visible && tracker !== 'all' && tool.filterTracker !== tracker) visible = false;
       if (visible) {
         if (status === 'active') {
           if (!tool.filterActive) visible = false;
@@ -4264,8 +4309,8 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
     countEl.textContent = total ? `${shown} of ${total}` : '';
   }
 
-  // Open the filter modal. The dropdowns reflect current state; changes apply
-  // live (so you see the effect behind the modal). "Clear" resets to defaults.
+  // Open the filter modal. Controls reflect current state; changes apply live
+  // (so you see the effect behind the modal). "Clear" resets to defaults.
   function openFilterModal() {
     const STATUS_OPTS = [
       ['active', 'Active only'],
@@ -4275,6 +4320,19 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
       ['ontrack', 'On track'],
       ['complete', 'Complete']
     ];
+    // View checkboxes only render when more than one view type is present
+    // (filtering by view is meaningless with a single type).
+    const viewField = presentViews.length > 1 ? `
+      <div class="filter-modal-field">
+        <span class="filter-modal-label">View</span>
+        <div class="filter-modal-checks">
+          ${presentViews.map(v => `
+            <label class="filter-modal-check">
+              <input type="checkbox" data-view="${v}"${state.views.has(v) ? ' checked' : ''}>
+              <span>${escText(VIEW_TYPES[v] ? VIEW_TYPES[v].label : v)}</span>
+            </label>`).join('')}
+        </div>
+      </div>` : '';
     openModal(`
       <h3>Filter leadership</h3>
       <div class="filter-modal-field">
@@ -4290,6 +4348,7 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
           ${trackers.map(t => `<option value="${escAttr(t.id)}"${state.tracker === t.id ? ' selected' : ''}>${escText(t.name)}</option>`).join('')}
         </select>
       </div>
+      ${viewField}
       <div class="modal-actions">
         <button class="btn btn-ghost" data-act="clear">Clear</button>
         <button class="btn btn-primary" data-act="done">Done</button>
@@ -4299,11 +4358,20 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
     const trackerSel = document.getElementById('lead-filter-tracker');
     statusSel.addEventListener('change', () => { state.status = statusSel.value; apply(); });
     trackerSel.addEventListener('change', () => { state.tracker = trackerSel.value; apply(); });
+    document.querySelectorAll('[data-view]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const v = cb.dataset.view;
+        if (cb.checked) state.views.add(v); else state.views.delete(v);
+        apply();
+      });
+    });
     document.querySelector('[data-act="clear"]').addEventListener('click', () => {
       state.status = 'active';
       state.tracker = 'all';
+      state.views = new Set(presentViews);
       statusSel.value = 'active';
       trackerSel.value = 'all';
+      document.querySelectorAll('[data-view]').forEach(cb => { cb.checked = true; });
       apply();
     });
     document.querySelector('[data-act="done"]').addEventListener('click', closeModal);
