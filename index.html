@@ -3521,9 +3521,9 @@ function renderGroupTree(node, container, sectionId, subsectionDef, pathKey, dep
     groupWrap.className = `tile-group tile-group-d${depth}`;
     groupWrap.dataset.groupAttr = node.attr;
     groupWrap.dataset.groupValue = g.value;
-    // Group header label: "Division: Electrolyzer" style, with the attr name
-    // as a quiet prefix so nested levels are readable.
-    const headLabel = `${GROUP_ATTR_LABEL[node.attr] || node.attr}: ${g.label}`;
+    // Group header shows just the value label (e.g. "Electrolyzer"). The
+    // attribute (Division/Product/Generation) is implied by the grouping chain.
+    const headLabel = g.label;
     const head = buildCollapsibleHead('div', 'tile-group-head', headLabel, groupKey, groupWrap);
     groupWrap.appendChild(head);
     renderGroupTree(g.child, groupWrap, sectionId, subsectionDef, groupKey, depth + 1);
