@@ -2668,6 +2668,25 @@ function buildToolList(session) {
       tile.filterStatus = statusMeta.isComplete ? 'complete' : (statusMeta.status || 'ontrack');
       tile.filterActive = statusMeta.isActive !== false && !statusMeta.isComplete;
     }
+    // Stage 3 data: stamp grouping attributes + OKR/KPI data from the richest
+    // snapshot entry (company-bin overlay, divisional fallback). Grouping reads
+    // groupAttrs; Stage 4's OKR/KPI renderers read keyResults/kpis. Absent on
+    // pre-Stage-3 snapshots — tiles just won't group / show OKR-KPI until bins
+    // are re-saved, which degrades gracefully.
+    const odata = getObjectiveData(tracker, objId, nameFallback);
+    if (odata) {
+      tile.groupAttrs = {
+        division: odata.division || '',
+        productLine: odata.productLine || '',
+        productModel: odata.productModel || ''
+      };
+      tile.keyResults = Array.isArray(odata.keyResults) ? odata.keyResults : [];
+      tile.kpis = Array.isArray(odata.kpis) ? odata.kpis : [];
+    } else {
+      tile.groupAttrs = { division: '', productLine: '', productModel: '' };
+      tile.keyResults = [];
+      tile.kpis = [];
+    }
     return tile;
   }
 
@@ -3017,6 +3036,24 @@ function findCompanyMatch(name) {
   return null;
 }
 
+// Resolve the richest snapshot entry for an objective: prefer the company-bin
+// twin (by name match) since only rd-gantt's snapshot carries grouping
+// attributes + OKR/KPI data; fall back to the objective's own divisional entry.
+// Returns the snapshot objective object, or null. Used to stamp grouping attrs
+// (division/productLine/productModel) and OKR/KPI data onto tiles.
+function getObjectiveData(trackerId, objId, name) {
+  const company = getCompanyTracker();
+  // Company match first (richest data), unless this tile IS the company bin.
+  if (company && company.id !== trackerId) {
+    const m = findCompanyMatch(name);
+    if (m && m.obj) return m.obj;
+  }
+  // Divisional (or company-bin self) fallback.
+  const snap = getSnapshot(trackerId);
+  const obj = snap && snap.objectives && snap.objectives[String(objId)];
+  return obj || null;
+}
+
 // Build the days line from a gates array. Returns a string like:
 //   "8 days past gate due"    — at least one gate is overdue (most urgent wins)
 //   "5 days ahead · 12 until next gate" — last passed gate was passed early
@@ -3274,6 +3311,15 @@ function gatherLeadershipObjectives(led) {
     it.isActive   = cobj.isActive;
     it.parentName = cobj.parentName;
     it.gates      = cobj.gates;
+    // Stage 3 enrichment: grouping attributes + OKR/KPI data come from the
+    // company bin (only rd-gantt's snapshot carries them; divisional gantts
+    // don't). Copied here so divisional tiles inherit them. Guarded so a
+    // pre-Stage-3 company snapshot (missing these) doesn't clobber with undefined.
+    if (cobj.division != null) it.division = cobj.division;
+    if (cobj.productLine != null) it.productLine = cobj.productLine;
+    if (cobj.productModel != null) it.productModel = cobj.productModel;
+    if (cobj.keyResults != null) it.keyResults = cobj.keyResults;
+    if (cobj.kpis != null) it.kpis = cobj.kpis;
   });
 
   return items;
