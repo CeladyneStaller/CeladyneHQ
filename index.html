@@ -547,18 +547,20 @@
   .tile-group-head {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     color: var(--text);
     padding: 6px 0;
     user-select: none;
   }
   .tile-group-d1 { margin-left: 14px; }
   .tile-group-d2 { margin-left: 14px; }
-  .tile-group-d1 > .tile-group-head { font-size: 12px; color: var(--text-muted); }
-  .tile-group-d2 > .tile-group-head { font-size: 12px; color: var(--text-subtle); }
+  .tile-group-d1 > .tile-group-head { font-size: 15px; color: var(--text-muted); }
+  .tile-group-d2 > .tile-group-head { font-size: 14px; color: var(--text-subtle); }
   .tile-group-head .tile-section-toggle { transition: transform 0.15s; }
   .tile-group.collapsed > .tile-group-head .tile-section-toggle { transform: rotate(-90deg); }
   .tile-group.collapsed > *:not(.tile-group-head) { display: none; }
@@ -828,12 +830,15 @@
     padding: 0 24px 0 8px;
   }
   /* Stage 2 leadership filter bar (replaces the old panel toolbar). */
+  /* Filter controls live inside the Leadership section header, pushed to the
+     right edge. Reset the header's uppercase/letter-spacing for the button. */
   .leadership-filter-bar {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 14px;
-    flex-wrap: wrap;
+    margin-left: auto;
+    text-transform: none;
+    letter-spacing: normal;
   }
   /* Filter button — opens the filter modal. Active state when a non-default
      filter is applied (accent ring + tint). */
@@ -841,6 +846,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    font-weight: 500;
   }
   .leadership-filter-btn .ti { font-size: 14px; }
   .leadership-filter-btn.has-active {
@@ -850,8 +856,8 @@
   }
   .leadership-filter-count {
     font-size: 12px;
+    font-weight: 400;
     color: var(--text-subtle);
-    margin-left: auto;
   }
   /* Filter modal fields (status + tracker selects). */
   .filter-modal-field { margin-bottom: 14px; }
@@ -3959,10 +3965,10 @@ function renderTiles() {
     const head = buildCollapsibleHead('h2', 'tile-section-head', section.label, `section/${section.id}`, wrap);
     wrap.appendChild(head);
 
-    // Leadership gets a status + tracker filter header (Stage 2). Filters are
-    // applied client-side over the rendered tiles and reset on every render.
+    // Leadership gets a status + tracker filter control in its header (Stage 2).
+    // Filters apply client-side over the rendered tiles and reset every render.
     if (section.id === 'leadership') {
-      appendLeadershipFilter(wrap, sectionTools);
+      appendLeadershipFilter(wrap, head, sectionTools);
     }
 
     // Sections that render as type-grouped subsections rather than a flat grid.
@@ -4084,7 +4090,7 @@ async function setSectionGrouping(sectionId, nextChain) {
 // transient triage action, not a durable preference. The button surfaces the
 // active filter (a dot + the visible count) so you can see a filter is on
 // without opening the modal.
-function appendLeadershipFilter(wrap, sectionTools) {
+function appendLeadershipFilter(wrap, head, sectionTools) {
   // Distinct trackers present among these tiles (in config order).
   const presentTrackerIds = new Set(sectionTools.map(t => t.filterTracker).filter(Boolean));
   const trackers = getConfiguredTrackers().filter(t => presentTrackerIds.has(t.id));
@@ -4092,20 +4098,24 @@ function appendLeadershipFilter(wrap, sectionTools) {
   // Filter state — defaults each render (active status, all trackers).
   const state = { status: 'active', tracker: 'all' };
 
-  const bar = document.createElement('div');
-  bar.className = 'leadership-filter-bar';
-  bar.innerHTML = `
+  // The filter controls live inside the section header, right-aligned. The
+  // header itself toggles collapse on click, so we stop propagation from the
+  // controls (clicking Filter must not collapse the section).
+  const ctrls = document.createElement('div');
+  ctrls.className = 'leadership-filter-bar';
+  ctrls.innerHTML = `
+    <span class="leadership-filter-count" aria-live="polite"></span>
     <button type="button" class="btn btn-sm leadership-filter-btn" aria-haspopup="dialog">
       <i class="ti ti-filter" aria-hidden="true"></i>
       <span class="leadership-filter-btn-label">Filter</span>
     </button>
-    <span class="leadership-filter-count" aria-live="polite"></span>
   `;
-  wrap.appendChild(bar);
+  ctrls.addEventListener('click', (e) => e.stopPropagation());
+  head.appendChild(ctrls);
 
-  const btn = bar.querySelector('.leadership-filter-btn');
-  const btnLabel = bar.querySelector('.leadership-filter-btn-label');
-  const countEl = bar.querySelector('.leadership-filter-count');
+  const btn = ctrls.querySelector('.leadership-filter-btn');
+  const btnLabel = ctrls.querySelector('.leadership-filter-btn-label');
+  const countEl = ctrls.querySelector('.leadership-filter-count');
 
   // True when the current filter differs from the default view.
   const isFiltered = () => state.status !== 'active' || state.tracker !== 'all';
