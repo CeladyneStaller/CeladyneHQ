@@ -1531,6 +1531,8 @@ const STATE = {
   config: null,         // { usersBinId, masterKey, logoPath, sessionDays }
   session: null,        // { email, role, issuedAt, expiresAt, tokenId }
   usersRecord: null,    // { users: [...], schemaVersion }
+  snapshots: {},        // trackerId → computedStatus | null (aggregate-fetch pool)
+  snapshotsHydratedAt: 0, // timestamp of last successful hydration
   bootstrapping: false,
   loginThrottleUntil: 0
 };
@@ -2572,6 +2574,114 @@ function fetchTrackerComputedStatus(trackerId) {
     })();
   }
   return _statusCache[trackerId];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aggregate snapshot hydration (the "fetch once, read many" architecture)
+//
+// Instead of each tile/panel fetching its tracker's snapshot independently
+// (which caused fetch bursts → JSONBin 429s, and cache races), hydrateSnapshots()
+// runs once at load: it computes the minimal set of trackers the current user
+// needs, fetches them all in parallel, and deposits results into STATE.snapshots.
+//
+// After hydration, every consumer reads STATE.snapshots[trackerId] synchronously
+// via getSnapshot() — no awaits, no per-tile fetching, no races.
+//
+// The fetch count per load is exactly |needed trackers|, which is computable
+// up front from the session. For most users that's 1-3; for the CTO (who leads
+// all trackers) it's all of them — correct, since the leadership panel needs them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Compute the minimal set of tracker IDs whose snapshots this user needs:
+//   - the company tracker (always — powers the health overlay on every tile)
+//   - trackers the user is assigned objectives in (their stage-gate tiles)
+//   - trackers the user leads (the leadership panel)
+//   - (future) trackers referenced by watched objectives
+// Returns an array of unique tracker IDs that actually exist in config.
+function computeNeededTrackers(session) {
+  const ids = new Set();
+  const company = getCompanyTracker();
+  if (company) ids.add(company.id);
+  if (session) {
+    (session.assignedObjectives || []).forEach(a => {
+      if (a && a.tracker) ids.add(a.tracker);
+    });
+    trackersLed(session).forEach(t => ids.add(t.id));
+    // FUTURE (watch tiles): add trackers referenced by session.watchedObjectives
+    // (session.watchedObjectives || []).forEach(w => { if (w && w.tracker) ids.add(w.tracker); });
+  }
+  // Keep only IDs that resolve to a configured tracker.
+  const configured = new Set(getConfiguredTrackers().map(t => t.id));
+  return [...ids].filter(id => configured.has(id));
+}
+
+// Fetch a single tracker's snapshot with retry + localStorage-cache fallback.
+// Mirrors the logic that lived in fetchTrackerComputedStatus, but returns the
+// snapshot directly (not a cached promise) for use inside hydration's Promise.all.
+async function _fetchSnapshotForHydration(trackerId) {
+  const delays = [0, 300, 700];
+  let lastErr;
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i]) await new Promise(r => setTimeout(r, delays[i]));
+    try {
+      const data = await jbFetchTracker(trackerId);
+      const snapshot = (data && data.computedStatus) || null;
+      if (snapshot) saveCachedSnapshot(trackerId, snapshot);
+      return snapshot;
+    } catch (err) {
+      lastErr = err;
+      if (/Invalid bin or key/i.test(err.message || '')) break;
+    }
+  }
+  const cached = loadCachedSnapshot(trackerId);
+  if (cached) {
+    console.warn(`Snapshot fetch failed for ${trackerId}; using cached fallback.`, lastErr);
+    return cached;
+  }
+  console.warn('Snapshot fetch failed and no cache available:', trackerId, lastErr);
+  return null;
+}
+
+// Hydrate STATE.snapshots for the current user. Fetches the needed tracker set
+// in parallel, merges results into STATE.snapshots (preserving any trackers not
+// in this fetch — e.g. ones hydrated earlier). Returns the set of tracker IDs
+// that were fetched. Never throws; individual failures resolve to null/cached.
+async function hydrateSnapshots(session) {
+  const needed = computeNeededTrackers(session || STATE.session);
+  if (!needed.length) {
+    STATE.snapshotsHydratedAt = Date.now();
+    return [];
+  }
+  const results = await Promise.all(needed.map(async id => {
+    const snapshot = await _fetchSnapshotForHydration(id);
+    return { id, snapshot };
+  }));
+  results.forEach(({ id, snapshot }) => {
+    STATE.snapshots[id] = snapshot;
+  });
+  STATE.snapshotsHydratedAt = Date.now();
+  return needed;
+}
+
+// Seed STATE.snapshots from the localStorage cache for instant first render
+// (option B). Called before hydration so tiles can render with last-known-good
+// data immediately, then re-render when fresh data lands. Only fills trackers
+// not already present in STATE.snapshots; never overwrites fresh data with cache.
+function seedSnapshotsFromCache(session) {
+  const needed = computeNeededTrackers(session || STATE.session);
+  needed.forEach(id => {
+    if (STATE.snapshots[id] === undefined) {
+      const cached = loadCachedSnapshot(id);
+      if (cached) STATE.snapshots[id] = cached;
+    }
+  });
+}
+
+// Synchronous accessor — the single read point for snapshot data post-hydration.
+// Returns the computedStatus for a tracker, or null if not hydrated / failed.
+function getSnapshot(trackerId) {
+  const s = STATE.snapshots[trackerId];
+  return s === undefined ? null : s;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
