@@ -653,6 +653,28 @@
     font-size: 12px;
     padding: 0 24px 0 8px;
   }
+  /* Stage 2 leadership filter bar (replaces the old panel toolbar). */
+  .leadership-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .leadership-filter-bar select {
+    height: 30px;
+    font-size: 12px;
+    padding: 0 26px 0 10px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+  }
+  .leadership-filter-count {
+    font-size: 12px;
+    color: var(--text-subtle);
+    margin-left: auto;
+  }
   .leadership-tracker-block {
     padding: 12px 14px;
     border-bottom: 0.5px solid var(--border);
@@ -2608,27 +2630,26 @@ function buildToolList(session) {
   // configured tiles that duplicate an existing triple are suppressed.
   //
   // Section is derived per tile via objectiveTileSection (assigned→projects,
-  // leads→leadership, else→watching). Stage 1: leadership-routed tiles and
-  // non-stagegate view types are suppressed (handled in Stage 2 / Stage 4).
+  // leads→leadership, else→watching). Non-stagegate view types are suppressed
+  // until Stage 4. Leadership-routed tiles now render (Stage 2).
   const seenTriples = new Set();
   const tripleKey = (tracker, objId, viewType) => `${tracker}__${objId}__${viewType}`;
 
   // Helper: build one objective tile object (or null if it can't/shouldn't render).
-  // `removable` marks user-configured tiles (vs assignment auto-tiles) — only
-  // those get a remove control in edit mode.
-  function buildObjectiveTile(tracker, objId, viewType, nameFallback, removable) {
+  //   removable — user-configured tiles get a remove control in edit mode.
+  //   statusMeta — optional { status, isComplete, isActive } for client-side
+  //     filtering (Leadership filter). Read off the tile's dataset at render.
+  function buildObjectiveTile(tracker, objId, viewType, nameFallback, removable, statusMeta) {
     const trackerObj = findTracker(tracker);
     if (!trackerObj) return null; // tracker no longer configured
     const section = objectiveTileSection(session, tracker);
-    // Stage 1 limits: only stagegate view renders, and leadership routing is
-    // deferred to Stage 2 (those tiles are suppressed for now).
+    // Stage limit: only stagegate view renders (OKR/KPI arrive in Stage 4).
     if (viewType !== 'stagegate') return null;
-    if (section === 'leadership') return null;
     const url = stageGateUrlFor(trackerObj, objId) || ganttUrlFor(trackerObj);
     if (!url) return null;
     const display = nameFallback || `#${objId}`;
     const vt = VIEW_TYPES[viewType] || VIEW_TYPES.stagegate;
-    return {
+    const tile = {
       id: `obj__${viewType}__${tracker}__${objId}`,
       name: shortLabel(display, 32),
       description: trackerObj.name,
@@ -2641,6 +2662,13 @@ function buildToolList(session) {
       titleAttr: nameFallback ? `${vt.label} for: ${nameFallback} (#${objId})` : `${vt.label} for #${objId}`,
       fetchStatus: async () => fetchStageGateStatus(tracker, objId, nameFallback)
     };
+    if (statusMeta) {
+      // Used by the Leadership filter to show/hide without re-deriving status.
+      tile.filterTracker = tracker;
+      tile.filterStatus = statusMeta.isComplete ? 'complete' : (statusMeta.status || 'ontrack');
+      tile.filterActive = statusMeta.isActive !== false && !statusMeta.isComplete;
+    }
+    return tile;
   }
 
   // 4a) Assignment auto-tiles (Path A): one stage-gate tile per assignment.
@@ -2654,7 +2682,32 @@ function buildToolList(session) {
     list.push(tile);
   });
 
-  // 4b) User-configured tiles. Dedup against auto-tiles and each other.
+  // 4b) Leadership auto-tiles (Model A): a stage-gate tile per objective in each
+  // led tracker, routed to Leadership. Generated from the same enriched data the
+  // old panel used (company overlay + dedup applied). Not removable. Carries
+  // status metadata for the Leadership filter. Deduped against assignment
+  // auto-tiles (an objective you both lead and are assigned to shows in Projects).
+  const led = trackersLed(session);
+  if (led.length) {
+    const ledObjectives = gatherLeadershipObjectives(led);
+    ledObjectives.forEach(it => {
+      const key = tripleKey(it.tracker.id, it.id, 'stagegate');
+      if (seenTriples.has(key)) return;
+      const tile = buildObjectiveTile(
+        it.tracker.id, it.id, 'stagegate', it.name, false,
+        { status: it.status, isComplete: it.isComplete, isActive: it.isActive }
+      );
+      if (!tile) return;
+      // Only keep tiles that actually routed to leadership (an assigned-in
+      // objective would route to projects and was already emitted in 4a, or
+      // will dedup here). Watching can't happen for led trackers.
+      if (tile.section !== 'leadership') return;
+      seenTriples.add(key);
+      list.push(tile);
+    });
+  }
+
+  // 4c) User-configured tiles. Dedup against auto-tiles and each other.
   // Removable in edit mode.
   const configured = (session && session.configuredTiles) || [];
   configured.forEach(ct => {
@@ -3150,40 +3203,33 @@ function renderGateBubblesHtml(gates) {
 // power the Stage-gate tile indicators (no extra computation hub-side).
 // Filters reset on each render (no persistence).
 // ─────────────────────────────────────────────────────────────────────────────
-async function renderLeadershipPanel(led) {
-  const root = document.getElementById('leadership-panel');
-  if (!root) return;
-  root.innerHTML = '<div class="leadership-panel-loading">Loading leadership view…</div>';
-
-  // Read snapshots from the hydrated pool. Always include the company tracker —
-  // it's the source of truth for card content (status, health, parent, gates),
-  // even if the user isn't a Lead of it. Synchronous: hydrateSnapshots() already
-  // loaded these (computeNeededTrackers includes company + all led trackers).
+// Gather the enriched objective list for a leader's tracker set. Returns items
+// with company-bin overlay applied and company-vs-divisional dedup done. This
+// is the data layer behind Leadership tiles (extracted from the old panel).
+// Each item: { tracker, id, name, score, status, progress, daysLeft, delayDays,
+//              isComplete, isActive, parentName, gates, slug }.
+function gatherLeadershipObjectives(led) {
   const company = getCompanyTracker();
   const fetchSet = led.slice();
   if (company && !fetchSet.find(t => t.id === company.id)) {
     fetchSet.push(company);
   }
-  const results = fetchSet.map(t => {
-    return { tracker: t, snapshot: getSnapshot(t.id) };
-  });
+  const results = fetchSet.map(t => ({ tracker: t, snapshot: getSnapshot(t.id) }));
 
-  // Build name → company-objective map. Used to overlay company-bin data
-  // onto each card (matched by case-insensitive, trimmed name).
+  // name → company-objective map for overlay (case-insensitive, trimmed).
+  const norm = s => (s || '').toLowerCase().trim();
   const companyByName = new Map();
   if (company) {
     const cr = results.find(r => r.tracker.id === company.id);
     const cobjs = cr && cr.snapshot && cr.snapshot.objectives;
     if (cobjs) {
       Object.values(cobjs).forEach(obj => {
-        if (obj && obj.name) companyByName.set(obj.name.toLowerCase().trim(), obj);
+        if (obj && obj.name) companyByName.set(norm(obj.name), obj);
       });
     }
   }
 
-  // Build flat objective list from the trackers the user actually leads.
-  // (The company bin is fetched above for enrichment, but only included as a
-  // source bin if it's in the user's `led` set.)
+  // Flat list from the trackers the user actually leads.
   const ledIds = new Set(led.map(t => t.id));
   let items = [];
   results.forEach(({ tracker, snapshot }) => {
@@ -3197,37 +3243,26 @@ async function renderLeadershipPanel(led) {
       const name = (obj.name && obj.name.trim())
         || (fromAssignment && fromAssignment.name)
         || `Objective #${id}`;
-      items.push({
-        tracker,
-        id,
-        ...obj,
-        name
-      });
+      items.push({ tracker, id, ...obj, name });
     }
   });
 
-  // Cross-bin dedup: drop company-level entries whose name also appears in
-  // any non-company bin. The non-company bin's copy is treated as the source
-  // of truth; the company bin entry is hidden to avoid double-counting in the
-  // CTO's view. Match is case-insensitive, whitespace-trimmed name.
-  const norm = s => (s || '').toLowerCase().trim();
+  // Cross-bin dedup: drop company-level entries whose name also appears in a
+  // non-company bin (the divisional copy wins).
   const nonCompanyNames = new Set();
   items.forEach(it => {
     if (!it.tracker.companyLevel && it.name) nonCompanyNames.add(norm(it.name));
   });
   items = items.filter(it => {
-    if (!it.tracker.companyLevel) return true;          // non-company always shown
-    if (!it.name) return true;                          // can't match without name → keep
-    return !nonCompanyNames.has(norm(it.name));         // suppress duplicate
+    if (!it.tracker.companyLevel) return true;
+    if (!it.name) return true;
+    return !nonCompanyNames.has(norm(it.name));
   });
 
-  // Company-bin enrichment: overlay the company bin's view on every card.
-  // Display fields (badge, parent, health, days, gates) come from company;
-  // routing fields (tracker, id, slug, name) stay so click URLs go to the
-  // divisional bin where the user actually does the work. No company match
-  // → graceful fallback to divisional data (this card's bin already supplied it).
+  // Company-bin enrichment: overlay company view (display fields) while keeping
+  // routing fields (tracker, id, slug, name) pointed at the divisional bin.
   items.forEach(it => {
-    if (it.tracker.companyLevel) return; // already company data
+    if (it.tracker.companyLevel) return;
     const cobj = companyByName.get(norm(it.name));
     if (!cobj) return;
     it.score      = cobj.score;
@@ -3241,170 +3276,7 @@ async function renderLeadershipPanel(led) {
     it.gates      = cobj.gates;
   });
 
-  // Status priority for sorting: at-risk first, then watch, on-track, complete.
-  function statusPriority(item) {
-    if (item.isComplete) return 4;
-    if (item.status === 'atrisk') return 0;
-    if (item.status === 'watch') return 1;
-    if (item.status === 'ontrack') return 2;
-    return 3;
-  }
-  items.sort((a, b) => {
-    const dp = statusPriority(a) - statusPriority(b);
-    if (dp !== 0) return dp;
-    return (a.daysLeft || 0) - (b.daysLeft || 0);
-  });
-
-  // No data at all → friendly empty state.
-  if (!items.length) {
-    root.innerHTML = `
-      <div class="leadership-empty">
-        No objective data yet. Save a Gantt for one of your trackers to populate the snapshot.
-      </div>`;
-    return;
-  }
-
-  // Build filter UI. Filters reset to "all" on every render (per spec).
-  // The filter row is hidden behind a "Filter" toggle button to keep the
-  // panel chrome minimal until the user wants to narrow.
-  const filtersHtml = `
-    <div class="leadership-toolbar">
-      <button type="button" class="btn-leadership-filter" id="leadership-filter-toggle" aria-expanded="false">
-        <i class="ti ti-filter" aria-hidden="true"></i><span>Filter</span>
-      </button>
-    </div>
-    <div class="leadership-filters" id="leadership-filters" hidden>
-      <select id="leadership-tracker-filter">
-        <option value="all">All trackers</option>
-        ${led.map(t => `<option value="${escAttr(t.id)}">${escText(t.name)}</option>`).join('')}
-      </select>
-      <select id="leadership-status-filter">
-        <option value="active" selected>Active only</option>
-        <option value="all">All (incl. complete)</option>
-        <option value="atrisk">At risk</option>
-        <option value="watch">Watch</option>
-        <option value="ontrack">On track</option>
-        <option value="complete">Complete</option>
-      </select>
-    </div>
-    <div id="leadership-body"></div>
-  `;
-  root.innerHTML = filtersHtml;
-  const bodyEl = document.getElementById('leadership-body');
-  const filtersEl = document.getElementById('leadership-filters');
-  const filterBtn = document.getElementById('leadership-filter-toggle');
-  filterBtn.addEventListener('click', () => {
-    const willOpen = filtersEl.hidden;
-    filtersEl.hidden = !willOpen;
-    filterBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
-  });
-
-  function statusKeyForFilter(item) {
-    return item.isComplete ? 'complete' : item.status;
-  }
-  // True when the item should appear in the default "Active" view.
-  // Backwards-compat: snapshots written before isActive was added (older
-  // Gantt code) treat undefined as active so the panel doesn't go empty.
-  function isItemActive(item) {
-    return item.isActive !== false && !item.isComplete;
-  }
-
-  function renderBody() {
-    const trackerFilter = document.getElementById('leadership-tracker-filter').value;
-    const statusFilter = document.getElementById('leadership-status-filter').value;
-    const isFiltered = trackerFilter !== 'all' || statusFilter !== 'active';
-    filterBtn.classList.toggle('has-active', isFiltered);
-    const visible = items.filter(it => {
-      if (trackerFilter !== 'all' && it.tracker.id !== trackerFilter) return false;
-      // Status semantics:
-      //   'active'   → active (started, not tentative, not complete)
-      //   'all'      → no status restriction (includes complete + tentative)
-      //   'complete' → only complete
-      //   'atrisk' / 'watch' / 'ontrack' → active items with that health
-      if (statusFilter === 'active') {
-        if (!isItemActive(it)) return false;
-      } else if (statusFilter === 'complete') {
-        if (!it.isComplete) return false;
-      } else if (statusFilter !== 'all') {
-        if (!isItemActive(it) || it.status !== statusFilter) return false;
-      }
-      return true;
-    });
-
-    if (!visible.length) {
-      bodyEl.innerHTML = '<div class="leadership-empty">No objectives match the current filters.</div>';
-      return;
-    }
-
-    // Group visible items by tracker for the per-tracker block layout.
-    const byTracker = new Map();
-    visible.forEach(it => {
-      const arr = byTracker.get(it.tracker.id) || [];
-      arr.push(it);
-      byTracker.set(it.tracker.id, arr);
-    });
-
-    bodyEl.innerHTML = led
-      .filter(t => byTracker.has(t.id))
-      .map(t => renderTrackerBlock(t, byTracker.get(t.id)))
-      .join('');
-  }
-
-  function renderTrackerBlock(tracker, blockItems) {
-    const counts = { atrisk: 0, watch: 0, ontrack: 0, complete: 0 };
-    blockItems.forEach(it => counts[statusKeyForFilter(it)]++);
-    const summary = [
-      counts.atrisk  ? `${counts.atrisk} at risk`   : '',
-      counts.watch   ? `${counts.watch} watch`      : '',
-      counts.ontrack ? `${counts.ontrack} on track` : '',
-      counts.complete ? `${counts.complete} complete` : ''
-    ].filter(Boolean).join(' · ');
-    const cards = blockItems.map(it => renderObjectiveCard(it)).join('');
-    return `
-      <div class="leadership-tracker-block">
-        <div class="leadership-tracker-head">
-          <div class="leadership-tracker-name">${escText(tracker.name)}</div>
-          <div class="leadership-tracker-meta">${escText(summary || `${blockItems.length} objectives`)}</div>
-        </div>
-        <div class="leadership-objgrid">${cards}</div>
-      </div>
-    `;
-  }
-
-  function renderObjectiveCard(it) {
-    const statusKey = it.isComplete ? 'complete' : it.status;
-    const statusLabel = STATUS_LABELS[statusKey] || '';
-
-    // Subtitle: "Bin · Parent" — same shape as new stage-gate tiles. Bin is the
-    // *card*'s tracker (where clicks go); parent comes from the company-bin overlay.
-    const binName = (it.tracker && it.tracker.name) || '';
-    const parentName = (it.parentName || '').trim();
-    const meta = [binName, parentName].filter(Boolean).join(' · ');
-
-    // Status line: "Health 72 · 8 days past gate due". Same builder as the tile.
-    const daysText = buildGateDaysText(it.gates || [], !!it.isComplete, startOfTodayMs());
-    const healthText = Number.isFinite(it.score) ? `Health ${it.score}` : '';
-    const statusLine = [healthText, daysText].filter(Boolean).join(' · ');
-
-    const url = stageGateUrlFor(it.tracker, it.id, it.slug);
-    const gatesHtml = renderGateBubblesHtml(it.gates || []);
-    return `
-      <a class="leadership-card" href="${escAttr(url || '#')}" target="_blank" rel="noopener noreferrer">
-        <div class="leadership-card-head">
-          <span class="leadership-card-name" title="${escAttr(it.name)}">${escText(it.name)}</span>
-          ${statusLabel ? `<span class="leadership-status-badge ${statusKey}">${statusLabel}</span>` : ''}
-        </div>
-        ${meta ? `<div class="leadership-card-meta">${escText(meta)}</div>` : ''}
-        ${statusLine ? `<div class="leadership-card-stats ${statusKey}">${escText(statusLine)}</div>` : ''}
-        ${gatesHtml ? `<div class="leadership-card-gates">${gatesHtml}</div>` : ''}
-      </a>
-    `;
-  }
-
-  // Wire filter changes
-  document.getElementById('leadership-tracker-filter').addEventListener('change', renderBody);
-  document.getElementById('leadership-status-filter').addEventListener('change', renderBody);
-  renderBody();
+  return items;
 }
 
 function escAttr(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
@@ -3553,26 +3425,10 @@ function renderTiles() {
   STATE._currentTools = tools; // expose to fetchTileStatuses
 
   TILE_SECTIONS.forEach(section => {
+    // Leadership only renders for Lead/CTO sessions with at least one led tracker.
     if (section.id === 'leadership') {
-      // Special path: panel rendering, not tiles.
       const led = trackersLed(STATE.session);
       if (!isLeadership(STATE.session) || !led.length) return;
-      const wrap = document.createElement('section');
-      wrap.className = 'tile-section';
-      wrap.dataset.section = 'leadership';
-      const head = buildCollapsibleHead('h2', 'tile-section-head', section.label, `section/leadership`, wrap);
-      wrap.appendChild(head);
-      const panel = document.createElement('div');
-      panel.id = 'leadership-panel';
-      panel.className = 'leadership-panel';
-      wrap.appendChild(panel);
-      root.appendChild(wrap);
-      // Async populate; doesn't block the rest of the page render.
-      renderLeadershipPanel(led).catch(err => {
-        console.warn('leadership panel render failed:', err);
-        panel.innerHTML = '<div class="obj-empty">Could not load leadership data.</div>';
-      });
-      return;
     }
 
     const sectionTools = tools.filter(t => (t.section || 'links') === section.id);
@@ -3590,12 +3446,18 @@ function renderTiles() {
     const head = buildCollapsibleHead('h2', 'tile-section-head', section.label, `section/${section.id}`, wrap);
     wrap.appendChild(head);
 
+    // Leadership gets a status + tracker filter header (Stage 2). Filters are
+    // applied client-side over the rendered tiles and reset on every render.
+    if (section.id === 'leadership') {
+      appendLeadershipFilter(wrap, sectionTools);
+    }
+
     // Sections that render as type-grouped subsections rather than a flat grid.
     // Projects uses the full set (stage-gates/okr/kpi/meetings/gantts); Watching
-    // uses the objective-only set (stage-gates/okr/kpi). Others render flat.
+    // and Leadership use the objective-only set (stage-gates/okr/kpi).
     const subsectionDef =
       section.id === 'projects' ? PROJECTS_SUBSECTIONS :
-      section.id === 'watching' ? OBJECTIVE_SUBSECTIONS :
+      (section.id === 'watching' || section.id === 'leadership') ? OBJECTIVE_SUBSECTIONS :
       null;
 
     if (subsectionDef) {
@@ -3647,6 +3509,76 @@ function renderTiles() {
 
     root.appendChild(wrap);
   });
+}
+
+// Append the Leadership filter header (status + tracker) and wire it to filter
+// the already-rendered tiles in this section. Filters reset every render (per
+// spec — a transient triage action, not a durable preference).
+function appendLeadershipFilter(wrap, sectionTools) {
+  // Distinct trackers present among these tiles (in config order).
+  const presentTrackerIds = new Set(sectionTools.map(t => t.filterTracker).filter(Boolean));
+  const trackers = getConfiguredTrackers().filter(t => presentTrackerIds.has(t.id));
+
+  const bar = document.createElement('div');
+  bar.className = 'leadership-filter-bar';
+  bar.innerHTML = `
+    <select class="leadership-filter-status" aria-label="Filter by status">
+      <option value="active">Active only</option>
+      <option value="all">All (incl. complete)</option>
+      <option value="atrisk">At risk</option>
+      <option value="watch">Watch</option>
+      <option value="ontrack">On track</option>
+      <option value="complete">Complete</option>
+    </select>
+    <select class="leadership-filter-tracker" aria-label="Filter by tracker">
+      <option value="all">All trackers</option>
+      ${trackers.map(t => `<option value="${escAttr(t.id)}">${escText(t.name)}</option>`).join('')}
+    </select>
+    <span class="leadership-filter-count" aria-live="polite"></span>
+  `;
+  wrap.appendChild(bar);
+
+  const statusSel = bar.querySelector('.leadership-filter-status');
+  const trackerSel = bar.querySelector('.leadership-filter-tracker');
+  const countEl = bar.querySelector('.leadership-filter-count');
+
+  function apply() {
+    const status = statusSel.value;
+    const tracker = trackerSel.value;
+    let shown = 0, total = 0;
+    // Iterate the rendered tiles in this section and toggle visibility.
+    wrap.querySelectorAll('.tile').forEach(tileEl => {
+      const id = tileEl.dataset.toolId || '';
+      const tool = sectionTools.find(t => t.id === id);
+      if (!tool) return; // not an objective tile (shouldn't happen in leadership)
+      total++;
+      let visible = true;
+      if (tracker !== 'all' && tool.filterTracker !== tracker) visible = false;
+      if (visible) {
+        if (status === 'active') {
+          if (!tool.filterActive) visible = false;
+        } else if (status === 'complete') {
+          if (tool.filterStatus !== 'complete') visible = false;
+        } else if (status !== 'all') {
+          if (!tool.filterActive || tool.filterStatus !== status) visible = false;
+        }
+      }
+      tileEl.style.display = visible ? '' : 'none';
+      if (visible) shown++;
+    });
+    // Hide subsection headers whose tiles are all filtered out.
+    wrap.querySelectorAll('.tile-subsection').forEach(sub => {
+      const anyVisible = Array.from(sub.querySelectorAll('.tile')).some(t => t.style.display !== 'none');
+      sub.style.display = anyVisible ? '' : 'none';
+    });
+    countEl.textContent = total ? `${shown} of ${total}` : '';
+  }
+
+  statusSel.addEventListener('change', apply);
+  trackerSel.addEventListener('change', apply);
+  // Apply once on render so the default "Active only" filter takes effect.
+  // Deferred to next tick so the tiles exist in the DOM first.
+  setTimeout(apply, 0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
