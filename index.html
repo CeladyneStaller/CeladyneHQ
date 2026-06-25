@@ -2991,18 +2991,24 @@ function buildToolList(session) {
       titleAttr: nameFallback ? `${vt.label} for: ${nameFallback} (#${objId})` : `${vt.label} for #${objId}`,
       fetchStatus: async () => fetchStageGateStatus(tracker, objId, nameFallback)
     };
-    if (statusMeta) {
-      // Used by the Leadership filter to show/hide without re-deriving status.
-      tile.filterTracker = tracker;
-      tile.filterStatus = statusMeta.isComplete ? 'complete' : (statusMeta.status || 'ontrack');
-      tile.filterActive = statusMeta.isActive !== false && !statusMeta.isComplete;
-    }
     // Stage 3 data: stamp grouping attributes + OKR/KPI data from the richest
     // snapshot entry (company-bin overlay, divisional fallback). Grouping reads
     // groupAttrs; Stage 4's OKR/KPI renderers read keyResults/kpis. Absent on
     // pre-Stage-3 snapshots — tiles just won't group / show OKR-KPI until bins
     // are re-saved, which degrades gracefully.
     const odata = getObjectiveData(tracker, objId, nameFallback);
+    // Filter metadata for the Leadership filter (tracker / status / active).
+    // Prefer an explicit statusMeta (passed by the leadership auto-tiles), but
+    // fall back to odata so EVERY objective tile — including configured OKR/KPI
+    // tiles built without statusMeta — gets correct filter fields. Without this
+    // fallback, configured tiles had filterActive === undefined and were hidden
+    // by the default "active" filter even when the objective was active.
+    const fm = statusMeta || odata;
+    if (fm) {
+      tile.filterTracker = tracker;
+      tile.filterStatus = fm.isComplete ? 'complete' : (fm.status || 'ontrack');
+      tile.filterActive = fm.isActive !== false && !fm.isComplete;
+    }
     if (odata) {
       tile.groupAttrs = {
         division: odata.division || '',
