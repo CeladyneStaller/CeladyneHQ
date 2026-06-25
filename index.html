@@ -2141,6 +2141,15 @@ async function jbFetchUsers() {
       leadership: normGroupList(gc.leadership)
     };
 
+    // Leadership view filter — which objective view types show in Leadership.
+    // A durable preference (default: stage-gates only). Validated against the
+    // known view types; an empty/invalid stored value falls back to the default.
+    const VALID_VIEWS = ['stagegate', 'okr', 'kpi'];
+    const storedViews = Array.isArray(u.leadershipViewFilter)
+      ? u.leadershipViewFilter.filter(v => VALID_VIEWS.includes(v))
+      : null;
+    u.leadershipViewFilter = (storedViews && storedViews.length) ? storedViews : ['stagegate'];
+
     if (!Array.isArray(u.assignedObjectives)) {
       u.assignedObjectives = [];
       return;
@@ -2444,6 +2453,7 @@ async function createUserRecord(email, pin, role) {
     assignedObjectives: [],
     configuredTiles: [],
     groupingConfig: { projects: [], leadership: [] },
+    leadershipViewFilter: ['stagegate'],
     createdAt: Date.now(),
     lastLogin: null,
     disabled: false
@@ -2468,6 +2478,9 @@ function makeSession(user, days) {
     groupingConfig: (user.groupingConfig && typeof user.groupingConfig === 'object')
       ? { projects: (user.groupingConfig.projects || []).slice(), leadership: (user.groupingConfig.leadership || []).slice() }
       : { projects: [], leadership: [] },
+    leadershipViewFilter: (Array.isArray(user.leadershipViewFilter) && user.leadershipViewFilter.length)
+      ? user.leadershipViewFilter.slice()
+      : ['stagegate'],
     issuedAt: now,
     expiresAt: now + sessionDays * 24 * 60 * 60 * 1000,
     tokenId: (crypto.randomUUID && crypto.randomUUID()) || generateSalt(8)
@@ -4214,12 +4227,40 @@ async function setSectionGrouping(sectionId, nextChain) {
   }
 }
 
+// Persist the Leadership view-filter selection (which objective view types show
+// in Leadership). A durable per-user preference — mirrors setSectionGrouping:
+// update the session, save locally, then persist to the user record in the
+// background. Unlike status/tracker (transient triage), the view selection
+// sticks across renders and devices.
+async function saveLeadershipViewFilter(views) {
+  if (!STATE.session) return;
+  const VALID_VIEWS = ['stagegate', 'okr', 'kpi'];
+  const next = (Array.isArray(views) ? views : []).filter(v => VALID_VIEWS.includes(v));
+  // Never persist an empty set (it would hide everything on next load with no
+  // obvious way back); fall back to the default.
+  const toStore = next.length ? next : ['stagegate'];
+  STATE.session.leadershipViewFilter = toStore.slice();
+  saveSession(STATE.session);
+  try {
+    const record = STATE.usersRecord || await jbFetchUsers();
+    const me = findUser(record, STATE.session.email);
+    if (me) {
+      me.leadershipViewFilter = toStore.slice();
+      await jbSaveUsers(record);
+      STATE.usersRecord = record;
+    }
+  } catch (err) {
+    console.warn('Failed to persist leadership view filter:', err);
+    toast('View filter saved on this device; sync failed.', 'error');
+  }
+}
+
+
 // Append the Leadership filter control: a compact "Filter" button in the section
-// that opens a small modal with status + tracker dropdowns. Filter state lives in
-// closure (persists across modal open/close) but resets every render — a
-// transient triage action, not a durable preference. The button surfaces the
-// active filter (a dot + the visible count) so you can see a filter is on
-// without opening the modal.
+// that opens a small modal with status, tracker, and view filters. Status and
+// tracker are transient (reset every render — triage). The VIEW selection is a
+// durable preference (session.leadershipViewFilter), so it sticks across renders
+// and devices. The button surfaces an active filter without opening the modal.
 function appendLeadershipFilter(wrap, head, sectionTools) {
   // Distinct trackers present among these tiles (in config order).
   const presentTrackerIds = new Set(sectionTools.map(t => t.filterTracker).filter(Boolean));
@@ -4238,10 +4279,22 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
     sectionTools.some(t => viewTypeOf(t.id) === v)
   );
 
-  // Filter state — defaults each render (active status, all trackers, all views).
-  // `views` is a Set of selected view types; default = every present view (no
-  // view filtering). Multiselect: a tile shows only if its view is in the set.
-  const state = { status: 'active', tracker: 'all', views: new Set(presentViews) };
+  // The persisted view preference (durable, default ['stagegate']). This is the
+  // full saved selection regardless of what's present right now — so if OKR
+  // tiles are temporarily absent, OKR stays selected and reappears when they
+  // return. The ACTIVE filter set intersects the preference with present views.
+  const prefViews = (STATE.session && Array.isArray(STATE.session.leadershipViewFilter) && STATE.session.leadershipViewFilter.length)
+    ? STATE.session.leadershipViewFilter.slice()
+    : ['stagegate'];
+  const prefSet = new Set(prefViews);
+
+  // Filter state. Status/tracker reset each render (transient). `views` is
+  // seeded from the durable preference, intersected with what's present.
+  const state = {
+    status: 'active',
+    tracker: 'all',
+    views: new Set(presentViews.filter(v => prefSet.has(v)))
+  };
 
   // The filter controls live inside the section header, right-aligned. The
   // header itself toggles collapse on click, so we stop propagation from the
@@ -4262,12 +4315,13 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
   const btnLabel = ctrls.querySelector('.leadership-filter-btn-label');
   const countEl = ctrls.querySelector('.leadership-filter-count');
 
-  // True when the current filter differs from the default view. For views, the
-  // default is "all present selected"; anything fewer is a filter.
+  // The "Filtered" indicator reflects the TRANSIENT filters (status/tracker)
+  // only. The view selection is a durable preference (e.g. normally stage-gates
+  // only), so narrowing by view is the baseline, not a transient filter — it
+  // shouldn't make the button read "Filtered" all the time.
   const isFiltered = () =>
     state.status !== 'active' ||
-    state.tracker !== 'all' ||
-    state.views.size !== presentViews.length;
+    state.tracker !== 'all';
 
   // Apply the current filter state to the rendered tiles, hide emptied
   // subsections/groups, and update the button + count.
@@ -4364,20 +4418,25 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
     const trackerSel = document.getElementById('lead-filter-tracker');
     statusSel.addEventListener('change', () => { state.status = statusSel.value; apply(); });
     trackerSel.addEventListener('change', () => { state.tracker = trackerSel.value; apply(); });
+    // View checkboxes: update the live filter AND persist the preference so it
+    // sticks across renders/devices. Toggling OKR on here saves immediately.
     document.querySelectorAll('[data-view]').forEach(cb => {
       cb.addEventListener('change', () => {
         const v = cb.dataset.view;
         if (cb.checked) state.views.add(v); else state.views.delete(v);
         apply();
+        // Persist the selection (a checkbox toggle never produces empty here in
+        // practice; saveLeadershipViewFilter guards the empty case anyway).
+        saveLeadershipViewFilter([...state.views]);
       });
     });
+    // Clear resets the TRANSIENT filters (status/tracker) only. The view
+    // selection is a saved preference, so Clear leaves it alone.
     document.querySelector('[data-act="clear"]').addEventListener('click', () => {
       state.status = 'active';
       state.tracker = 'all';
-      state.views = new Set(presentViews);
       statusSel.value = 'active';
       trackerSel.value = 'all';
-      document.querySelectorAll('[data-view]').forEach(cb => { cb.checked = true; });
       apply();
     });
     document.querySelector('[data-act="done"]').addEventListener('click', closeModal);
