@@ -3941,18 +3941,18 @@ function buildToolList(session) {
                 : bandLabel(view.band);
     const sev = view.isComplete ? 'success'
               : ({ ontrack: 'success', watch: 'warning', atrisk: 'danger' }[key] || 'subtle');
-    // "Health N" is gone. It was objectiveScore under an older name, printed
-    // alongside the body's own "OKR score" row — the same number twice, and the
-    // word "health" already means gate readiness everywhere else in this stack.
-    // The schedule line is what belongs here: "12d left", "+30d slip". The slip
-    // is the work-slip the catch-up alarm uses, so chip and glow never contradict.
-    // The schedule moved into the body's stat row, so it sits at the same height
-    // as the two scores instead of on its own line above them. Nothing is left for
-    // the status slot, which the renderer hides rather than showing a bare dot.
-    // Severity is still returned — the urgent count keys off it, not off text.
-    const bits = [];
+    // This slot is empty by design, and the renderer hides it rather than paint a
+    // bare dot. Two things used to live here and both moved:
+    //   "Health N"  — objectiveScore under an older name, printed alongside the
+    //                 body's own "OKR score" row. The same number twice, and
+    //                 "health" already means gate readiness everywhere else here.
+    //   the schedule — now in the body's stat row, level with the two scores.
+    // Severity is still returned: the urgent count keys off it, not off text.
     return {
-      text: bits.join(' · ') || 'View progress',
+      // Empty string, NOT `bits.join() || 'View progress'`. That fallback existed
+      // to keep the slot from going blank; with nothing left to put here it would
+      // print filler above the scores instead.
+      text: '',
       severity: sev,
       gateLanes: view.gateLanes || [],
       // Flat list retained ONLY for callers that count gates; the dot rows are
