@@ -2150,7 +2150,6 @@ async function jbFetchUsers() {
   // Legacy:  ['Tera-01', 'Mega-03']  (pre-multi-tracker)
   // IDs are coerced to strings (storage may use numeric ids).
   // `name` may be missing for older records — tile labels fall back to id.
-  const legacyTrackerId = (getConfiguredTrackers()[0] || {}).id || 'default';
   data.users.forEach(u => {
     // Org role / leadership fields — added in the leadership build.
     // Default everyone to 'ic'. `leadOf` only meaningful for orgRole === 'lead'.
@@ -2220,21 +2219,9 @@ async function jbFetchUsers() {
       : null;
     u.leadershipViewFilter = (storedViews && storedViews.length) ? storedViews : ['objective'];
 
-    if (!Array.isArray(u.assignedObjectives)) {
-      u.assignedObjectives = [];
-      return;
-    }
-    u.assignedObjectives = u.assignedObjectives.map(item => {
-      if (typeof item === 'string') return { tracker: legacyTrackerId, id: item, name: '' };
-      if (item && typeof item === 'object' && item.id != null) {
-        return {
-          tracker: item.tracker || legacyTrackerId,
-          id: String(item.id),
-          name: item.name || ''
-        };
-      }
-      return null;
-    }).filter(Boolean);
+    // assignedObjectives is gone: ownership is derived from the portfolio by
+    // myObjectives(), so there is no stored copy to normalise or drift from it.
+    // Existing arrays are left on the record, ignored and harmless.
   });
   return data;
 }
@@ -2257,7 +2244,7 @@ async function jbSaveUsers(record) {
 }
 
 // ---- Q Trackers (multi-bin) ----
-// Trackers are configured as { id, name, binId } in STATE.config.trackers.
+// Trackers are configured as { id, name, divisionId, ...urls } in STATE.config.trackers.
 // Legacy: if STATE.config.trackerBinId is set and trackers[] is empty, treat
 // it as a single default tracker.
 
@@ -2288,38 +2275,7 @@ async function adminSaveTrackers(trackers) {
     toast(`Saved locally; failed to share: ${err.message}`, 'error');
   }
 }
-function leadsTracker(session, trackerId) {
-  if (!session) return false;
-  if (session.orgRole === 'cto') return true; // CTO leads everything
-  if (session.orgRole !== 'lead') return false;
-  return Array.isArray(session.leadOf) && session.leadOf.includes(trackerId);
-}
-// True if the user has at least one assignment in the given tracker.
-function isAssignedToTracker(session, trackerId) {
-  if (!session || !Array.isArray(session.assignedObjectives)) return false;
-  return session.assignedObjectives.some(a => a && a.tracker === trackerId);
-}
-// Route an objective tile to a section based on the user's relationship to its
-// tracker. Computed fresh each render (stored tiles are relationship-agnostic):
-//   assigned to the tracker → 'projects'
-//   else leads the tracker  → 'leadership'
-//   else                    → 'watching'
-// Stage 1 note: 'leadership' routing is computed but those tiles are suppressed
-// at generation time until Stage 2 restructures the Leadership section.
-function objectiveTileSection(session, trackerId) {
-  if (isAssignedToTracker(session, trackerId)) return 'projects';
-  if (leadsTracker(session, trackerId)) return 'leadership';
-  return 'watching';
-}
-// Trackers this user has leadership over (CTO → all configured; Lead → leadOf).
-function trackersLed(session) {
-  if (!session) return [];
-  const all = getConfiguredTrackers();
-  if (session.orgRole === 'cto') return all;
-  if (session.orgRole !== 'lead') return [];
-  const set = new Set(session.leadOf || []);
-  return all.filter(t => set.has(t.id));
-}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  IDENTITY — NEW STACK  (divisions + derived ownership)
 //
@@ -2422,14 +2378,23 @@ function findExistingCTO(usersRecord, exceptEmail) {
   return (usersRecord.users || []).find(u => u.orgRole === 'cto' && normaliseEmail(u.email) !== except) || null;
 }
 
+// A "tracker" is no longer a data source — it is a division's external links
+// (Confluence meeting page, Gantt, tracker UI). The objectives it used to hold
+// come from the broker now. `divisionId` ties an entry to the division it
+// belongs to, which is what routes its tiles.
+//
+// The filter used to require `binId`; requiring it now would drop every entry
+// the moment the bin id came off.
 function getConfiguredTrackers() {
   const cfg = STATE.config || {};
-  const list = Array.isArray(cfg.trackers) ? cfg.trackers.filter(t => t && t.id && t.binId) : [];
+  const list = Array.isArray(cfg.trackers) ? cfg.trackers.filter(t => t && t.id) : [];
   if (list.length) {
     return list.map(t => ({
       id: t.id,
       name: t.name || t.id,
-      binId: t.binId,
+      // Empty until an admin picks one in the tracker editor. Pre-selected there
+      // from the legacy id, so saving is the migration.
+      divisionId: t.divisionId || '',
       trackerUrl: t.trackerUrl || '',
       ganttUrl: t.ganttUrl || '',
       meetingPageUrl: t.meetingPageUrl || '',
@@ -2439,9 +2404,9 @@ function getConfiguredTrackers() {
       companyLevel: !!(t.companyLevel || t.companyLevelGantt || t.alwaysShowGantt)
     }));
   }
-  if (cfg.trackerBinId) {
-    return [{ id: 'default', name: 'Tracker', binId: cfg.trackerBinId, trackerUrl: '', ganttUrl: '', meetingPageUrl: '', companyLevel: false }];
-  }
+  // Pre-multi-tracker installs stored one bare bin id under cfg.trackerBinId.
+  // It carried no links and no division, so there is nothing left to build a
+  // link tile out of — that fallback is gone rather than returning a stub.
   return [];
 }
 function findTracker(trackerId) {
@@ -3103,41 +3068,6 @@ window.__rdDiag = async function () {
   return out;
 };
 
-async function jbFetchTracker(trackerId) {
-  const cfg = STATE.config;
-  const tracker = findTracker(trackerId);
-  if (!cfg || !tracker || !tracker.binId || !cfg.masterKey) {
-    throw new Error('Tracker not configured.');
-  }
-  // Cache-busting query param — see jbFetchUsers for the why.
-  const r = await fetch(`${JSONBIN_BASE}/${tracker.binId}/latest?_=${Date.now()}`, {
-    headers: { 'X-Master-Key': cfg.masterKey, 'X-Bin-Meta': 'false' },
-    cache: 'no-store'
-  });
-  if (!r.ok) {
-    if (r.status === 401 || r.status === 403) throw new Error('Invalid bin or master key.');
-    if (r.status === 404) return null;
-    throw new Error(`Tracker fetch failed: ${r.status}`);
-  }
-  return r.json();
-}                                            
-
-async function jbSaveTracker(trackerId, record) {
-  const cfg = STATE.config;
-  const tracker = findTracker(trackerId);
-  if (!tracker) throw new Error(`Tracker "${trackerId}" is not configured.`);
-  const r = await fetch(`${JSONBIN_BASE}/${tracker.binId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Master-Key': cfg.masterKey },
-    body: JSON.stringify(record)
-  });
-  if (!r.ok) {
-    const txt = await r.text().catch(() => '');
-    throw new Error(`Tracker save failed (${tracker.name}): ${r.status} ${txt}`);
-  }
-  return r.json();
-}
-
 // Read the canonical project ID. IDs in storage may be numeric; coerce to string
 // so URL params, comparisons, and Set membership work consistently throughout.
 function projectId(p) {
@@ -3209,7 +3139,6 @@ async function createUserRecord(email, pin, role) {
     pinHash,
     salt,
     iterations: STATE.config.pbkdf2Iterations,
-    assignedObjectives: [],
     configuredTiles: [],
     groupingConfig: { projects: [], leadership: [] },
     leadershipViewFilter: ['objective'],
@@ -3233,7 +3162,6 @@ function makeSession(user, days) {
     orgRole: (user.orgRole === 'lead' || user.orgRole === 'cto') ? user.orgRole : 'ic',
     leadOf: Array.isArray(user.leadOf) ? user.leadOf.slice() : [],
     leadDivisions: Array.isArray(user.leadDivisions) ? user.leadDivisions.slice() : [],
-    assignedObjectives: Array.isArray(user.assignedObjectives) ? user.assignedObjectives.slice() : [],
     configuredTiles: Array.isArray(user.configuredTiles) ? user.configuredTiles.slice() : [],
     groupingConfig: (user.groupingConfig && typeof user.groupingConfig === 'object')
       ? { projects: (user.groupingConfig.projects || []).slice(), leadership: (user.groupingConfig.leadership || []).slice() }
@@ -3643,19 +3571,19 @@ function renderHubChrome() {
 function buildToolList(session) {
   const list = TOOLS.slice();
   const trackers = getConfiguredTrackers();
-  const assignments = (session && session.assignedObjectives) || [];
-
-  // Compute the set of trackers the user has at least one assignment in.
-  const assignedTrackerIds = new Set();
-  assignments.forEach(a => {
-    if (a && a.tracker) assignedTrackerIds.add(a.tracker);
-  });
-
-  // Section routing for per-tracker tiles (Meeting Page + Gantt).
+  // Section routing for a division's link tiles (Meeting Page + Gantt).
+  //
+  // This used to ask two questions — do you have an assignment in this tracker,
+  // and do you lead it — against legacy tracker ids. Assignments are derived from
+  // the portfolio now and carry no tracker, so only leadership remains, asked of
+  // the division the entry points at.
+  //
+  // An entry with no divisionId routes to links: that is the honest answer for
+  // "we don't know whose this is" and it is what an unmigrated entry does until
+  // an admin picks its division.
   function sectionFor(t) {
     if (t.companyLevel) return 'links';
-    if (assignedTrackerIds.has(t.id)) return 'projects';
-    if (leadsTracker(session, t.id)) return 'projects';
+    if (t.divisionId && leadsDivision(session, t.divisionId)) return 'projects';
     return 'links';
   }
 
@@ -4758,9 +4686,12 @@ function renderTiles() {
   STATE._currentTools = tools; // expose to fetchTileStatuses
 
   TILE_SECTIONS.forEach(section => {
-    // Leadership only renders for Lead/CTO sessions with at least one led tracker.
+    // Leadership only renders for Lead/CTO sessions with at least one led
+    // division. This must ask divisionsLed, not the old trackersLed: a Lead
+    // created through the division picker has leadDivisions set and no leadOf
+    // at all, so a leadOf-based gate would hide their section entirely.
     if (section.id === 'leadership') {
-      const led = trackersLed(STATE.session);
+      const led = divisionsLed(STATE.session);
       if (!isLeadership(STATE.session) || !led.length) return;
     }
 
@@ -5628,7 +5559,7 @@ function openManageTrackersModal() {
       <div class="user-row">
         <div class="user-info">
           <div class="email">${t.name}</div>
-          <div class="meta"><span class="mono">${t.binId}</span> · ${urls.join(' · ')}</div>
+          <div class="meta">${t.divisionId ? divisionLabel(t.divisionId) : '<span style="color: var(--warning-text);">no division</span>'} · ${urls.join(' · ')}</div>
         </div>
         <div class="user-actions">
           <button class="btn btn-sm" data-act="edit-tracker" data-idx="${i}" title="Edit">
@@ -5699,12 +5630,34 @@ function openManageTrackersModal() {
 }
 
 // Add or edit a single tracker. onDone() is called after save/cancel.
+// Division <option>s for the tracker editor, with the right one pre-selected.
+//
+// Selection order: an explicit divisionId if the entry has one; otherwise the
+// legacy tracker id resolved through LEGACY_TRACKER_TO_DIVISION. That pre-select
+// IS the migration — an admin opens the entry, sees the inferred division, and
+// saving makes it explicit. Nothing is bulk-written behind their back.
+function _trackerDivisionOptions(existing) {
+  const divisions = (STATE.portfolio && Array.isArray(STATE.portfolio.divisions))
+    ? STATE.portfolio.divisions : [];
+  let selected = (existing && existing.divisionId) || '';
+  if (!selected && existing && existing.id) {
+    // _legacyLeadDivisions takes a session-shaped object; a bare { leadOf } is
+    // all it reads, so reuse it rather than duplicating the matching rules.
+    const guess = _legacyLeadDivisions({ leadOf: [existing.id] }, divisions);
+    if (guess.length === 1) selected = guess[0];
+  }
+  return divisions.map(d => {
+    const label = String(d.name || d.id).replace(/</g, '&lt;');
+    return `<option value="${d.id}" ${d.id === selected ? 'selected' : ''}>${label}</option>`;
+  }).join('');
+}
+
 function openTrackerEditModal(existing, onDone) {
   const isEdit = !!existing;
   const esc = s => String(s || '').replace(/"/g, '&quot;');
   openModal(`
     <h3>${isEdit ? 'Edit' : 'Add'} tracker</h3>
-    <p class="intro">A tracker bin holds the objectives for one division. The internal ID is used in URLs and shouldn't change after first use.</p>
+    <p class="intro">External links for one division — Confluence meeting page, Gantt, tracker UI. The internal ID is used in URLs and shouldn't change after first use.</p>
     <div id="tracker-edit-error" class="inline-error" style="display: none;"></div>
     <label class="field">
       <span class="label-row">Display name</span>
@@ -5715,8 +5668,12 @@ function openTrackerEditModal(existing, onDone) {
       <input type="text" id="tracker-id" autocomplete="off" value="${esc(existing && existing.id)}" placeholder="auto from name" ${isEdit ? 'readonly' : ''}>
     </label>
     <label class="field">
-      <span class="label-row">JSONBin bin ID</span>
-      <input type="text" id="tracker-bin-id" autocomplete="off" value="${esc(existing && existing.binId)}" placeholder="paste bin ID">
+      <span class="label-row">Division</span>
+      <select id="tracker-division">
+        <option value="">— none —</option>
+        ${_trackerDivisionOptions(existing)}
+      </select>
+      <div class="obj-picker-meta">Which division these links belong to. Decides whether the Gantt and Meeting page tiles land in <em>Projects</em> (for that division's lead) or <em>Useful links</em>.</div>
     </label>
     <label class="field">
       <span class="label-row">Tracker URL <span class="subtle">(optional)</span></span>
@@ -5765,39 +5722,32 @@ function openTrackerEditModal(existing, onDone) {
   document.querySelector('[data-act="save"]').addEventListener('click', async () => {
     const name = document.getElementById('tracker-name').value.trim();
     const id = document.getElementById('tracker-id').value.trim();
-    const binId = document.getElementById('tracker-bin-id').value.trim();
+    const divisionId = document.getElementById('tracker-division').value;
     const trackerUrl = document.getElementById('tracker-url').value.trim();
     const meetingPageUrl = document.getElementById('meeting-page-url').value.trim();
     const ganttUrl = document.getElementById('gantt-url').value.trim();
     const companyLevel = document.getElementById('gantt-always-show').checked;
     if (!name) return showError('tracker-edit-error', 'Display name is required.');
     if (!id || !/^[a-z0-9-]+$/.test(id)) return showError('tracker-edit-error', 'ID must be lowercase letters, numbers, and dashes only.');
-    if (!binId) return showError('tracker-edit-error', 'Bin ID is required.');
     showError('tracker-edit-error', '');
 
-    // Verify the bin is reachable before saving
     const btn = document.querySelector('[data-act="save"]');
     btn.disabled = true;
-    btn.textContent = 'Verifying…';
+    btn.textContent = 'Saving…';
 
-    // Save provisionally so jbFetchTracker can find the new entry
+    // No verification round trip any more: there is no bin to reach, and the
+    // save/verify/roll-back dance existed only to prove one was readable.
     const trackers = getConfiguredTrackers().slice();
     const idx = trackers.findIndex(t => t.id === id);
-    const updated = { id, name, binId, trackerUrl, ganttUrl, meetingPageUrl, companyLevel };
+    const updated = { id, name, divisionId, trackerUrl, ganttUrl, meetingPageUrl, companyLevel };
     if (idx >= 0) trackers[idx] = updated; else trackers.push(updated);
-    await adminSaveTrackers(trackers);
-
     try {
-      await jbFetchTracker(id);
+      await adminSaveTrackers(trackers);
       toast(`Saved ${name}`, 'success');
       closeModal();
       if (onDone) onDone();
     } catch (e) {
-      // Roll back the config change
-      const reverted = getConfiguredTrackers().filter(t => t.id !== id);
-      if (existing) reverted.push(existing);
-      await adminSaveTrackers(reverted );
-      showError('tracker-edit-error', e.message || 'Could not reach the tracker bin.');
+      showError('tracker-edit-error', e.message || 'Could not save.');
       btn.disabled = false;
       btn.textContent = 'Save';
     }
@@ -5807,6 +5757,14 @@ function openTrackerEditModal(existing, onDone) {
 // ============================================================
 //  USER LIST (admin)
 // ============================================================
+// How many divisions a Lead leads, for the user-list meta line. Prefers the
+// explicit list; falls back to the legacy count so an unmigrated lead still
+// shows a number rather than nothing.
+function _leadCount(user) {
+  if (!user) return 0;
+  if (Array.isArray(user.leadDivisions) && user.leadDivisions.length) return user.leadDivisions.length;
+  return Array.isArray(user.leadOf) ? user.leadOf.length : 0;
+}
 async function renderUserList() {
   const list = document.getElementById('drawer-user-list');
   list.innerHTML = '<div class="tiny muted" style="padding: 10px 0;">Loading users…</div>';
@@ -5823,7 +5781,7 @@ async function renderUserList() {
       <span class="avatar" style="width: 30px; height: 30px;">${initialsFor(user.email)}</span>
       <div class="user-info">
         <div class="email">${user.email}${isMe ? ' <span class="tiny subtle">(you)</span>' : ''}</div>
-        <div class="meta">${user.role || 'user'}${user.orgRole && user.orgRole !== 'ic' ? ' · ' + (user.orgRole === 'cto' ? 'CTO' : 'Lead' + (user.leadOf && user.leadOf.length ? ' (' + user.leadOf.length + ')' : '')) : ''} &middot; ${(user.assignedObjectives || []).length} objective${(user.assignedObjectives || []).length === 1 ? '' : 's'} &middot; last sign-in ${last}</div>
+        <div class="meta">${user.role || 'user'}${user.orgRole && user.orgRole !== 'ic' ? ' · ' + (user.orgRole === 'cto' ? 'CTO' : 'Lead' + (_leadCount(user) ? ' (' + _leadCount(user) + ')' : '')) : ''} &middot; last sign-in ${last}</div>
       </div>
       <div class="user-actions">
         <button class="btn btn-sm" data-act="edit" data-email="${user.email}" title="Edit">
@@ -5858,8 +5816,6 @@ async function handleUserAction(action, email) {
     user.disabled = !user.disabled;
     try {
       await jbSaveUsers(record);
-      // Disabling a user changes who appears in objective.assignedTo arrays.
-      syncTrackerAssignments(record).catch(err => console.warn('Tracker sync failed:', err));
       toast(`${email} ${user.disabled ? 'disabled' : 'enabled'}`, 'success');
       renderUserList();
     } catch (e) {
@@ -5876,11 +5832,6 @@ async function handleUserAction(action, email) {
         record.users = record.users.filter(u => normaliseEmail(u.email) !== normaliseEmail(email));
         try {
           await jbSaveUsers(record);
-          // Cascade cleanup: rewrite objectives' assignedTo arrays.
-          syncTrackerAssignments(record).catch(err => {
-            console.warn('Tracker sync failed:', err);
-            toast('User removed, but tracker cleanup failed: ' + (err.message || ''), 'error');
-          });
           toast(`${email} removed`, 'success');
           renderUserList();
         } catch (e) {
@@ -5966,230 +5917,6 @@ function openFolderModal(tool) {
   document.querySelector('[data-act="close"]').addEventListener('click', closeModal);
 }
  
-// ---------- Objective picker helpers ----------
-// Renders a checkbox list of OBJECTIVES from ALL configured tracker bins.
-// Filterable by bin, division, and productLine. Selection persists across
-// filter changes (a checked item that gets filtered out is just hidden).
-//
-// preselected: array of {tracker, id, name?} pairs.
-// Returns { getSelected(): [{tracker, id, name}, ...] }.
-async function mountObjectivePicker(containerId, preselected) {
-  const el = document.getElementById(containerId);
-  if (!el) return { getSelected: () => [] };
-  preselected = preselected || [];
-
-  const trackers = getConfiguredTrackers();
-  if (!trackers.length) {
-    el.outerHTML = `<div class="obj-empty" style="border: 0.5px solid var(--border-strong); border-radius: var(--radius);">No tracker bins configured. Add one in Settings → Hub configuration to assign objectives.</div>`;
-    return { getSelected: () => [] };
-  }
-
-  el.innerHTML = '<div class="obj-empty">Loading objectives…</div>';
-
-  // Fetch all trackers in parallel; capture products for name lookup.
-  const results = await Promise.all(trackers.map(async t => {
-    try {
-      const data = await jbFetchTracker(t.id);
-      const products = Array.isArray(data.products) ? data.products : [];
-      return { tracker: t, objectives: objectivesIn(data), products, error: null };
-    } catch (e) {
-      return { tracker: t, objectives: [], products: [], error: e.message || 'fetch failed' };
-    }
-  }));
-
-  // Flat item list for filtering, plus a product-id → display-name map.
-  const items = [];
-  const productNames = {};
-  results.forEach(({ tracker, objectives, products }) => {
-    products.forEach(p => {
-      if (p && p.id) productNames[p.id] = p.name || p.id;
-    });
-    objectives.forEach(obj => {
-      const id = projectId(obj);
-      if (!id) return;
-      items.push({ tracker, objective: obj, id });
-    });
-  });
-
-  if (!items.length && results.every(r => !r.error)) {
-    el.innerHTML = '<div class="obj-empty">No objectives found in any tracker. (Looking for projects with projectType === "objective".)</div>';
-    return { getSelected: () => [] };
-  }
-
-  // Selection state — keyed by `${tracker}::${id}` so each selection is unique.
-  const selected = new Map();
-  preselected.forEach(a => {
-    if (a && a.tracker && a.id != null) {
-      const key = assignmentKey({ tracker: a.tracker, id: String(a.id) });
-      selected.set(key, { tracker: a.tracker, id: String(a.id), name: a.name || '' });
-    }
-  });
-
-  // Filter state — empty string means "any".
-  const filters = { bin: '', division: '', product: '' };
-
-  // Distinct values for each filter dropdown.
-  const distinctDivisions = Array.from(new Set(
-    items.map(i => i.objective.division).filter(Boolean)
-  )).sort();
-  const distinctProducts = Array.from(new Set(
-    items.map(i => i.objective.productLine).filter(Boolean)
-  )).sort();
-
-  const escAttr = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
-  const escText = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-
-  el.innerHTML = `
-    <div class="obj-picker-filters">
-      <select data-filter="bin" aria-label="Filter by bin">
-        <option value="">All bins</option>
-        ${trackers.map(t => `<option value="${escAttr(t.id)}">${escText(t.name)}</option>`).join('')}
-      </select>
-      <select data-filter="division" aria-label="Filter by division">
-        <option value="">All divisions</option>
-        ${distinctDivisions.map(d => `<option value="${escAttr(d)}">${escText(d)}</option>`).join('')}
-      </select>
-      <select data-filter="product" aria-label="Filter by product">
-        <option value="">All products</option>
-        ${distinctProducts.map(p => `<option value="${escAttr(p)}">${escText(productNames[p] || p)}</option>`).join('')}
-      </select>
-    </div>
-    <div class="obj-picker-body" data-body></div>
-    <div class="obj-picker-footer">
-      <span data-counts>0 of 0 visible</span>
-      <button type="button" data-clear-filters>Clear filters</button>
-    </div>
-  `;
-
-  const bodyEl = el.querySelector('[data-body]');
-  const countsEl = el.querySelector('[data-counts]');
-
-  function renderBody() {
-    bodyEl.innerHTML = '';
-
-    // Surface fetch errors at the top — not subject to filters.
-    results.forEach(({ tracker, error }) => {
-      if (!error) return;
-      const errRow = document.createElement('div');
-      errRow.className = 'obj-row';
-      errRow.style.color = 'var(--danger)';
-      errRow.style.cursor = 'default';
-      errRow.textContent = `${tracker.name}: ${error}`;
-      bodyEl.appendChild(errRow);
-    });
-
-    // Apply filters (AND'd together)
-    const visible = items.filter(({ tracker, objective }) => {
-      if (filters.bin && tracker.id !== filters.bin) return false;
-      if (filters.division && objective.division !== filters.division) return false;
-      if (filters.product && objective.productLine !== filters.product) return false;
-      return true;
-    });
-
-    if (!visible.length) {
-      const msg = document.createElement('div');
-      msg.className = 'obj-empty';
-      msg.textContent = items.length
-        ? 'No objectives match the current filters.'
-        : 'No objectives loaded.';
-      bodyEl.appendChild(msg);
-    } else {
-      visible.forEach(({ tracker, objective, id }) => {
-        const name = projectName(objective);
-        const key = assignmentKey({ tracker: tracker.id, id });
-        const row = document.createElement('label');
-        row.className = 'obj-row';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.value = key;
-        cb.checked = selected.has(key);
-        cb.addEventListener('change', () => {
-          if (cb.checked) selected.set(key, { tracker: tracker.id, id, name });
-          else selected.delete(key);
-          updateCounts(visible.length);
-        });
-        const text = document.createElement('span');
-        text.textContent = `${tracker.name} / ${projectLabel(objective)}`;
-        row.appendChild(cb);
-        row.appendChild(text);
-        bodyEl.appendChild(row);
-      });
-    }
-
-    updateCounts(visible.length);
-  }
-
-  function updateCounts(visibleCount) {
-    const sel = selected.size;
-    countsEl.textContent = `${visibleCount} visible · ${sel} selected`;
-  }
-
-  // Wire filter selects
-  el.querySelectorAll('select[data-filter]').forEach(sel => {
-    sel.addEventListener('change', () => {
-      filters[sel.dataset.filter] = sel.value;
-      renderBody();
-    });
-  });
-
-  // Clear filters button
-  el.querySelector('[data-clear-filters]').addEventListener('click', () => {
-    filters.bin = filters.division = filters.product = '';
-    el.querySelectorAll('select[data-filter]').forEach(s => { s.value = ''; });
-    renderBody();
-  });
-
-  renderBody();
-
-  return {
-    getSelected: () => Array.from(selected.values())
-  };
-}
-
-// Sync writer: walk every configured tracker, recompute the inverse assignedTo
-// arrays for objective-type projects in THAT tracker only, and write back if
-// anything changed. Non-objective projects in the bin are left untouched.
-// One fetch + (conditional) write per configured tracker.
-async function syncTrackerAssignments(usersRecord) {
-  const trackers = getConfiguredTrackers();
-  if (!trackers.length) return;
-
-  // Build inverse map keyed by `${trackerId}::${objId}` -> [emails]
-  const inverse = {};
-  (usersRecord.users || []).forEach(u => {
-    if (u.disabled) return;
-    (u.assignedObjectives || []).forEach(a => {
-      if (!a || a.id == null || !a.tracker) return;
-      const k = assignmentKey({ tracker: a.tracker, id: String(a.id) });
-      (inverse[k] = inverse[k] || []).push(normaliseEmail(u.email));
-    });
-  });
-
-  // For each tracker, rewrite assignedTo on its objective projects and save if changed.
-  await Promise.all(trackers.map(async t => {
-    let trackerData;
-    try { trackerData = await jbFetchTracker(t.id); }
-    catch (e) { console.warn(`Skipping sync for ${t.name}: ${e.message}`); return; }
-    const objectives = objectivesIn(trackerData);
-    let changed = false;
-    objectives.forEach(obj => {
-      const id = projectId(obj);
-      if (!id) return;
-      const k = assignmentKey({ tracker: t.id, id });
-      const next = (inverse[k] || []).slice().sort();
-      const prev = (Array.isArray(obj.assignedTo) ? obj.assignedTo : []).map(normaliseEmail).sort();
-      if (next.length !== prev.length || next.some((v, i) => v !== prev[i])) {
-        obj.assignedTo = next;
-        changed = true;
-      }
-    });
-    if (changed) {
-      try { await jbSaveTracker(t.id, trackerData); }
-      catch (e) { console.warn(`Save failed for ${t.name}: ${e.message}`); }
-    }
-  }));
-}
-
 // ---- Org role field (shared by add-user and edit-user modals) ----
 // Returns the HTML for the org role dropdown + tracker multi-select. The
 // multi-select is hidden by default and toggled visible when 'lead' is chosen.
@@ -6292,25 +6019,19 @@ function openAddUserModal() {
       <input type="checkbox" id="adduser-admin">
       <span>Grant admin role</span>
     </label>
-    ${orgRoleFieldHtml('ic', [])}
-    <label class="field">
-      <span class="label-row">Assigned objectives</span>
-      <div id="adduser-objectives" class="obj-picker"></div>
-      <div class="obj-picker-meta">Stage-gate and Q Tracker tiles will deep-link to these objectives.</div>
-    </label>
+    ${orgRoleFieldHtml('ic', [], null)}
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">Add user</button>
     </div>
   `);
   bindOrgRoleField(null);
-  const pickerPromise = mountObjectivePicker('adduser-objectives', []);
   document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
   document.querySelector('[data-act="save"]').addEventListener('click', async () => {
     const email = document.getElementById('adduser-email').value;
     const pin = document.getElementById('adduser-pin').value;
     const isAdmin = document.getElementById('adduser-admin').checked;
-    const { orgRole, leadOf } = readOrgRoleField();
+    const { orgRole, leadDivisions } = readOrgRoleField();
     if (!normaliseEmail(email)) return showError('add-user-error', 'Enter a valid email.');
     if (!pin || pin.length < STATE.config.pinMinLength) {
       return showError('add-user-error', `PIN must be at least ${STATE.config.pinMinLength} digits.`);
@@ -6324,21 +6045,14 @@ function openAddUserModal() {
     btn.disabled = true;
     btn.textContent = 'Saving…';
     try {
-      const picker = await pickerPromise;
       const user = await createUserRecord(email, pin, isAdmin ? 'admin' : 'user');
-      user.assignedObjectives = picker.getSelected();
       user.orgRole = orgRole;
-      user.leadOf = orgRole === 'lead' ? leadOf : [];
+      user.leadDivisions = orgRole === 'lead' ? leadDivisions : [];
       // Single-CTO enforcement: demote any prior CTO before adding this one.
       const demoted = orgRole === 'cto' ? enforceSingleCTO(record, email) : [];
       record.users.push(user);
       await jbSaveUsers(record);
       STATE.usersRecord = record;
-      // Best-effort inverse sync; surface failure but don't block UX.
-      syncTrackerAssignments(record).catch(err => {
-        console.warn('Tracker sync failed:', err);
-        toast('User added, but tracker sync failed: ' + (err.message || ''), 'error');
-      });
       const msg = demoted.length
         ? `${user.email} added; ${demoted.join(', ')} demoted to IC`
         : `${user.email} added`;
@@ -6362,35 +6076,30 @@ function openEditUserModal(user) {
       <input type="checkbox" id="edituser-admin" ${user.role === 'admin' ? 'checked' : ''}>
       <span>Admin role</span>
     </label>
-    ${orgRoleFieldHtml(user.orgRole || 'ic', user.leadOf || [])}
-    <label class="field">
-      <span class="label-row">Assigned objectives</span>
-      <div id="edituser-objectives" class="obj-picker"></div>
-      <div class="obj-picker-meta">Stage-gate and Q Tracker tiles will deep-link to these objectives.</div>
-    </label>
+    ${orgRoleFieldHtml(user.orgRole || 'ic', user.leadDivisions || [], user)}
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">Save changes</button>
     </div>
   `);
   bindOrgRoleField(user.email);
-  const pickerPromise = mountObjectivePicker('edituser-objectives', user.assignedObjectives || []);
   document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
   document.querySelector('[data-act="save"]').addEventListener('click', async () => {
     const isAdmin = document.getElementById('edituser-admin').checked;
-    const { orgRole, leadOf } = readOrgRoleField();
+    const { orgRole, leadDivisions } = readOrgRoleField();
     const btn = document.querySelector('[data-act="save"]');
     btn.disabled = true;
     btn.textContent = 'Saving…';
     try {
-      const picker = await pickerPromise;
       const record = STATE.usersRecord || await jbFetchUsers();
       const target = findUser(record, user.email);
       if (!target) throw new Error('User no longer exists.');
       target.role = isAdmin ? 'admin' : 'user';
-      target.assignedObjectives = picker.getSelected();
       target.orgRole = orgRole;
-      target.leadOf = orgRole === 'lead' ? leadOf : [];
+      // Saving is what makes the division list explicit. leadOf stays on the
+      // record until 4d: divisionsLed prefers leadDivisions the moment it is
+      // non-empty, and the resolver still answers for anyone not yet re-saved.
+      target.leadDivisions = orgRole === 'lead' ? leadDivisions : [];
       // Single-CTO enforcement — only triggers if promoting THIS user to CTO.
       const demoted = orgRole === 'cto' ? enforceSingleCTO(record, target.email) : [];
       await jbSaveUsers(record);
@@ -6398,18 +6107,15 @@ function openEditUserModal(user) {
       // If the edited user is the current user, refresh the session so the
       // new objectives/leadership take effect immediately.
       if (STATE.session && normaliseEmail(STATE.session.email) === normaliseEmail(target.email)) {
-        STATE.session.assignedObjectives = target.assignedObjectives.slice();
         STATE.session.role = target.role;
         STATE.session.orgRole = target.orgRole;
-        STATE.session.leadOf = (target.leadOf || []).slice();
+        // A live session in localStorage is never re-migrated, so the renamed
+        // field has to be written here or the change only lands on next sign-in.
+        STATE.session.leadDivisions = (target.leadDivisions || []).slice();
         saveSession(STATE.session);
         renderHubChrome();
         renderTiles();
       }
-      syncTrackerAssignments(record).catch(err => {
-        console.warn('Tracker sync failed:', err);
-        toast('User updated, but tracker sync failed: ' + (err.message || ''), 'error');
-      });
       const msg = demoted.length
         ? `${target.email} updated; ${demoted.join(', ')} demoted to IC`
         : `${target.email} updated`;
