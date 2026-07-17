@@ -3904,61 +3904,10 @@ function buildToolList(session) {
     }
   }
 
-  // THE BRANCH. Flag off → the old tracker/snapshot path below, untouched.
-  const useBroker = !!(STATE.config && STATE.config.useBrokerData) && !!STATE.portfolio && !!window.RDCore;
-  if (useBroker) {
-    buildPortfolioObjectiveTiles();
-  } else {
-  // Not removable (removing would just regenerate from the assignment).
-  assignments.forEach(a => {
-    const key = tripleKey(a.tracker, a.id, 'objective');
-    if (seenTriples.has(key)) return;
-    const tile = buildObjectiveTile(a.tracker, a.id, 'objective', a.name, false);
-    if (!tile) return;
-    seenTriples.add(key);
-    list.push(tile);
-  });
-
-  // 4b) Leadership auto-tiles (Model A): a stage-gate tile per objective in each
-  // led tracker, routed to Leadership. Generated from the same enriched data the
-  // old panel used (company overlay + dedup applied). Not removable. Carries
-  // status metadata for the Leadership filter. Deduped against assignment
-  // auto-tiles (an objective you both lead and are assigned to shows in Projects).
-  const led = trackersLed(session);
-  if (led.length) {
-    const ledObjectives = gatherLeadershipObjectives(led);
-    ledObjectives.forEach(it => {
-      const key = tripleKey(it.tracker.id, it.id, 'objective');
-      if (seenTriples.has(key)) return;
-      const tile = buildObjectiveTile(
-        it.tracker.id, it.id, 'objective', it.name, false,
-        { status: it.status, isComplete: it.isComplete, isActive: it.isActive }
-      );
-      if (!tile) return;
-      // Only keep tiles that actually routed to leadership (an assigned-in
-      // objective would route to projects and was already emitted in 4a, or
-      // will dedup here). Watching can't happen for led trackers.
-      if (tile.section !== 'leadership') return;
-      seenTriples.add(key);
-      list.push(tile);
-    });
-  }
-
-  // 4c) User-configured tiles. Dedup against auto-tiles and each other.
-  // Removable in edit mode.
-  const configured = (session && session.configuredTiles) || [];
-  configured.forEach(ct => {
-    if (!ct || !ct.tracker || ct.objectiveId == null) return;
-    const viewType = ct.viewType || 'objective';
-    const key = tripleKey(ct.tracker, ct.objectiveId, viewType);
-    if (seenTriples.has(key)) return;
-    const tile = buildObjectiveTile(ct.tracker, ct.objectiveId, viewType, ct.name, true);
-    if (!tile) return;
-    seenTriples.add(key);
-    list.push(tile);
-  });
-
-  } // end of the old (flag-off) objective-tile path
+  // Tiles come from the portfolio via RDCore. The flag-off branch that used to
+  // sit here read the tracker snapshot bins, which were retired at cutover — it
+  // had already stopped working before it was deleted.
+  buildPortfolioObjectiveTiles();
 
   // Visibility filter: tiles can declare access requirements via two optional
   // fields, and any tile failing them is dropped before render.
@@ -5447,7 +5396,7 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
     // put the wrong word on every tile the filter selects. 'noband' is a real,
     // filterable state now (nothing scorable), so it gets an option rather than
     // being unreachable.
-    const STATUS_OPTS = _fUseBroker ? [
+    const STATUS_OPTS = [
       ['active', 'Active only'],
       ['all', 'All (incl. ended)'],
       ['atrisk', 'Off track'],
@@ -5630,23 +5579,17 @@ async function addConfiguredTilesBatch(picks, viewType) {
   let added = 0, skipped = 0;
   picks.forEach(p => {
     if (!p || p.id == null) return;
-    if (!useBroker && !p.tracker) return;
-    const key = keyOf(p.tracker, p.id, vt);
+        const key = keyOf(p.tracker, p.id, vt);
     if (seen.has(key)) { skipped++; return; }
     seen.add(key);
-    // Deliberately NO tracker in broker mode: there are none, and writing a
-    // division into that field would resurrect the tracker model under a new
-    // name and confuse the flag-off path if anyone toggled back.
-    tiles.push(useBroker
-      ? { objectiveId: String(p.id), viewType: vt, name: p.name || '' }
-      : { tracker: p.tracker, objectiveId: String(p.id), viewType: vt, name: p.name || '' });
+    // Deliberately NO tracker field: there are no trackers, and writing a
+    // division into it would resurrect the tracker model under a new name.
+    tiles.push({ objectiveId: String(p.id), viewType: vt, name: p.name || '' });
     added++;
   });
   if (!added) return { added: 0, skipped };
   await saveConfiguredTiles(tiles);
-  // Broker mode: the portfolio and every EXEC doc are already loaded; there is
-  // nothing to hydrate, and hydrateSnapshots would go hunting retired bins.
-  if (!useBroker) await hydrateSnapshots(STATE.session);
+  // Nothing to hydrate: the portfolio and every EXEC doc are already in memory.
   renderTiles();
   fetchTileStatuses();
   return { added, skipped };
@@ -5745,8 +5688,7 @@ async function openAddTileModal() {
       STATE.snapshots[t.id] = snap;
     }
   }));
-  const gathered = _mUseBroker ? gatherObjectivesFromPortfolio()
-                               : gatherObjectivesFromSnapshots(trackers);
+  const gathered = gatherObjectivesFromPortfolio();
   // Build the flat item list for the modal. division/productLine (raw values)
   // drive the filters; their *Label fields drive display. isActive comes from
   // the snapshot (Gantt's definition). name carries the company-overlay value.
@@ -5781,13 +5723,9 @@ async function openAddTileModal() {
   // "Mine" is derived from portfolio ownership in broker mode — there is no
   // assignedObjectives list any more. Same `${scope}::${id}` key shape, so the
   // filter below is unchanged.
-  const assignedSet = _mUseBroker
-    ? new Set(myObjectives(STATE.session).map(o => `${o.divisionId}::${o.id}`))
-    : new Set((STATE.session.assignedObjectives || []).map(a => `${a.tracker}::${a.id}`));
-  // Scopes the user leads (divisions in broker mode, trackers otherwise).
-  const ledTrackerIds = _mUseBroker
-    ? new Set(divisionsLed(STATE.session))
-    : new Set(trackersLed(STATE.session).map(t => t.id));
+  const assignedSet = new Set(myObjectives(STATE.session).map(o => `${o.divisionId}::${o.id}`));
+  // Divisions the user leads.
+  const ledTrackerIds = new Set(divisionsLed(STATE.session));
 
   const addBtn = document.querySelector('[data-act="add"]');
   const searchEl = document.getElementById('addtile-search');
