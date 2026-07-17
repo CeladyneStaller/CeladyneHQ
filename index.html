@@ -2166,9 +2166,18 @@ async function jbFetchUsers() {
     // Normalised defensively: drop malformed entries, coerce id to string.
     u.configuredTiles = Array.isArray(u.configuredTiles)
       ? u.configuredTiles.map(t => {
-          if (!t || typeof t !== 'object' || t.tracker == null || t.objectiveId == null) return null;
+          // `tracker` is LEGACY and must not be required. The new stack has no
+          // trackers, so tiles added from the portfolio carry none — and this
+          // predicate used to demand one, which meant a tile added in broker mode
+          // saved fine, rendered fine, and was then silently deleted by this
+          // migration on the next page load. Silent, permanent, and invisible.
+          // objectiveId is the only field a tile genuinely cannot do without.
+          if (!t || typeof t !== 'object' || t.objectiveId == null) return null;
           const vt = (t.viewType === 'okr' || t.viewType === 'kpi') ? t.viewType : 'stagegate';
-          return { tracker: String(t.tracker), objectiveId: String(t.objectiveId), viewType: vt, name: t.name || '' };
+          const out = { objectiveId: String(t.objectiveId), viewType: vt, name: t.name || '' };
+          // Preserved when present: the flag-off path still keys tiles by tracker.
+          if (t.tracker != null) out.tracker = String(t.tracker);
+          return out;
         }).filter(Boolean)
       : [];
 
@@ -4262,6 +4271,33 @@ function renderGateBubblesHtml(gates) {
 //                     The company tracker is always pulled in additionally for
 //                     overlay, but only emitted if it's in includeTrackers.
 //
+// Modal rows sourced from the portfolio. Returns the SAME item shape
+// gatherObjectivesFromSnapshots does — including `tracker` as an {id,name}
+// object — so the modal's build loop, search, dropdowns, select-all and every
+// filter below it work untouched. The division stands in for the tracker: it is
+// what the leadership-only toggle compares against, and it is what the tile's
+// filterTracker carries.
+//
+// No dedup, no company overlay, no snapshot pre-fetch. One portfolio means one
+// record per objective, and it is already in memory.
+function gatherObjectivesFromPortfolio() {
+  const out = [];
+  portfolioObjectives().forEach(o => {
+    const v = getObjectiveView(o.id);
+    if (!v) return;
+    out.push({
+      tracker: { id: v.divisionId, name: v.labels.division || v.divisionId },
+      id: String(v.id),
+      name: v.name,
+      division: v.divisionId,
+      divisionLabel: v.labels.division || v.divisionId,
+      productLine: v.productId,
+      productLineLabel: v.labels.product || v.productId,
+      isActive: v.isActive
+    });
+  });
+  return out;
+}
 // Each item: { tracker, id, name, score, status, progress, daysLeft, delayDays,
 //              isComplete, isActive, parentName, gates, slug, division,
 //              productLine, productModel, ...labels, keyResults, kpis }.
@@ -5213,11 +5249,18 @@ async function saveConfiguredTiles(nextTiles) {
 // Remove a configured tile matching the given triple.
 async function removeConfiguredTile(triple) {
   if (!triple || !STATE.session) return;
-  const tiles = (STATE.session.configuredTiles || []).filter(t =>
-    !(t.tracker === triple.tracker &&
-      String(t.objectiveId) === String(triple.objectiveId) &&
-      (t.viewType || 'stagegate') === triple.viewType)
-  );
+  const tiles = (STATE.session.configuredTiles || []).filter(t => {
+    const sameObj = String(t.objectiveId) === String(triple.objectiveId) &&
+                    (t.viewType || 'stagegate') === triple.viewType;
+    if (!sameObj) return true;                 // keep: different tile entirely
+    // Only compare tracker when the tile being removed actually carries one.
+    // Broker-mode tiles have none, and a blanket `t.tracker === triple.tracker`
+    // works there only by the accident of undefined === undefined — which stops
+    // being true the moment a legacy tile shares an objective id, and then
+    // Remove silently does nothing.
+    if (triple.tracker == null) return false;  // drop it
+    return t.tracker !== triple.tracker;
+  });
   await saveConfiguredTiles(tiles);
   renderTiles();
   fetchTileStatuses();
@@ -5251,21 +5294,33 @@ async function addConfiguredTilesBatch(picks, viewType) {
   if (!STATE.session || !Array.isArray(picks) || !picks.length) return { added: 0, skipped: 0 };
   const vt = (viewType === 'okr' || viewType === 'kpi') ? viewType : 'stagegate';
   const tiles = (STATE.session.configuredTiles || []).slice();
-  // Triple-key set of what already exists (and what we add as we go).
-  const seen = new Set(tiles.map(t => `${t.tracker}__${String(t.objectiveId)}__${t.viewType || 'stagegate'}`));
+  const useBroker = !!(STATE.config && STATE.config.useBrokerData) && !!STATE.portfolio;
+  // Key on what actually identifies a tile in each model. In broker mode the
+  // pick's `tracker` holds a division, which is a property OF the objective, not
+  // part of its identity — keying on it would let the same objective be tiled
+  // twice if its division ever changed.
+  const keyOf = (t, id, v) => useBroker ? `${String(id)}__${v}` : `${t}__${String(id)}__${v}`;
+  const seen = new Set(tiles.map(t => keyOf(t.tracker, t.objectiveId, t.viewType || 'stagegate')));
   let added = 0, skipped = 0;
   picks.forEach(p => {
-    if (!p || !p.tracker || p.id == null) return;
-    const key = `${p.tracker}__${String(p.id)}__${vt}`;
+    if (!p || p.id == null) return;
+    if (!useBroker && !p.tracker) return;
+    const key = keyOf(p.tracker, p.id, vt);
     if (seen.has(key)) { skipped++; return; }
     seen.add(key);
-    tiles.push({ tracker: p.tracker, objectiveId: String(p.id), viewType: vt, name: p.name || '' });
+    // Deliberately NO tracker in broker mode: there are none, and writing a
+    // division into that field would resurrect the tracker model under a new
+    // name and confuse the flag-off path if anyone toggled back.
+    tiles.push(useBroker
+      ? { objectiveId: String(p.id), viewType: vt, name: p.name || '' }
+      : { tracker: p.tracker, objectiveId: String(p.id), viewType: vt, name: p.name || '' });
     added++;
   });
   if (!added) return { added: 0, skipped };
   await saveConfiguredTiles(tiles);
-  // Newly-referenced trackers may not be hydrated yet; hydrate once for all.
-  await hydrateSnapshots(STATE.session);
+  // Broker mode: the portfolio and every EXEC doc are already loaded; there is
+  // nothing to hydrate, and hydrateSnapshots would go hunting retired bins.
+  if (!useBroker) await hydrateSnapshots(STATE.session);
   renderTiles();
   fetchTileStatuses();
   return { added, skipped };
@@ -5350,7 +5405,10 @@ async function openAddTileModal() {
   // company gantt strips from its raw projects but keeps in its snapshot.
   // Company-vs-divisional dedup (divisional wins) and company overlay are
   // applied by the gather.
-  const trackers = getConfiguredTrackers();
+  // Broker mode has nothing to pre-fetch: the portfolio and every EXEC doc are
+  // already in memory, and there are no trackers to enumerate.
+  const _mUseBroker = !!(STATE.config && STATE.config.useBrokerData) && !!STATE.portfolio && !!window.RDCore;
+  const trackers = _mUseBroker ? [] : getConfiguredTrackers();
   const listEl = document.getElementById('addtile-list');
   // The hub only hydrates the snapshots it needs for the current view (company
   // + assigned + led + configured-tile trackers). The modal lets you tile ANY
@@ -5362,7 +5420,8 @@ async function openAddTileModal() {
       STATE.snapshots[t.id] = snap;
     }
   }));
-  const gathered = gatherObjectivesFromSnapshots(trackers);
+  const gathered = _mUseBroker ? gatherObjectivesFromPortfolio()
+                               : gatherObjectivesFromSnapshots(trackers);
   // Build the flat item list for the modal. division/productLine (raw values)
   // drive the filters; their *Label fields drive display. isActive comes from
   // the snapshot (Gantt's definition). name carries the company-overlay value.
@@ -5394,9 +5453,16 @@ async function openAddTileModal() {
   const distinctDivisions = Array.from(new Set(allItems.map(i => i.division).filter(Boolean))).sort();
   const distinctProducts = Array.from(new Set(allItems.map(i => i.productLine).filter(Boolean))).sort();
 
-  const assignedSet = new Set((STATE.session.assignedObjectives || []).map(a => `${a.tracker}::${a.id}`));
-  // Trackers the user leads (for the leadership-only filter).
-  const ledTrackerIds = new Set(trackersLed(STATE.session).map(t => t.id));
+  // "Mine" is derived from portfolio ownership in broker mode — there is no
+  // assignedObjectives list any more. Same `${scope}::${id}` key shape, so the
+  // filter below is unchanged.
+  const assignedSet = _mUseBroker
+    ? new Set(myObjectives(STATE.session).map(o => `${o.divisionId}::${o.id}`))
+    : new Set((STATE.session.assignedObjectives || []).map(a => `${a.tracker}::${a.id}`));
+  // Scopes the user leads (divisions in broker mode, trackers otherwise).
+  const ledTrackerIds = _mUseBroker
+    ? new Set(divisionsLed(STATE.session))
+    : new Set(trackersLed(STATE.session).map(t => t.id));
 
   const addBtn = document.querySelector('[data-act="add"]');
   const searchEl = document.getElementById('addtile-search');
