@@ -1717,14 +1717,6 @@ function appendParams(baseUrl, params) {
   return `${baseUrl}${sep}${qsStr}`;
 }
 
-// URL builders for the dynamically-generated tiles.
-// Each returns null if the relevant URL isn't configured on the tracker, in
-// which case the corresponding tile is skipped.
-function qTrackerUrlFor(tracker, objectiveIds) {
-  if (!tracker || !tracker.trackerUrl) return null;
-  const csv = (objectiveIds || []).map(String).join(',');
-  return appendParams(tracker.trackerUrl, { objective: csv });
-}
 function stageGateUrlFor(tracker, objectiveId, slug) {
   if (!tracker || !tracker.trackerUrl) return null;
   // Receiving tracker pages match objectives by their generated slug (e.g.
@@ -2007,7 +1999,6 @@ const STATE = {
   config: null,         // { usersBinId, masterKey, logoPath, sessionDays }
   session: null,        // { email, role, issuedAt, expiresAt, tokenId }
   usersRecord: null,    // { users: [...], schemaVersion }
-  snapshots: {},        // trackerId → computedStatus | null (aggregate-fetch pool)
   snapshotsHydratedAt: 0, // timestamp of last successful hydration
   // ---- Broker-backed portfolio (new stack) ----
   // There is no stored snapshot in the new model. The apps compute health at
@@ -2459,8 +2450,6 @@ function findTracker(trackerId) {
 function trackersConfigured() {
   return getConfiguredTrackers().length > 0;
 }
-// Backwards-compatible name retained for any callers that pre-date the rename.
-function trackerConfigured() { return trackersConfigured(); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared hub config (Option C — tracker list lives in JSONBin, not localStorage).
@@ -3475,30 +3464,22 @@ function enterHub() {
     } catch (_) { /* fall through to normal hub */ }
   }
   showView('hub');
-  // Option B: seed STATE.snapshots from the localStorage cache so the first
-  // render shows last-known-good data instantly (no loading flash). Then
-  // hydrate fresh data in the background and re-render when it lands.
-  seedSnapshotsFromCache(STATE.session);
+  // Chrome and the static tiles paint immediately; objective tiles arrive when
+  // the broker responds. There is no cache to seed from — the snapshot cache
+  // held objectives from the retired bins, whose ids did not survive the
+  // migration, so it could not produce a single tile.
   renderHubChrome();
   renderTiles();
   fetchTileStatuses();
   installStatusRefresh();
-  // Hydrate fresh snapshots, then re-render so tiles reflect current data.
-  hydrateSnapshots(STATE.session).then(() => {
-    renderTiles();
-    fetchTileStatuses();
-  }).catch(err => {
-    console.warn('Snapshot hydration failed; showing cached/seed data.', err);
-  });
-  // Pull the shared tracker config from the hub config bin. If it changes the
-  // tracker list, that triggers a re-hydrate (new trackers → new snapshots).
+  // Shared config (broker url/token, execution app url) from the hub config bin.
   refreshHubConfig().catch(err => {
-    console.warn('Hub config refresh failed; using cached/local trackers.', err);
+    console.warn('Hub config refresh failed; using cached/local config.', err);
   });
-  // New stack: fetch RDCore + the portfolio from the broker. Stage 1 is additive —
-  // nothing renders from this yet, so a broker problem logs and changes nothing on
-  // screen. Deliberately not awaited: the Hub must not wait on it, or a slow broker
-  // would delay a dashboard that does not use this data yet.
+  // RDCore + the portfolio from the broker. This is where every objective tile
+  // comes from — a broker failure means no objective tiles, so it is warned about
+  // loudly rather than swallowed. Still not awaited: the chrome and static tiles
+  // above should paint without waiting on the network.
   // Run __rdDiag() in the console to inspect what loaded.
   loadBrokerData().then(() => {
     console.info('[rd] broker data loaded —',
@@ -3511,7 +3492,7 @@ function enterHub() {
     renderTiles();
     fetchTileStatuses();
   }).catch(err => {
-    console.warn('[rd] broker data load failed (Stage 1 is additive; Hub unaffected):', err);
+    console.error('[rd] broker data load failed — objective tiles will not render:', err);
   });
 }
 
@@ -3556,10 +3537,10 @@ async function refreshHubConfig() {
   // (every reader re-saving what it just read, stamping updatedBy with whoever
   // loaded last). saveConfig is local-device only.
   saveConfig({ trackers: bin });
-  // Tracker list changed → the needed-tracker set may have changed → re-hydrate.
+  // Config changed (broker url/token) → re-pull the portfolio it points at.
   renderHubChrome();
   renderTiles();
-  hydrateSnapshots(STATE.session).then(() => {
+  loadBrokerData().then(() => {
     renderTiles();
     fetchTileStatuses();
   }).catch(() => {});
@@ -3577,11 +3558,10 @@ function installStatusRefresh() {
     if (STATE._refreshTimer) return;
     STATE._refreshTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        // Re-hydrate snapshots from the bins, then re-render. This is where
-        // periodic freshness comes from — hydrateSnapshots overwrites
-        // STATE.snapshots with fresh data and mirrors it to the localStorage
-        // cache as a side effect.
-        hydrateSnapshots(STATE.session).then(() => {
+        // Re-pull the portfolio, then re-render. This is where periodic freshness
+        // comes from. loadEngine short-circuits on window.RDCore, so this refetches
+        // the documents but not the 70KB engine.
+        loadBrokerData().then(() => {
           renderTiles();
           fetchTileStatuses();
         }).catch(() => {});
@@ -3597,9 +3577,9 @@ function installStatusRefresh() {
  
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      // Tab regained focus — re-hydrate in case snapshots went stale while
-      // hidden, then re-render. Falls back to existing STATE.snapshots on failure.
-      hydrateSnapshots(STATE.session).then(() => {
+      // Tab regained focus — re-pull in case the portfolio moved while hidden.
+      // On failure the last-loaded portfolio stays in STATE and still renders.
+      loadBrokerData().then(() => {
         renderTiles();
         fetchTileStatuses();
       }).catch(() => { fetchTileStatuses(); });
@@ -3933,159 +3913,6 @@ function buildToolList(session) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// localStorage-backed snapshot cache
-//
-// Every successful snapshot fetch is mirrored here. If a later fetch fails
-// after all retries (sustained JSONBin slowness, eventual-consistency hiccup,
-// network issue), hydration returns the cached snapshot instead of null.
-//
-// Why this matters: when a snapshot is missing, downstream consumers degrade
-// in user-visible ways:
-//   - Stage-gate tiles fall back to "View progress" or strip parent name
-//   - Leadership-panel dedup misses the divisional twin → company-bin item
-//     slips through with the wrong tracker
-// With cached fallback, all consumers see *some* valid data (potentially
-// stale) instead of those broken states.
-// ─────────────────────────────────────────────────────────────────────────────
-const SNAPSHOT_CACHE_KEY = 'hub_snapshot_cache_v1';
-const SNAPSHOT_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-function _readSnapshotCache() {
-  try { return JSON.parse(localStorage.getItem(SNAPSHOT_CACHE_KEY) || '{}'); }
-  catch { return {}; }
-}
-function _writeSnapshotCache(cache) {
-  try { localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify(cache)); }
-  catch (err) {
-    // Quota exceeded or storage disabled — log but don't crash the fetcher.
-    console.warn('Snapshot cache write failed:', err);
-  }
-}
-function loadCachedSnapshot(trackerId) {
-  const entry = _readSnapshotCache()[trackerId];
-  if (!entry || !entry.snapshot) return null;
-  if (Date.now() - (entry.savedAt || 0) > SNAPSHOT_CACHE_MAX_AGE_MS) return null;
-  return entry.snapshot;
-}
-function saveCachedSnapshot(trackerId, snapshot) {
-  if (!snapshot) return;
-  const cache = _readSnapshotCache();
-  cache[trackerId] = { snapshot, savedAt: Date.now() };
-  _writeSnapshotCache(cache);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Aggregate snapshot hydration (the "fetch once, read many" architecture)
-//
-// Instead of each tile/panel fetching its tracker's snapshot independently
-// (which caused fetch bursts → JSONBin 429s, and cache races), hydrateSnapshots()
-// runs once at load: it computes the minimal set of trackers the current user
-// needs, fetches them all in parallel, and deposits results into STATE.snapshots.
-//
-// After hydration, every consumer reads STATE.snapshots[trackerId] synchronously
-// via getSnapshot() — no awaits, no per-tile fetching, no races.
-//
-// The fetch count per load is exactly |needed trackers|, which is computable
-// up front from the session. For most users that's 1-3; for the CTO (who leads
-// all trackers) it's all of them — correct, since the leadership panel needs them.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Compute the minimal set of tracker IDs whose snapshots this user needs:
-//   - the company tracker (always — powers the health overlay on every tile)
-//   - trackers the user is assigned objectives in (their stage-gate tiles)
-//   - trackers the user leads (the leadership panel)
-//   - trackers referenced by configured (watch/custom) tiles
-// Returns an array of unique tracker IDs that actually exist in config.
-function computeNeededTrackers(session) {
-  const ids = new Set();
-  const company = getCompanyTracker();
-  if (company) ids.add(company.id);
-  if (session) {
-    (session.assignedObjectives || []).forEach(a => {
-      if (a && a.tracker) ids.add(a.tracker);
-    });
-    trackersLed(session).forEach(t => ids.add(t.id));
-    // Configured tiles (custom-tile build): include each tile's tracker so its
-    // snapshot is hydrated and the tile can render from STATE.snapshots.
-    (session.configuredTiles || []).forEach(t => {
-      if (t && t.tracker) ids.add(t.tracker);
-    });
-  }
-  // Keep only IDs that resolve to a configured tracker.
-  const configured = new Set(getConfiguredTrackers().map(t => t.id));
-  return [...ids].filter(id => configured.has(id));
-}
-
-// Fetch a single tracker's snapshot with retry + localStorage-cache fallback.
-// Mirrors the logic that lived in fetchTrackerComputedStatus, but returns the
-// snapshot directly (not a cached promise) for use inside hydration's Promise.all.
-async function _fetchSnapshotForHydration(trackerId) {
-  const delays = [0, 300, 700];
-  let lastErr;
-  for (let i = 0; i < delays.length; i++) {
-    if (delays[i]) await new Promise(r => setTimeout(r, delays[i]));
-    try {
-      const data = await jbFetchTracker(trackerId);
-      const snapshot = (data && data.computedStatus) || null;
-      if (snapshot) saveCachedSnapshot(trackerId, snapshot);
-      return snapshot;
-    } catch (err) {
-      lastErr = err;
-      if (/Invalid bin or key/i.test(err.message || '')) break;
-    }
-  }
-  const cached = loadCachedSnapshot(trackerId);
-  if (cached) {
-    console.warn(`Snapshot fetch failed for ${trackerId}; using cached fallback.`, lastErr);
-    return cached;
-  }
-  console.warn('Snapshot fetch failed and no cache available:', trackerId, lastErr);
-  return null;
-}
-
-// Hydrate STATE.snapshots for the current user. Fetches the needed tracker set
-// in parallel, merges results into STATE.snapshots (preserving any trackers not
-// in this fetch — e.g. ones hydrated earlier). Returns the set of tracker IDs
-// that were fetched. Never throws; individual failures resolve to null/cached.
-async function hydrateSnapshots(session) {
-  const needed = computeNeededTrackers(session || STATE.session);
-  if (!needed.length) {
-    STATE.snapshotsHydratedAt = Date.now();
-    return [];
-  }
-  const results = await Promise.all(needed.map(async id => {
-    const snapshot = await _fetchSnapshotForHydration(id);
-    return { id, snapshot };
-  }));
-  results.forEach(({ id, snapshot }) => {
-    STATE.snapshots[id] = snapshot;
-  });
-  STATE.snapshotsHydratedAt = Date.now();
-  return needed;
-}
-
-// Seed STATE.snapshots from the localStorage cache for instant first render
-// (option B). Called before hydration so tiles can render with last-known-good
-// data immediately, then re-render when fresh data lands. Only fills trackers
-// not already present in STATE.snapshots; never overwrites fresh data with cache.
-function seedSnapshotsFromCache(session) {
-  const needed = computeNeededTrackers(session || STATE.session);
-  needed.forEach(id => {
-    if (STATE.snapshots[id] === undefined) {
-      const cached = loadCachedSnapshot(id);
-      if (cached) STATE.snapshots[id] = cached;
-    }
-  });
-}
-
-// Synchronous accessor — the single read point for snapshot data post-hydration.
-// Returns the computedStatus for a tracker, or null if not hydrated / failed.
-function getSnapshot(trackerId) {
-  const s = STATE.snapshots[trackerId];
-  return s === undefined ? null : s;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Safety check-in status
 //
 // Reads the same Supabase backend the standalone check-in app writes to.
@@ -4308,70 +4135,6 @@ const STATUS_SEVERITIES = {
   complete: 'success'
 };
 
-// `objectiveName` lets fetchStageGateStatus do company-bin matching without
-// re-reading the divisional bin to find the name first. Caller (buildToolList)
-// already has the name from the user's assignment record — pass it through.
-function fetchStageGateStatus(trackerId, objectiveId, objectiveName) {
-  // Read the divisional snapshot from the hydrated pool. It's the source of
-  // truth for the slug (URL routing) and the fallback content if no company
-  // match exists. Synchronous — data was loaded by hydrateSnapshots().
-  const divisional = getSnapshot(trackerId);
-  const divObj = divisional && divisional.objectives && divisional.objectives[String(objectiveId)];
-
-  // Try company-bin match — but skip if the assignment IS already a company
-  // bin (no need to round-trip a self-match).
-  const company = getCompanyTracker();
-  let match = null;
-  if (company && company.id !== trackerId) {
-    match = findCompanyMatch(objectiveName || (divObj && divObj.name));
-  } else if (company && company.id === trackerId && divObj) {
-    // The assignment is in the company bin — its own snapshot is the company view.
-    match = { tracker: company, id: String(objectiveId), obj: divObj };
-  }
-
-  // Pick the source of content: company match if found, else divisional fallback.
-  const source = (match && match.obj) || divObj;
-  if (!source) {
-    // Neither bin has a snapshot for this objective. Tile shows neutral fallback.
-    return { text: 'View progress', severity: 'subtle' };
-  }
-
-  const statusKey = source.isComplete ? 'complete' : (source.status || 'subtle');
-  const badgeLabel = STATUS_LABELS[statusKey] || '';
-  const severity = STATUS_SEVERITIES[statusKey] || 'subtle';
-
-  // Subtitle: "Bin · Parent". Bin is the *assignment*'s tracker (where the user
-  // expects to be sent on click), not where the data was found.
-  const assignmentTracker = findTracker(trackerId);
-  const binName = (assignmentTracker && assignmentTracker.name) || '';
-  const parentName = (source.parentName || '').trim();
-  const meta = [binName, parentName].filter(Boolean).join(' · ');
-
-  // Days text from gates. Falls back gracefully when gates lack date metadata
-  // (older snapshots saved before this schema landed).
-  const gates = Array.isArray(source.gates) ? source.gates : [];
-  const daysText = buildGateDaysText(gates, !!source.isComplete, startOfTodayMs());
-
-  // Status line: "Health 72 · 8 days past gate due" (or just "Health 72" if no
-  // days info, or just the days text for older snapshots without health).
-  const healthText = Number.isFinite(source.score) ? `Health ${source.score}` : '';
-  const text = [healthText, daysText].filter(Boolean).join(' · ') || 'View progress';
-
-  // URL always uses the divisional bin's slug — clicks go to the divisional
-  // tracker page, not the company plan. (The "where do I act on this?" URL.)
-  const url = (assignmentTracker && divObj && divObj.slug)
-    ? stageGateUrlFor(assignmentTracker, objectiveId, divObj.slug)
-    : null;
-
-  return {
-    text,
-    severity,
-    gates,
-    url,
-    badge: badgeLabel ? { label: badgeLabel, key: statusKey } : null,
-    meta
-  };
-}
 // Render one dot row per workstream. A lone workstream renders exactly as before
 // (no label), so nothing changes for the common case; multiple workstreams get
 // the same A/B/C letters the planning app uses, with the set name on hover.
@@ -4458,96 +4221,6 @@ function gatherObjectivesFromPortfolio() {
 // Each item: { tracker, id, name, score, status, progress, daysLeft, delayDays,
 //              isComplete, isActive, parentName, gates, slug, division,
 //              productLine, productModel, ...labels, keyResults, kpis }.
-function gatherObjectivesFromSnapshots(includeTrackers) {
-  const company = getCompanyTracker();
-  // Fetch snapshots for the include set plus the company (for overlay), deduped.
-  const fetchSet = includeTrackers.slice();
-  if (company && !fetchSet.find(t => t.id === company.id)) {
-    fetchSet.push(company);
-  }
-  const results = fetchSet.map(t => ({ tracker: t, snapshot: getSnapshot(t.id) }));
-
-  // name → company-objective map for overlay (case-insensitive, trimmed).
-  const norm = s => (s || '').toLowerCase().trim();
-  const companyByName = new Map();
-  if (company) {
-    const cr = results.find(r => r.tracker.id === company.id);
-    const cobjs = cr && cr.snapshot && cr.snapshot.objectives;
-    if (cobjs) {
-      Object.values(cobjs).forEach(obj => {
-        if (obj && obj.name) companyByName.set(norm(obj.name), obj);
-      });
-    }
-  }
-
-  // Flat list from the trackers in the include set.
-  const includeIds = new Set(includeTrackers.map(t => t.id));
-  let items = [];
-  results.forEach(({ tracker, snapshot }) => {
-    if (!includeIds.has(tracker.id)) return;
-    if (!snapshot || !snapshot.objectives) return;
-    for (const id of Object.keys(snapshot.objectives)) {
-      const obj = snapshot.objectives[id];
-      const fromAssignment = (STATE.session.assignedObjectives || []).find(
-        a => a.tracker === tracker.id && a.id === id
-      );
-      const name = (obj.name && obj.name.trim())
-        || (fromAssignment && fromAssignment.name)
-        || `Objective #${id}`;
-      items.push({ tracker, id, ...obj, name });
-    }
-  });
-
-  // Cross-bin dedup: drop company-level entries whose name also appears in a
-  // non-company bin (the divisional copy wins).
-  const nonCompanyNames = new Set();
-  items.forEach(it => {
-    if (!it.tracker.companyLevel && it.name) nonCompanyNames.add(norm(it.name));
-  });
-  items = items.filter(it => {
-    if (!it.tracker.companyLevel) return true;
-    if (!it.name) return true;
-    return !nonCompanyNames.has(norm(it.name));
-  });
-
-  // Company-bin enrichment: overlay company view (display fields) while keeping
-  // routing fields (tracker, id, slug, name) pointed at the divisional bin.
-  items.forEach(it => {
-    if (it.tracker.companyLevel) return;
-    const cobj = companyByName.get(norm(it.name));
-    if (!cobj) return;
-    it.score      = cobj.score;
-    it.status     = cobj.status;
-    it.progress   = cobj.progress;
-    it.daysLeft   = cobj.daysLeft;
-    it.delayDays  = cobj.delayDays;
-    it.isComplete = cobj.isComplete;
-    it.isActive   = cobj.isActive;
-    it.parentName = cobj.parentName;
-    it.gates      = cobj.gates;
-    // Stage 3 enrichment: grouping attributes + OKR/KPI data come from the
-    // company bin (only rd-gantt's snapshot carries them; divisional gantts
-    // don't). Copied here so divisional tiles inherit them. Guarded so a
-    // pre-Stage-3 company snapshot (missing these) doesn't clobber with undefined.
-    if (cobj.division != null) it.division = cobj.division;
-    if (cobj.divisionLabel != null) it.divisionLabel = cobj.divisionLabel;
-    if (cobj.productLine != null) it.productLine = cobj.productLine;
-    if (cobj.productLineLabel != null) it.productLineLabel = cobj.productLineLabel;
-    if (cobj.productModel != null) it.productModel = cobj.productModel;
-    if (cobj.productModelLabel != null) it.productModelLabel = cobj.productModelLabel;
-    if (cobj.keyResults != null) it.keyResults = cobj.keyResults;
-    if (cobj.kpis != null) it.kpis = cobj.kpis;
-  });
-
-  return items;
-}
-
-// Gather the enriched objective list for a leader's tracker set — the data layer
-// behind Leadership tiles. Thin wrapper over gatherObjectivesFromSnapshots with
-// the include set scoped to the trackers the user leads.
-function gatherLeadershipObjectives(led) {
-  return gatherObjectivesFromSnapshots(led);
-}
 
 function escAttr(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
 function escText(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
@@ -5535,27 +5208,6 @@ async function removeConfiguredTile(triple) {
   fetchTileStatuses();
 }
 
-// Add a configured tile. No-op if the triple already exists (dedup). May need
-// to hydrate a newly-referenced tracker before the tile can show real data.
-async function addConfiguredTile(tracker, objectiveId, viewType, name) {
-  if (!STATE.session) return;
-  const vt = (viewType === 'okr' || viewType === 'kpi') ? viewType : 'stagegate';
-  const exists = (STATE.session.configuredTiles || []).some(t =>
-    t.tracker === tracker &&
-    String(t.objectiveId) === String(objectiveId) &&
-    (t.viewType || 'stagegate') === vt
-  );
-  if (exists) { toast('That tile already exists.', 'subtle'); return; }
-  const tiles = (STATE.session.configuredTiles || []).slice();
-  tiles.push({ tracker, objectiveId: String(objectiveId), viewType: vt, name: name || '' });
-  await saveConfiguredTiles(tiles);
-  // The new tile's tracker may not have been hydrated yet (watching a tracker
-  // the user has no other relationship to). Hydrate, then render.
-  await hydrateSnapshots(STATE.session);
-  renderTiles();
-  fetchTileStatuses();
-}
-
 // Add multiple configured tiles at once for a batch of objectives sharing one
 // view type. Dedups against existing tiles AND within the batch, persists once,
 // hydrates once, renders once. Returns { added, skipped } counts.
@@ -5669,18 +5321,8 @@ async function openAddTileModal() {
   // applied by the gather.
   // Broker mode has nothing to pre-fetch: the portfolio and every EXEC doc are
   // already in memory, and there are no trackers to enumerate.
-  const trackers = [];
   const listEl = document.getElementById('addtile-list');
-  // The hub only hydrates the snapshots it needs for the current view (company
-  // + assigned + led + configured-tile trackers). The modal lets you tile ANY
-  // configured tracker, so ensure every configured tracker's snapshot is loaded
-  // first — otherwise objectives in un-hydrated trackers would be invisible.
-  await Promise.all(trackers.map(async t => {
-    if (STATE.snapshots[t.id] === undefined || STATE.snapshots[t.id] === null) {
-      const snap = await _fetchSnapshotForHydration(t.id);
-      STATE.snapshots[t.id] = snap;
-    }
-  }));
+  // Nothing to pre-fetch: the portfolio and every EXEC doc are already in memory.
   const gathered = gatherObjectivesFromPortfolio();
   // Build the flat item list for the modal. division/productLine (raw values)
   // drive the filters; their *Label fields drive display. isActive comes from
@@ -5841,10 +5483,10 @@ async function openAddTileModal() {
 }
 
 async function fetchTileStatuses() {
-  // Renders each tile's status badge/text. Stage-gate tiles read from the
-  // already-hydrated STATE.snapshots (no fetching here); other tiles (safety
-  // check-in, static links) do their own thing. Snapshot freshness is owned
-  // by hydrateSnapshots, called on load / focus / periodic refresh.
+  // Renders each tile's status badge/text. Objective tiles resolve instantly from
+  // STATE (the portfolio is already in memory); other tiles (safety check-in,
+  // static links) do their own fetching. Portfolio freshness is owned by
+  // loadBrokerData, called on load / focus / periodic refresh.
   let urgentCount = 0;
   const tools = STATE._currentTools || TOOLS;
   await Promise.all(tools.map(async (tool) => {
