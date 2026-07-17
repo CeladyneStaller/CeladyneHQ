@@ -2659,6 +2659,45 @@ function objectiveUrl(o) {
          `&objective=${encodeURIComponent(o.id)}&readonly`;
 }
 
+// The apps store dates as DAY COUNTS from 2020-01-01 UTC, not milliseconds
+// (isoToDay/dayToIso in the app shells). classifyGate compares g.plannedDate
+// against whatever `today` you hand it, so passing the Hub's own
+// startOfTodayMs() would compare ~1.78e12 against ~2400 and mark every gate on
+// record overdue — silently, and plausibly, which is the worst kind of wrong.
+const RD_EPOCH = Date.UTC(2020, 0, 1);
+function rdToday() { return Math.round((Date.now() - RD_EPOCH) / 86400000); }
+
+// Gate dots for an objective, in the { name, state } shape renderGateBubblesHtml
+// already consumes. No translation table needed: classifyGate returns
+// passed | passed-late | overdue | pending, and the renderer understands all
+// four already (its '' and '-' cases are for gates with no state at all, which
+// the engine never produces).
+//
+// An objective's gates live across its stage-gate SETS, so this walks
+// setsForObjective -> gatesForSet rather than reading stageGates directly —
+// gates belonging to another objective's set would otherwise leak in.
+function gatesForObjective(objId) {
+  const RD = window.RDCore;
+  if (!RD || !STATE.pfMap) return [];
+  const today = rdToday();
+  const out = [];
+  (RD.setsForObjective(objId, STATE.pfMap) || []).forEach(set => {
+    if (!set || set.id == null) return;
+    (RD.gatesForSet(set.id, STATE.pfMap) || []).forEach(g => {
+      if (!g) return;
+      out.push({
+        name: g.name || g.id || '',
+        state: RD.classifyGate(g, today),
+        // kept for ordering only; the renderer reads name/state
+        _at: (g.baselineDate != null ? g.baselineDate : g.plannedDate)
+      });
+    });
+  });
+  // Chronological, so the dot row reads left-to-right as the plan runs.
+  // Undated gates sort last rather than jumping to the front on a null compare.
+  out.sort((a, b) => (a._at == null ? Infinity : a._at) - (b._at == null ? Infinity : b._at));
+  return out;
+}
 // The Hub-shaped view of one objective, computed through RDCore. This is the
 // single accessor the tile layer will read — the replacement for the old
 // getObjectiveData()/getSnapshot() pair, minus the company overlay and the
@@ -2702,6 +2741,7 @@ function getObjectiveView(objId) {
       initiative: initiativeLabel(o.initiativeId)
     },
     keyResults: RD.krsForObjective(o.id, STATE.pfMap) || [],
+    gates: gatesForObjective(o.id),
     url: objectiveUrl(o)
   };
 }
@@ -3526,11 +3566,7 @@ function buildToolList(session) {
     return {
       text: bits.join(' · ') || 'View progress',
       severity: sev,
-      // Gate dots land in 3c — RDCore exposes them via setsForObjective /
-      // gatesForSet / classifyGate, which is its own piece of work. An empty
-      // array renders no dot row (the container is :empty-hidden), rather than
-      // inventing dots from data this stage has not mapped yet.
-      gates: [],
+      gates: view.gates || [],
       url: view.url || null,
       badge: label ? { label, key } : null,
       meta: [view.labels.division, view.labels.initiative].filter(Boolean).join(' · ')
@@ -4878,8 +4914,17 @@ async function saveLeadershipViewFilter(views) {
 // and devices. The button surfaces an active filter without opening the modal.
 function appendLeadershipFilter(wrap, head, sectionTools) {
   // Distinct trackers present among these tiles (in config order).
+  // In broker mode filterTracker holds a DIVISION id, so the dropdown must be
+  // built from portfolio.divisions — matching it against getConfiguredTrackers()
+  // would find nothing and silently render an empty, useless dropdown.
   const presentTrackerIds = new Set(sectionTools.map(t => t.filterTracker).filter(Boolean));
-  const trackers = getConfiguredTrackers().filter(t => presentTrackerIds.has(t.id));
+  const _fUseBroker = !!(STATE.config && STATE.config.useBrokerData) && !!STATE.portfolio;
+  const trackers = _fUseBroker
+    ? ((STATE.portfolio.divisions || [])
+        .filter(d => d && presentTrackerIds.has(d.id))
+        .map(d => ({ id: d.id, name: d.name || d.id })))
+    : getConfiguredTrackers().filter(t => presentTrackerIds.has(t.id));
+  const _fScopeLabel = _fUseBroker ? 'Division' : 'Tracker';
 
   // Map a tile ID to its view type (same prefixes the subsections use).
   const viewTypeOf = (id) => {
@@ -4987,7 +5032,21 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
   // Open the filter modal. Controls reflect current state; changes apply live
   // (so you see the effect behind the modal). "Clear" resets to defaults.
   function openFilterModal() {
-    const STATUS_OPTS = [
+    // In broker mode the labels must say what RDCore means, not what the old
+    // CSS class is called. The class 'watch' now carries RDCore's 'at-risk' and
+    // 'atrisk' carries 'off-track' — labelling those "Watch" and "At risk" would
+    // put the wrong word on every tile the filter selects. 'noband' is a real,
+    // filterable state now (nothing scorable), so it gets an option rather than
+    // being unreachable.
+    const STATUS_OPTS = _fUseBroker ? [
+      ['active', 'Active only'],
+      ['all', 'All (incl. ended)'],
+      ['atrisk', 'Off track'],
+      ['watch', 'At risk'],
+      ['ontrack', 'On track'],
+      ['noband', 'No data'],
+      ['complete', 'Complete']
+    ] : [
       ['active', 'Active only'],
       ['all', 'All (incl. complete)'],
       ['atrisk', 'At risk'],
@@ -5017,9 +5076,9 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
         </select>
       </div>
       <div class="filter-modal-field">
-        <label class="filter-modal-label" for="lead-filter-tracker">Tracker</label>
+        <label class="filter-modal-label" for="lead-filter-tracker">${_fScopeLabel}</label>
         <select id="lead-filter-tracker">
-          <option value="all"${state.tracker === 'all' ? ' selected' : ''}>All trackers</option>
+          <option value="all"${state.tracker === 'all' ? ' selected' : ''}>All ${_fScopeLabel.toLowerCase()}s</option>
           ${trackers.map(t => `<option value="${escAttr(t.id)}"${state.tracker === t.id ? ' selected' : ''}>${escText(t.name)}</option>`).join('')}
         </select>
       </div>
