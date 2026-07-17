@@ -1629,6 +1629,15 @@ const CONFIG_DEFAULTS = {
   trackers: [],             // localStorage CACHE — source of truth lives in hubConfigBin
   hubConfigBinId: '6a025eeec0954111d80c718d',  // shared config bin
   masterKey: '$2a$10$yJlmc9C76UAAdqpnsNR0oeboCCOK/VS1YJnFU4kH4kJrySTg2Ue92',
+  // ---- Broker (new project-management stack) ----
+  // brokerUrl is safe to bake in: it is a public endpoint, not a secret.
+  // brokerToken is NOT baked in — an admin sets it once in the shared hub config
+  // bin and every user picks it up from there (see refreshHubConfig).
+  brokerUrl: 'https://web-production-b17a2.up.railway.app',
+  brokerToken: 'vpjshbfgtplybz5sfbjfcomygtcunkn1',
+  // Where objective tiles point. The execution app takes ?division=&objective=
+  // &readonly as deep-link params, so a tile can land on the exact objective.
+  executionAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/execution_app.html',
   logoPath: 'logo.png',     // drop a logo.png or logo.svg next to index.html
   sessionDays: 30,
   pinMinLength: 6,
@@ -1971,6 +1980,16 @@ const STATE = {
   usersRecord: null,    // { users: [...], schemaVersion }
   snapshots: {},        // trackerId → computedStatus | null (aggregate-fetch pool)
   snapshotsHydratedAt: 0, // timestamp of last successful hydration
+  // ---- Broker-backed portfolio (new stack) ----
+  // There is no stored snapshot in the new model. The apps compute health at
+  // render time with RDCore; so does the Hub, from the same engine, so the two
+  // cannot disagree about what a score means.
+  portfolio: null,        // the `portfolio` doc (divisions/products/models/initiatives/objectives/…)
+  execDocs: {},           // bare division id → EXEC-<div> doc
+  pfMap: null,            // RD.withPortfolio(portfolio, execDocs) — the shape RDCore takes
+  portfolioVersions: {},  // doc id → version, for cheap /version polling later
+  portfolioLoadedAt: 0,
+  engineReady: false,     // window.RDCore fetched from the broker
   editMode: false,      // dashboard edit mode (add/remove configured tiles)
   bootstrapping: false,
   loginThrottleUntil: 0
@@ -2328,10 +2347,19 @@ async function jbSaveHubConfig(payload) {
 // always better than no hub at all.
 const HUB_CONFIG_CACHE_KEY = 'hub_config_cache_v1';
 
+// A valid payload carries EITHER a tracker list or broker settings. The bin now
+// holds both, and through the migration it may briefly hold only one — gating on
+// `trackers` alone would silently reject a broker-only config and leave every
+// user without a token, with nothing on screen to say why.
+function _hubConfigUsable(data) {
+  return !!(data && typeof data === 'object' &&
+            (Array.isArray(data.trackers) || data.brokerUrl || data.brokerToken));
+}
+
 async function loadHubConfig() {
   try {
     const data = await jbFetchHubConfig();
-    if (data && Array.isArray(data.trackers)) {
+    if (_hubConfigUsable(data)) {
       try { localStorage.setItem(HUB_CONFIG_CACHE_KEY, JSON.stringify(data)); } catch {}
       return data;
     }
@@ -2340,10 +2368,247 @@ async function loadHubConfig() {
   }
   try {
     const cached = JSON.parse(localStorage.getItem(HUB_CONFIG_CACHE_KEY) || 'null');
-    if (cached && Array.isArray(cached.trackers)) return cached;
+    if (_hubConfigUsable(cached)) return cached;
   } catch {}
   return null;
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  BROKER DATA LAYER  (new project-management stack)
+//
+//  The Hub reads the `portfolio` doc plus one `EXEC-<division>` doc per division
+//  from the broker, and computes health with RDCore — the same engine the
+//  planning/execution/designer apps run. There is no stored snapshot any more.
+//
+//  The engine is FETCHED, not bundled. The Hub cannot render anything without
+//  broker data, so depending on the broker for the engine costs it nothing that
+//  it had not already spent — and it means a band-threshold change in rdcore.js
+//  reaches the Hub on reload with no Hub redeploy. The apps inline their copy
+//  instead, because they have an offline scratch mode the Hub does not.
+//
+//  Stage 1 is ADDITIVE: nothing below is wired into rendering yet. The old
+//  snapshot/tracker layer still drives every tile. Run __rdDiag() in the console
+//  to see what this layer loaded.
+// ═════════════════════════════════════════════════════════════════════════════
+
+function brokerBase() {
+  return (((STATE.config && STATE.config.brokerUrl) || '').trim()).replace(/\/+$/, '');
+}
+
+function brokerHeaders() {
+  const tok = ((STATE.config && STATE.config.brokerToken) || '').trim();
+  // /state/* is currently ungated. The token is sent anyway so the Hub keeps
+  // working unchanged the day the broker starts requiring one.
+  return tok ? { 'Authorization': `Bearer ${tok}` } : {};
+}
+
+// GET a document. Returns { version, etag, updatedAt, doc } — or null for a doc
+// that does not exist yet, which is not an error.
+async function brokerGet(docId) {
+  const base = brokerBase();
+  if (!base) throw new Error('No broker URL configured');
+  const r = await fetch(`${base}/state/${encodeURIComponent(docId)}?_=${Date.now()}`, {
+    headers: brokerHeaders(), cache: 'no-store'
+  });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`broker GET ${docId} failed: ${r.status}`);
+  return r.json();
+}
+
+// The cheap endpoint: { version, etag, updatedAt } with no document body. The
+// broker serves this from memory, so polling it is free. Stage 4 uses it.
+async function brokerVersion(docId) {
+  const base = brokerBase();
+  if (!base) throw new Error('No broker URL configured');
+  const r = await fetch(`${base}/state/${encodeURIComponent(docId)}/version?_=${Date.now()}`, {
+    headers: brokerHeaders(), cache: 'no-store'
+  });
+  if (!r.ok) throw new Error(`broker version ${docId} failed: ${r.status}`);
+  return r.json();
+}
+
+// ---- engine ----------------------------------------------------------------
+let _enginePromise = null;
+
+// Load RDCore from the broker. Idempotent, and safe to call concurrently.
+function loadEngine() {
+  if (window.RDCore) { STATE.engineReady = true; return Promise.resolve(window.RDCore); }
+  if (_enginePromise) return _enginePromise;
+  const base = brokerBase();
+  if (!base) return Promise.reject(new Error('No broker URL configured'));
+  _enginePromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    // Deliberately NO cache-buster. The broker sends ETag + Cache-Control:no-cache,
+    // so the browser revalidates on every load and takes a ~200-byte 304 when the
+    // engine has not moved. A ?_=<time> would defeat that and re-download 70KB
+    // every single page view.
+    s.src = `${base}/rdcore.js`;
+    s.async = true;
+    s.onload = () => {
+      if (!window.RDCore) { reject(new Error('rdcore.js loaded but window.RDCore is undefined')); return; }
+      STATE.engineReady = true;
+      resolve(window.RDCore);
+    };
+    s.onerror = () => reject(new Error(`Failed to load rdcore.js from ${base}`));
+    document.head.appendChild(s);
+  });
+  return _enginePromise;
+}
+
+// ---- documents -------------------------------------------------------------
+// Fetch the portfolio, then one EXEC doc per division it declares. The doc set
+// is self-describing — portfolio.divisions IS the list — so adding a division
+// needs no Hub change.
+async function loadPortfolio() {
+  const pf = await brokerGet('portfolio');
+  if (!pf || !pf.doc) throw new Error('portfolio document not found on the broker');
+  const portfolio = pf.doc;
+  const versions = { portfolio: pf.version };
+  const divisions = Array.isArray(portfolio.divisions) ? portfolio.divisions : [];
+  const execDocs = {};
+  await Promise.all(divisions.map(async d => {
+    if (!d || !d.id) return;
+    const docId = `EXEC-${d.id}`;
+    try {
+      const res = await brokerGet(docId);
+      if (res && res.doc) { execDocs[d.id] = res.doc; versions[docId] = res.version; }
+    } catch (err) {
+      // One unreachable division must not blank the whole Hub.
+      console.warn(`[rd] failed to load ${docId}:`, err);
+    }
+  }));
+  STATE.portfolio = portfolio;
+  // Keyed by BARE division id, matching the apps' execMap() (they strip 'EXEC-').
+  STATE.execDocs = execDocs;
+  // RDCore wants the portfolio folded in under PORTFOLIO_KEY for cross-doc KPI
+  // resolution — the same call the apps make.
+  STATE.pfMap = window.RDCore.withPortfolio(portfolio, execDocs);
+  STATE.portfolioVersions = versions;
+  STATE.portfolioLoadedAt = Date.now();
+  return portfolio;
+}
+
+async function loadBrokerData() {
+  await loadEngine();
+  await loadPortfolio();
+  return STATE.portfolio;
+}
+
+// ---- accessors -------------------------------------------------------------
+function portfolioObjectives() {
+  const pf = STATE.portfolio;
+  return (pf && Array.isArray(pf.objectives)) ? pf.objectives : [];
+}
+
+function findObjective(objId) {
+  const t = String(objId);
+  return portfolioObjectives().find(o => o && String(o.id) === t) || null;
+}
+
+// Owners are a LIST — an objective can be shared by several people — and legacy
+// rows still hold a bare string. RD.ownersOf normalises both shapes. Never read
+// o.owner directly.
+function objectiveOwners(o) {
+  return (window.RDCore && window.RDCore.ownersOf) ? window.RDCore.ownersOf(o) : [];
+}
+
+function ownsObjective(email, o) {
+  const me = String(email || '').trim().toLowerCase();
+  if (!me) return false;
+  return objectiveOwners(o).some(x => String(x).trim().toLowerCase() === me);
+}
+
+// Portfolio entities carry `name`; objectives and key results carry `statement`.
+function _pfLabel(list, id) {
+  if (!id) return '';
+  const rec = (Array.isArray(list) ? list : []).find(x => x && x.id === id);
+  return rec ? (rec.name || rec.statement || String(rec.id)) : String(id);
+}
+function divisionLabel(id)   { return _pfLabel(STATE.portfolio && STATE.portfolio.divisions, id); }
+function productLabel(id)    { return _pfLabel(STATE.portfolio && STATE.portfolio.products, id); }
+function modelLabel(id)      { return _pfLabel(STATE.portfolio && STATE.portfolio.models, id); }
+function initiativeLabel(id) { return _pfLabel(STATE.portfolio && STATE.portfolio.initiatives, id); }
+
+// Objective tiles deep-link into the execution app, read-only: ?division= and
+// ?objective= are its own params, and ?readonly keeps a browsing click out of an
+// editable surface.
+function objectiveUrl(o) {
+  const base = ((STATE.config && STATE.config.executionAppUrl) || '').trim();
+  if (!base || !o) return '';
+  const sep = base.includes('?') ? '&' : '?';
+  return `${base}${sep}division=${encodeURIComponent(o.divisionId || '')}` +
+         `&objective=${encodeURIComponent(o.id)}&readonly`;
+}
+
+// The Hub-shaped view of one objective, computed through RDCore. This is the
+// single accessor the tile layer will read — the replacement for the old
+// getObjectiveData()/getSnapshot() pair, minus the company overlay and the
+// dedup-by-name. Both are meaningless now: one portfolio means one record per
+// objective, so there is nothing to reconcile.
+//
+// Nothing here hard-codes a threshold. band() decides what a score means, so a
+// band change in rdcore.js reaches these tiles with no Hub edit at all.
+function getObjectiveView(objId) {
+  const RD = window.RDCore;
+  if (!RD || !STATE.portfolio || !STATE.pfMap) return null;
+  const o = findObjective(objId);
+  if (!o) return null;
+
+  const score = RD.objectiveScore(o.id, STATE.pfMap);   // null when nothing is scorable
+  const exec = STATE.execDocs[o.divisionId] || {};
+  // null = still running. Both 'achieved' and 'abandoned' mean ended.
+  const end = RD.objectiveEndState(exec.objectiveState || [], o.id);
+  const productId = RD.effProduct(o, STATE.portfolio) || '';
+  const modelId = RD.effModel(o, STATE.portfolio) || '';
+
+  return {
+    id: o.id,
+    name: o.statement || o.name || String(o.id),
+    divisionId: o.divisionId || '',
+    initiativeId: o.initiativeId || '',
+    quarter: o.quarter || '',
+    owners: RD.ownersOf(o),
+    score,
+    band: RD.band(score),                 // on-track | at-risk | off-track | no-band
+    isActive: end === null,               // "active" = not ended, per spec
+    isComplete: !!(end && end.status === 'achieved'),
+    isAbandoned: !!(end && end.status === 'abandoned'),
+    endStatus: end ? end.status : '',
+    productId,
+    modelId,
+    labels: {
+      division: divisionLabel(o.divisionId),
+      product: productLabel(productId),
+      model: modelLabel(modelId),
+      initiative: initiativeLabel(o.initiativeId)
+    },
+    keyResults: RD.krsForObjective(o.id, STATE.pfMap) || [],
+    url: objectiveUrl(o)
+  };
+}
+
+// Console diagnostic — proves this layer works before anything depends on it.
+// Run __rdDiag() from the console after the Hub loads.
+window.__rdDiag = async function () {
+  const out = { brokerUrl: brokerBase(), tokenSet: !!brokerHeaders().Authorization };
+  try {
+    const RD = await loadEngine();
+    out.engine = { exports: Object.keys(RD).length, bands: [RD.band(95), RD.band(75), RD.band(50), RD.band(null)] };
+  } catch (e) { out.engine = 'FAILED: ' + e.message; console.log(out); return out; }
+  try {
+    await loadPortfolio();
+    out.versions = STATE.portfolioVersions;
+    out.divisions = (STATE.portfolio.divisions || []).map(d =>
+      ({ id: d.id, name: d.name, execLoaded: !!STATE.execDocs[d.id] }));
+    const objs = portfolioObjectives();
+    out.objectiveCount = objs.length;
+    const email = STATE.session && STATE.session.email;
+    out.mine = objs.filter(o => ownsObjective(email, o)).map(o => o.statement || o.id);
+    out.sample = objs.length ? getObjectiveView(objs[0].id) : null;
+  } catch (e) { out.portfolio = 'FAILED: ' + e.message; }
+  console.log(out);
+  return out;
+};
 
 async function jbFetchTracker(trackerId) {
   const cfg = STATE.config;
@@ -2724,11 +2989,41 @@ function enterHub() {
   refreshHubConfig().catch(err => {
     console.warn('Hub config refresh failed; using cached/local trackers.', err);
   });
+  // New stack: fetch RDCore + the portfolio from the broker. Stage 1 is additive —
+  // nothing renders from this yet, so a broker problem logs and changes nothing on
+  // screen. Deliberately not awaited: the Hub must not wait on it, or a slow broker
+  // would delay a dashboard that does not use this data yet.
+  // Run __rdDiag() in the console to inspect what loaded.
+  loadBrokerData().then(() => {
+    console.info('[rd] broker data loaded —',
+      portfolioObjectives().length, 'objectives across',
+      Object.keys(STATE.execDocs).length, 'divisions.',
+      'Run __rdDiag() for detail.');
+  }).catch(err => {
+    console.warn('[rd] broker data load failed (Stage 1 is additive; Hub unaffected):', err);
+  });
 }
 
 async function refreshHubConfig() {
   const data = await loadHubConfig();
   if (!data) return;
+
+  // Broker settings live in the same shared bin, admin-set once for everyone.
+  // Merged FIRST and independently of trackers — the tracker comparison below
+  // early-returns when the list is unchanged, and a broker token arriving on a
+  // day nobody touched the trackers would be dropped by that return.
+  const brokerPatch = {};
+  if (typeof data.brokerUrl === 'string' && data.brokerUrl.trim() &&
+      data.brokerUrl !== STATE.config.brokerUrl) brokerPatch.brokerUrl = data.brokerUrl.trim();
+  if (typeof data.brokerToken === 'string' &&
+      data.brokerToken !== STATE.config.brokerToken) brokerPatch.brokerToken = data.brokerToken;
+  if (typeof data.executionAppUrl === 'string' &&
+      data.executionAppUrl !== STATE.config.executionAppUrl) brokerPatch.executionAppUrl = data.executionAppUrl;
+  if (Object.keys(brokerPatch).length) {
+    Object.assign(STATE.config, brokerPatch);
+    saveConfig(brokerPatch);   // local-device cache only, same as the trackers path
+  }
+
   // Defensive: if the bin returned an empty trackers list but localStorage
   // has trackers, treat the bin as "not yet initialized" rather than
   // accepting it as the new truth. Without this, an unsaved seed bin (or
