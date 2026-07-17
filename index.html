@@ -467,6 +467,10 @@
   .ov-kname            { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ov-ktgt, .ov-kcur   { text-align: right; color: var(--text-subtle); font-variant-numeric: tabular-nums; }
   .ov-kcur             { color: var(--text); font-weight: 600; }
+  .tile-alarm          { border-color: #C0453E !important;
+                         box-shadow: 0 0 0 1px #C0453E, 0 0 12px rgba(192,69,62,.35); }
+  .ov-catchup          { font-size: 11px; font-weight: 700; color: #A32D2D;
+                         letter-spacing: .01em; }
   .ov-metrics          { display: flex; flex-direction: column; gap: 4px; }
   .ov-metric           { display: grid; grid-template-columns: 88px 1fr 34px;
                          align-items: center; gap: 6px; }
@@ -2737,6 +2741,10 @@ function objectiveUrl(o) {
 // record overdue — silently, and plausibly, which is the worst kind of wrong.
 const RD_EPOCH = Date.UTC(2020, 0, 1);
 function rdToday() { return Math.round((Date.now() - RD_EPOCH) / 86400000); }
+// Mirrors execution_app's CATCHUP_SLIP_THRESHOLD exactly: "objective slip (days)
+// that trips the schedule alarm". Same value, deliberately — a Hub that glowed at
+// 7d while the execution app stayed calm would make one of the two a liar.
+const CATCHUP_SLIP_THRESHOLD = 10;
 function rdDayToIso(d) {
   return (d == null) ? '' : new Date(RD_EPOCH + d * 86400000).toISOString().slice(0, 10);
 }
@@ -2897,6 +2905,10 @@ function getObjectiveView(objId) {
   const exec = STATE.execDocs[o.divisionId] || {};
   // null = still running. Both 'achieved' and 'abandoned' mean ended.
   const end = RD.objectiveEndState(exec.objectiveState || [], o.id);
+  // Work slip from the cascade (driven by OVERDUE gates). Null when the cascade
+  // is unavailable, which reads as "no alarm" rather than a false one.
+  const sched = (STATE.cascade && STATE.cascade.objectiveScheduleSlip)
+    ? STATE.cascade.objectiveScheduleSlip[o.id] : null;
   const productId = RD.effProduct(o, STATE.portfolio) || '';
   const modelId = RD.effModel(o, STATE.portfolio) || '';
 
@@ -2936,6 +2948,11 @@ function getObjectiveView(objId) {
     // inventing a more careful word for the same number; a tooltip carries the
     // caveat, exactly as it does there.
     gateHealth: RD.objectiveGateReadiness(o.id, STATE.pfMap, rdToday()),
+    // The schedule ALARM, defined exactly as execution_app defines it:
+    //   schedAlarm = !ended && slip > CATCHUP_SLIP_THRESHOLD
+    // where slip is cascade.objectiveScheduleSlip — NOT projectedEnd-plannedEnd.
+    scheduleSlip: sched,
+    catchupNeeded: !end && sched != null && sched > CATCHUP_SLIP_THRESHOLD,
     // Grouped by workstream. Flat gate lists interleave parallel sets.
     gateLanes: gateLanesForObjective(o.id),
     // Editable only for owners — see objectiveUrl.
@@ -4859,7 +4876,14 @@ function renderObjectiveBody(view) {
       `</div>${laneHtml}</div>`;
   }
 
-  return `<div class="tile-objective">${krBlock}${progBlock}${gateBlock}</div>`;
+  // The alarm, stated plainly. No button: building a catch-up plan happens in the
+  // execution app, and a Hub button would either duplicate that flow or lie about
+  // where the work lives. This says what is true and where it is true; the tile
+  // already links through.
+  const alarmBlock = view.catchupNeeded
+    ? `<div class="ov-catchup" title="Work is ${view.scheduleSlip} days behind its own plan \u2014 past the ${CATCHUP_SLIP_THRESHOLD}-day threshold the execution app alarms on.">Catch-up plan needed</div>`
+    : '';
+  return `<div class="tile-objective">${alarmBlock}${krBlock}${progBlock}${gateBlock}</div>`;
 }
 
 // Render the OKR-view tile body: one row per Key Result, each with a mini
@@ -5003,6 +5027,9 @@ function renderTileEl(tool) {
   const isObjective = isMerged || isKpi;
   // Body slot varies by view type; header (badge + meta + status) is shared by
   // all objective tiles.
+  // Red glow on the whole tile when the schedule alarm trips — the point is to be
+  // findable while SCANNING, before you have read a single number on it.
+  if (tool.view && tool.view.catchupNeeded) a.classList.add('tile-alarm');
   let bodyHtml = '';
   if (isMerged) {
     // tool.view is stamped by the portfolio generator. Without it (old snapshot
