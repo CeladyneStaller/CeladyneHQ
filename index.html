@@ -2753,35 +2753,69 @@ function kpiPool() {
 // straight to the renderer (which is what this did) produced a blank label and a
 // 0% bar on every row: `escText(undefined)` renders empty, and
 // `Number(undefined) || 0` is 0. Both failed quietly and looked like styling.
+// Key result rows for the objective tile: dot | name | Target | Now.
+//
+// Mirrors the app's ovKrRows. Two things it does that are easy to get wrong:
+// the label is `.statement` (RDCore key results have no `.name`), and the score
+// is keyResultScore(id) — a FUNCTION, not a field. Handing the raw records to a
+// renderer yields a blank label and a 0% bar, quietly, on every row.
+//
+// Target/Now come from the FIRST kpi hosting the KR, matching the app. With
+// several, the first is shown rather than none: the row is a summary, and the KPI
+// view is where the full set lives.
 function okrRowsForObjective(objId) {
   const RD = window.RDCore;
   if (!RD || !STATE.pfMap) return [];
+  const pool = kpiPool();
   return (RD.krsForObjective(objId, STATE.pfMap) || []).map(kr => {
-    const row = {
-      name: kr.statement || kr.name || String(kr.id),
-      // The engine's answer, whatever it is. Do not recompute from kr.progress —
-      // that field only exists for percentage-tracked KRs, and reading it
-      // directly would quietly ignore subkr and kpi tracking types.
-      score: RD.keyResultScore(kr.id, STATE.pfMap)
-    };
-    // The "current → target" sub-line renders only when both are present, and it
-    // only means anything for a KR measured by exactly ONE kpi. With several,
-    // there is no single target to show, so it is omitted rather than picking
-    // one arbitrarily — that is what the KPI view is for.
-    const kpis = RD.kpisFor('keyResult', kr.id, STATE.pfMap) || [];
-    if (kpis.length === 1) {
-      const pool = kpiPool();
-      const t = RD.effTarget(kpis[0], pool);
-      const v = RD.effValue(kpis[0], pool, STATE.pfMap);
-      if (t != null && v != null) {
-        const unit = RD.kpiUnit(kpis[0], pool) || '';
-        row.target = unit ? `${t} ${unit}` : t;
-        row.current = unit ? `${v} ${unit}` : v;
-        row.direction = kpis[0].direction || '';
-      }
+    const score = RD.keyResultScore(kr.id, STATE.pfMap);
+    const kk = (RD.kpisFor('keyResult', kr.id, STATE.pfMap) || [])[0];
+    let tgt = '\u2014', cur = '\u2014';
+    if (kk) {
+      const u = RD.kpiUnit(kk, pool) || kk.unit;
+      const unit = u ? (' ' + u) : '';
+      const dir = kk.direction === 'down' ? '\u2264' : '\u2265';
+      const tv = RD.effTarget(kk, pool, STATE.pfMap);
+      const cv = RD.effValue(kk, pool, STATE.pfMap);
+      if (tv != null) tgt = dir + ' ' + rdNum(tv) + unit;
+      if (cv != null) cur = rdNum(cv) + unit;
     }
-    return row;
+    return { name: kr.statement || kr.name || String(kr.id), score, band: hubBand(score), tgt, cur };
   });
+}
+
+// Number formatting to match the app's ovNum: integers and anything >=100 render
+// whole; smaller decimals keep two places.
+function rdNum(v) {
+  if (v == null || v === '') return '';
+  const n = Number(v);
+  if (!isFinite(n)) return String(v);
+  return (Math.abs(n) >= 100 || Number.isInteger(n)) ? String(Math.round(n)) : String(Math.round(n * 100) / 100);
+}
+// Schedule line for an objective: "12d left" / "3d overdue" / "ended 2026-05-01",
+// plus the slip in days. Mirrors ovObjTile's daysStr/schedChip exactly.
+//
+// The projected end comes from the cascade, which resolves the LATEST binding
+// gate across ALL of an objective's workstreams — not the lane you happen to be
+// looking at. That is why the tile can read "+28d slip" when every dot in lane A
+// is green: lane B is what moved the date.
+function scheduleOf(o, end) {
+  const c = STATE.cascade;
+  const proj = (c && c.objectiveProjectedEnd) ? c.objectiveProjectedEnd[o.id] : null;
+  // Same precedence the app uses: a projection beats the plan; with no plan, the
+  // projection is all there is.
+  const eff = (o.plannedEnd != null) ? (proj != null ? proj : o.plannedEnd) : proj;
+  if (end) {
+    // An ended objective has no days-left and no slip — the date stopped moving.
+    return { text: 'ended ' + rdDayToIso(end.endedDay), slip: null, projectedEnd: eff };
+  }
+  const dl = (eff != null) ? eff - rdToday() : null;
+  const text = (dl == null) ? ''
+             : dl < 0 ? Math.abs(dl) + 'd overdue'
+             : dl === 0 ? 'Due today'
+             : dl + 'd left';
+  const slip = (o.plannedEnd != null && eff != null) ? eff - o.plannedEnd : null;
+  return { text, slip: (slip != null && slip > 0) ? slip : null, projectedEnd: eff };
 }
 // The Hub-shaped view of one objective, computed through RDCore. This is the
 // single accessor the tile layer will read — the replacement for the old
@@ -4658,6 +4692,66 @@ function kpiDirectionCue(direction) {
   if (direction === 'decrease') return '↓';
   if (direction === 'maintain') return '±';
   return '↑'; // increase (default)
+}
+
+// The merged objective body: key results, one overall progress bar, then gates.
+// Mirrors the planning app's ovObjTile body (ovKpiTbl -> ovProg -> gatesBlock) so
+// the same objective reads the same way in both tools. The Hub's own tile header
+// sits above this and is unchanged.
+//
+// Both signals, one tile. They answer different questions — "are we hitting our
+// numbers" and "are we hitting our dates" — and they routinely disagree: a green
+// band beside two overdue gates is not a bug, it is the actual situation. The old
+// split made you pick which half to see.
+function renderObjectiveBody(view) {
+  if (!view) return '';
+  const krs = Array.isArray(view.keyResults) ? view.keyResults : [];
+  const lanes = Array.isArray(view.gateLanes) ? view.gateLanes : [];
+
+  // ---- key results -------------------------------------------------------
+  let krBlock = '';
+  if (krs.length) {
+    const rows = krs.map(r => `
+      <div class="ov-kdot ${bandClass(r.band)}"></div>
+      <span class="ov-kname" title="${escAttr(r.name)}">${escText(r.name)}</span>
+      <span class="ov-ktgt">${escText(r.tgt)}</span>
+      <span class="ov-kcur">${escText(r.cur)}</span>`).join('');
+    krBlock = `<div class="ov-ktbl">
+      <div class="ov-kh"></div><div class="ov-kh">Key result</div>
+      <div class="ov-kh ov-r">Target</div><div class="ov-kh ov-r">Now</div>${rows}</div>`;
+  } else {
+    krBlock = `<div class="tile-okr-empty">No key results defined.</div>`;
+  }
+
+  // ---- overall progress --------------------------------------------------
+  // Deliberately the objective score, NOT gate readiness. Readiness is percent of
+  // gates passed — 0 on day one — so a bar driven by it would read "no progress"
+  // on every healthy new objective.
+  const pct = Math.max(0, Math.min(100, Math.round(Number(view.score) || 0)));
+  const scored = Number.isFinite(view.score);
+  const progBlock = `<div class="ov-prog">
+      <div class="ov-ptrack"><div class="ov-pfill ${bandClass(view.band)}" style="width:${scored ? pct : 0}%"></div></div>
+      <span class="ov-ppct">${scored ? pct + '%' : '\u2014'}</span></div>`;
+
+  // ---- gates -------------------------------------------------------------
+  let gateBlock = '';
+  const all = lanes.reduce((a, l) => a.concat(l.gates), []);
+  if (all.length) {
+    const passed = all.filter(g => g.state === 'passed' || g.state === 'passed-late').length;
+    const behind = all.filter(g => g.state === 'overdue').length;
+    const laneHtml = lanes.map(l => {
+      const lbl = l.label
+        ? `<span class="tile-gate-lane" title="${escAttr(l.name)}">${escText(l.label)}</span>`
+        : '';
+      return `<div class="tile-gate-row">${lbl}${renderGateBubblesHtml(l.gates)}</div>`;
+    }).join('');
+    gateBlock = `<div class="ov-gates">
+      <div class="ov-gatehd"><span class="ov-gt">Gates ${passed}/${all.length}</span>` +
+      (behind ? `<span class="ov-behind">\u2691 ${behind} behind</span>` : '') +
+      `</div>${laneHtml}</div>`;
+  }
+
+  return `<div class="tile-objective">${krBlock}${progBlock}${gateBlock}</div>`;
 }
 
 // Render the OKR-view tile body: one row per Key Result, each with a mini
