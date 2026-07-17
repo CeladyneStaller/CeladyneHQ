@@ -5251,13 +5251,27 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
     sectionTools.some(t => viewTypeOf(t.id) === v)
   );
 
-  // The persisted view preference (durable, default ['stagegate']). This is the
-  // full saved selection regardless of what's present right now — so if OKR
-  // tiles are temporarily absent, OKR stays selected and reappears when they
+  // The persisted view preference (durable, default ['objective']). This is the
+  // full saved selection regardless of what's present right now — so if KPI
+  // tiles are temporarily absent, KPI stays selected and reappears when they
   // return. The ACTIVE filter set intersects the preference with present views.
-  const prefViews = (STATE.session && Array.isArray(STATE.session.leadershipViewFilter) && STATE.session.leadershipViewFilter.length)
-    ? STATE.session.leadershipViewFilter.slice()
-    : ['objective'];
+  //
+  // Legacy values are mapped HERE, at read time, not only in migrateUserRecord.
+  // A session already in localStorage still holds ['stagegate'] from before the
+  // merge and nothing re-migrates it — so the raw value intersected with
+  // ['objective'] yields the empty set, and the filter dutifully hides every
+  // tile. The Leadership section then looks broken rather than filtered, which is
+  // the worst possible way for a preference to fail.
+  //
+  // Unknown values are dropped rather than treated as filters; if nothing valid
+  // survives, fall back to the default instead of hiding everything. A genuine
+  // ['kpi'] preference is still valid and still hides objective tiles, as meant.
+  const _prefRaw = (STATE.session && Array.isArray(STATE.session.leadershipViewFilter))
+    ? STATE.session.leadershipViewFilter : [];
+  const _prefMapped = _prefRaw
+    .map(v => LEGACY_VIEW_MAP[v] || v)
+    .filter(v => VIEW_ORDER.includes(v));
+  const prefViews = _prefMapped.length ? Array.from(new Set(_prefMapped)) : ['objective'];
   const prefSet = new Set(prefViews);
 
   // Filter state. Status/tracker reset each render (transient). `views` is
