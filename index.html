@@ -462,8 +462,11 @@
                          letter-spacing: .01em; }
 
   /* the two named scores */
-  .ov-stats            { display: flex; gap: 16px; }
+  .ov-stats            { display: flex; align-items: baseline; gap: 16px; }
   .ov-stat             { display: flex; align-items: baseline; gap: 4px; }
+  /* pushed to the right edge, level with the two scores */
+  .ov-sched            { margin-left: auto; font-size: 11px; color: var(--text-subtle);
+                         white-space: nowrap; flex: 0 0 auto; }
   .ov-statnum          { font-size: 18px; font-weight: 600; line-height: 1;
                          font-variant-numeric: tabular-nums; color: var(--text-subtle); }
   .ov-statnum.ontrack  { color: #3B6D11; }
@@ -509,6 +512,8 @@
 
   /* one section per workstream — only rendered when there is more than one */
   .ov-lanehd           { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; }
+  /* the lane's flag badge reuses .tile-gates-behind so it matches the top line */
+  .ov-lanehd .tile-gates-behind { flex: 0 0 auto; }
   .ov-lanename         { font-size: 10px; font-weight: 600; flex: 1; min-width: 0;
                          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ov-lanefrac         { font-size: 10px; font-weight: 600; flex: 0 0 auto;
@@ -3934,9 +3939,11 @@ function buildToolList(session) {
     // word "health" already means gate readiness everywhere else in this stack.
     // The schedule line is what belongs here: "12d left", "+30d slip". The slip
     // is the work-slip the catch-up alarm uses, so chip and glow never contradict.
-    const sched = view.schedule || {};
-    const slipText = sched.slip ? `+${sched.slip}d slip` : '';
-    const bits = [sched.text, slipText].filter(Boolean);
+    // The schedule moved into the body's stat row, so it sits at the same height
+    // as the two scores instead of on its own line above them. Nothing is left for
+    // the status slot, which the renderer hides rather than showing a bare dot.
+    // Severity is still returned — the urgent count keys off it, not off text.
+    const bits = [];
     return {
       text: bits.join(' · ') || 'View progress',
       severity: sev,
@@ -3958,7 +3965,12 @@ function buildToolList(session) {
       // No tracker in the id — there are no trackers. The prefix still matches
       // the subsection matchers and the Leadership filter's viewTypeOf().
       id: `obj__${viewType}__${view.id}`,
-      name: shortLabel(view.name, 32),
+      // No shortLabel here. .tile-name already ellipsises in CSS (flex:1,
+      // min-width:0, text-overflow), so a 32-char JS cut just truncates the name
+      // earlier than the tile actually needs — at the same 32 chars whether the
+      // tile is 240px or 480px wide. Let the layout decide; titleAttr has the full
+      // text on hover.
+      name: view.name,
       description: view.labels.division || '',
       icon: vt.icon,
       url: view.url || '#',
@@ -4570,34 +4582,39 @@ function renderGateLanesHtml(lanes) {
   }).join('');
 }
 
-// Renders the stage-gate dot row that mirrors the active panel's bubbles.
-// Empty array → empty string (the .tile-gates div is :empty-hidden via CSS).
-function renderGateBubblesHtml(gates) {
+// Just the dot track — no header. Split out because renderObjectiveBody renders
+// one row PER WORKSTREAM under a header it writes itself; calling the full
+// renderGateBubblesHtml per lane printed a second "Gates x/y" header inside every
+// workstream, under the workstream's own.
+function renderGateDotsHtml(gates) {
   if (!gates || !gates.length) return '';
   const escAttr = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
   const escText = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  const passed = gates.filter(g => g.state === 'passed' || g.state === 'passed-late').length;
-  const total = gates.length;
-  const behind = gates.filter(g => g.state === 'overdue').length;
   const dots = gates.map((g, i) => {
     const state = g.state || 'pending';
     const isDone = state === 'passed' || state === 'passed-late';
-    const inner = isDone ? '✓' : String(i + 1);
-    const tooltip = `Gate ${i + 1}: ${g.name || '(unnamed)'} — ${state.replace('-', ' ')}`;
+    const inner = isDone ? '\u2713' : String(i + 1);
+    const tooltip = `Gate ${i + 1}: ${g.name || '(unnamed)'} \u2014 ${state.replace('-', ' ')}`;
     return `<span class="gate-dot ${state}" title="${escAttr(tooltip)}">${escText(inner)}</span>`;
   });
-  const connector = '<span class="gate-conn"></span>';
-  const track = dots.join(connector);
+  return `<div class="gate-track">${dots.join('<span class="gate-conn"></span>')}</div>`;
+}
+
+// Header + dots. Still used by the flag-off snapshot path, which fills the
+// data-gates slot and has no body renderer to write a header for it.
+function renderGateBubblesHtml(gates) {
+  if (!gates || !gates.length) return '';
+  const passed = gates.filter(g => g.state === 'passed' || g.state === 'passed-late').length;
+  const behind = gates.filter(g => g.state === 'overdue').length;
   const behindBadge = behind > 0
-    ? `<span class="tile-gates-behind">⚑ ${behind} behind</span>`
+    ? `<span class="tile-gates-behind">\u2691 ${behind} behind</span>`
     : '';
   return `
     <div class="tile-gates-head">
-      <span>Gates ${passed}/${total}</span>
+      <span>Gates ${passed}/${gates.length}</span>
       ${behindBadge}
     </div>
-    <div class="tile-gates-track">${track}</div>
-  `;
+    ${renderGateDotsHtml(gates)}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4992,10 +5009,18 @@ function renderObjectiveBody(view) {
       `<span class="ov-statnum ${cls}">${has ? Math.round(val) : '\u2014'}</span>` +
       `<span class="ov-statlbl">${escText(label)}</span></div>`;
   };
+  // The schedule rides on the same line as the scores, pushed right. It used to
+  // sit in the tile's status slot above them; that slot is now empty and hidden.
+  const sched = view.schedule || {};
+  const schedBits = [sched.text, sched.slip ? `+${sched.slip}d slip` : ''].filter(Boolean);
+  const schedHtml = schedBits.length
+    ? `<div class="ov-sched">${escText(schedBits.join(' \u00b7 '))}</div>`
+    : '';
   const statRow = `<div class="ov-stats">` +
     stat('OKR score', view.score, 'Mean of key result scores') +
     stat('Gate health', view.gateHealth,
          'Weakest workstream \u2014 % of gates passed. 0% means the plan has not started, not that it is failing.') +
+    schedHtml +
     `</div>`;
 
   // ---- key results, with their KPIs nested -------------------------------
@@ -5041,16 +5066,18 @@ function renderObjectiveBody(view) {
     // Per-lane headers ONLY when there is more than one workstream. With one lane
     // its fraction is the objective's fraction and its name is the only name —
     // printing them again just says the same thing three times.
+    // renderGateDotsHtml, NOT renderGateBubblesHtml — the latter writes its own
+    // "Gates x/y" header, which under a lane header printed the same numbers twice.
     const body = lanes.length > 1
       ? lanes.map(l => {
           const lbandCls = bandClass(hubBand(l.total ? (100 * l.passed / l.total) : null));
           return `<div class="ov-lanehd">` +
             `<span class="ov-lanename" title="${escAttr(l.name)}">${escText(l.name)}</span>` +
-            `<span class="ov-lanefrac ${lbandCls}">${l.passed}/${l.total}` +
-            (l.behind ? ` \u00b7 ${l.behind} behind` : '') + `</span></div>` +
-            `<div class="ov-lane">${renderGateBubblesHtml(l.gates)}</div>`;
+            `<span class="ov-lanefrac ${lbandCls}">${l.passed}/${l.total}</span>` +
+            (l.behind ? `<span class="tile-gates-behind">\u2691 ${l.behind} behind</span>` : '') +
+            `</div><div class="ov-lane">${renderGateDotsHtml(l.gates)}</div>`;
         }).join('')
-      : `<div class="ov-lane">${renderGateBubblesHtml(lanes[0].gates)}</div>`;
+      : `<div class="ov-lane">${renderGateDotsHtml(lanes[0].gates)}</div>`;
     gateBlock = `<div class="ov-sec">${head}${body}</div>`;
   }
 
@@ -6081,7 +6108,16 @@ async function fetchTileStatuses() {
       const result = await tool.fetchStatus();
       const sev = result.severity || 'subtle';
       el.className = 'tile-status ' + (sev === 'subtle' ? '' : sev);
-      el.innerHTML = `<span class="dot"></span><span>${result.text}</span>`;
+      // Objective tiles render their schedule inside the body now and return no
+      // status text. Without this the slot would still paint a bare severity dot
+      // floating above the scores with nothing beside it.
+      if (!result.text) {
+        el.style.display = 'none';
+        el.innerHTML = '';
+      } else {
+        el.style.display = '';
+        el.innerHTML = `<span class="dot"></span><span>${result.text}</span>`;
+      }
       if (sev === 'warning' || sev === 'danger') urgentCount++;
       // Optional: tile-gates slot for stage-gate dot rows.
       if (result.gates) {
