@@ -2869,7 +2869,14 @@ function rdNum(v) {
 // gate across ALL of an objective's workstreams — not the lane you happen to be
 // looking at. That is why the tile can read "+28d slip" when every dot in lane A
 // is green: lane B is what moved the date.
-function scheduleOf(o, end) {
+// Schedule line for an objective: "12d left" / "3d overdue" / "ended 2026-05-01",
+// plus the slip in days. Mirrors ovObjTile's daysStr/schedChip exactly.
+//
+// The projected end comes from the cascade, which resolves the LATEST binding
+// gate across ALL of an objective's workstreams — not the lane you happen to be
+// looking at. That is why the tile can read "+28d slip" when every dot in lane A
+// is green: lane B is what moved the date.
+function scheduleOf(o, end, workSlip) {
   const c = STATE.cascade;
   const proj = (c && c.objectiveProjectedEnd) ? c.objectiveProjectedEnd[o.id] : null;
   // Same precedence the app uses: a projection beats the plan; with no plan, the
@@ -2877,6 +2884,7 @@ function scheduleOf(o, end) {
   const eff = (o.plannedEnd != null) ? (proj != null ? proj : o.plannedEnd) : proj;
   if (end) {
     // An ended objective has no days-left and no slip — the date stopped moving.
+    // (cascade agrees: objectiveScheduleSlip is null, not 0, once an objective ends.)
     return { text: 'ended ' + rdDayToIso(end.endedDay), slip: null, projectedEnd: eff };
   }
   const dl = (eff != null) ? eff - rdToday() : null;
@@ -2884,9 +2892,19 @@ function scheduleOf(o, end) {
              : dl < 0 ? Math.abs(dl) + 'd overdue'
              : dl === 0 ? 'Due today'
              : dl + 'd left';
-  const slip = (o.plannedEnd != null && eff != null) ? eff - o.plannedEnd : null;
-  return { text, slip: (slip != null && slip > 0) ? slip : null, projectedEnd: eff };
+  // The chip reads cascade.objectiveScheduleSlip — the SAME number the catch-up
+  // alarm trips on — so the tile tells one story. It previously read
+  // projectedEnd - plannedEnd, which answers a different question ("does the work
+  // still fit the span?") and disagreed with the glow in both directions: a gate
+  // 30d overdue with 60d of buffer glowed red beside a chip showing nothing, and
+  // work sitting on its own plan but overflowing the span showed "+18d slip" on a
+  // calm tile. Both were true; together on one tile they read as a bug.
+  //
+  // This number is post-propagation: a late gate pushes its whole chain, so three
+  // gates 10d late each compound to 30d rather than reporting the worst one.
+  return { text, slip: (workSlip != null && workSlip > 0) ? workSlip : null, projectedEnd: eff };
 }
+
 // The Hub-shaped view of one objective, computed through RDCore. This is the
 // single accessor the tile layer will read — the replacement for the old
 // getObjectiveData()/getSnapshot() pair, minus the company overlay and the
@@ -2938,7 +2956,7 @@ function getObjectiveView(objId) {
     keyResults: okrRowsForObjective(o.id),
     // Schedule projection (cascade). `schedule.text` is the days line, `.slip` the
     // chip. Null-safe: a failed cascade degrades to no line, not no tile.
-    schedule: scheduleOf(o, end),
+    schedule: scheduleOf(o, end, sched),
     // Stage-gate health: the identical call both apps make. It is literally
     // `gateHealth` in execution_app's objMetricStrip and labelled "health" in
     // planning_app, whose own tooltip is candid about what it measures —
@@ -3776,7 +3794,8 @@ function buildToolList(session) {
     const sev = view.isComplete ? 'success'
               : ({ ontrack: 'success', watch: 'warning', atrisk: 'danger' }[key] || 'subtle');
     const healthText = Number.isFinite(view.score) ? `Health ${Math.round(view.score)}` : '';
-    // The schedule line the app puts under the name: "12d left", "+18d slip".
+    // The schedule line under the name: "12d left", "+30d slip". The slip is the
+    // work-slip the catch-up alarm uses, so chip and glow never contradict.
     // Distinct from the band on purpose — one is dates, the other outcomes, and
     // they disagree often enough that merging them would lose the disagreement.
     const sched = view.schedule || {};
