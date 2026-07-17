@@ -448,6 +448,10 @@
   .tile-badge.watch    { background: #FAEEDA; color: #854F0B; }
   .tile-badge.atrisk   { background: #FCEBEB; color: #A32D2D; }
   .tile-badge.complete { background: var(--surface-alt); color: var(--text-subtle); }
+  /* no-band: RDCore scored this as null — nothing measurable, which is a real
+     state and not an error. Also the landing spot for any band name the Hub does
+     not recognise, so a future RDCore band renders neutral instead of unstyled. */
+  .tile-badge.noband   { background: var(--surface-alt); color: var(--text-subtle); }
 
   /* ---- Edit mode ---- */
   .edit-banner {
@@ -724,6 +728,7 @@
   .okr-kr-score.ontrack { color: #3B6D11; }
   .okr-kr-score.watch   { color: #854F0B; }
   .okr-kr-score.atrisk  { color: #A32D2D; }
+  .okr-kr-score.noband  { color: var(--text-subtle); }
   .okr-kr-bar {
     height: 5px;
     background: var(--surface-alt);
@@ -734,6 +739,7 @@
   .okr-kr-fill.ontrack { background: #4E9A2A; }
   .okr-kr-fill.watch   { background: #C68A1E; }
   .okr-kr-fill.atrisk  { background: #C0453E; }
+  .okr-kr-fill.noband  { background: var(--border); }
   .okr-kr-sub {
     font-size: 11px;
     color: var(--text-subtle);
@@ -802,6 +808,7 @@
   .kpi-row-fill.ontrack { background: #4E9A2A; }
   .kpi-row-fill.watch   { background: #C68A1E; }
   .kpi-row-fill.atrisk  { background: #C0453E; }
+  .kpi-row-fill.noband  { background: var(--border); }
   .tile-gates-head {
     display: flex;
     align-items: center;
@@ -3135,6 +3142,11 @@ function enterHub() {
       portfolioObjectives().length, 'objectives across',
       Object.keys(STATE.execDocs).length, 'divisions.',
       'Run __rdDiag() for detail.');
+    // Bands are resolved by RDCore, which arrives asynchronously. Anything drawn
+    // before it landed rendered neutral (hubBand -> 'unknown') rather than
+    // guessing a threshold. Re-render now that the engine can answer.
+    renderTiles();
+    fetchTileStatuses();
   }).catch(err => {
     console.warn('[rd] broker data load failed (Stage 1 is additive; Hub unaffected):', err);
   });
@@ -4289,14 +4301,57 @@ function renderViewTypeSubsections(tiles, container, sectionId, subsectionDef, p
 
 // Renders a single tile element and returns it. Shared between flat sections
 // and Projects subsections.
-// Map a 0-100 score to a status key, using the same thresholds the Gantt uses
-// (healthStatusKey: >=70 ontrack, >=40 watch, else atrisk). Drives the green/
-// amber/red coloring of KR and KPI progress bars so they match health badges.
-function scoreToStatus(score) {
-  const n = Number(score);
-  if (!Number.isFinite(n)) return 'watch';
-  return n >= 70 ? 'ontrack' : n >= 40 ? 'watch' : 'atrisk';
+// ═════════════════════════════════════════════════════════════════════════════
+//  BANDS — RDCore decides, the Hub only styles
+//
+//  Nothing in this file may decide what a score MEANS. RDCore's band() owns the
+//  thresholds, and the Hub fetches RDCore from the broker, so changing a
+//  threshold in rdcore.js reaches these tiles on the next reload with no Hub
+//  edit and no redeploy.
+//
+//  That rule has one uncomfortable consequence, and it is deliberate: when the
+//  engine has not loaded yet there is NO local fallback. Re-implementing "90 is
+//  on-track" here as a stopgap would be a second copy of the one thing that must
+//  only exist once — and a stopgap copy is the worst kind, because it is invisible
+//  and only wrong after someone changes the real one. So an unloaded engine
+//  reports 'unknown' and renders neutral. Tiles re-render when the engine lands
+//  (see the boot handler), so the neutral state lasts only until then.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// The one band resolver. Returns RDCore's band name, or 'unknown' before the
+// engine is available. Never guesses.
+function hubBand(score) {
+  const RD = window.RDCore;
+  if (RD && typeof RD.band === 'function') return RD.band(score);
+  return 'unknown';
 }
+
+// Band name → CSS class. Unmapped names fall through to the neutral class rather
+// than to nothing: if RDCore adds a band tomorrow, its tiles must render as
+// something visible-but-uncommitted, not vanish because no rule matched.
+const BAND_CLASS = {
+  'on-track':  'ontrack',
+  'at-risk':   'watch',
+  'off-track': 'atrisk',
+  'no-band':   'noband',
+  'unknown':   'noband'
+};
+function bandClass(band) { return BAND_CLASS[band] || 'noband'; }
+
+// Band name → display text. An unmapped band shows its own raw name — a new band
+// reading "needs-attention" is odd but honest; showing nothing would hide it.
+const BAND_LABEL = {
+  'on-track':  'On track',
+  'at-risk':   'At risk',
+  'off-track': 'Off track',
+  'no-band':   'No data',
+  'unknown':   '…'
+};
+function bandLabel(band) { return BAND_LABEL[band] || String(band || ''); }
+
+// Kept for the existing KR/KPI bar renderers, which ask for a CSS class from a
+// score. Now routed through the engine instead of the old local 70/40 split.
+function scoreToStatus(score) { return bandClass(hubBand(score)); }
 
 // Direction → a subtle cue glyph for KPI rows. Increase/decrease/maintain.
 function kpiDirectionCue(direction) {
