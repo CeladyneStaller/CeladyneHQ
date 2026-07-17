@@ -1642,6 +1642,12 @@ const CONFIG_DEFAULTS = {
   // bin and every user picks it up from there (see refreshHubConfig).
   brokerUrl: 'https://web-production-b17a2.up.railway.app',
   brokerToken: 'vpjshbfgtplybz5sfbjfcomygtcunkn1',
+  // THE FLIP. false = objective tiles come from the old tracker snapshots;
+  // true = they come from the portfolio + RDCore. Ships false so applying the
+  // patch changes nothing. Flip it in localStorage on one device to try it
+  // (hub_config_v1 → useBrokerData: true), then in the hub config bin for
+  // everyone once it looks right. Stage 4 deletes the flag and the old path.
+  useBrokerData: false,
   // Where objective tiles point. The execution app takes ?division=&objective=
   // &readonly as deep-link params, so a tile can land on the exact objective.
   executionAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/execution_app.html',
@@ -3166,6 +3172,10 @@ async function refreshHubConfig() {
       data.brokerToken !== STATE.config.brokerToken) brokerPatch.brokerToken = data.brokerToken;
   if (typeof data.executionAppUrl === 'string' &&
       data.executionAppUrl !== STATE.config.executionAppUrl) brokerPatch.executionAppUrl = data.executionAppUrl;
+  // The flip, shared. Setting this in the bin switches every user at once —
+  // which is the point, but also why it is worth flipping locally first.
+  if (typeof data.useBrokerData === 'boolean' &&
+      data.useBrokerData !== STATE.config.useBrokerData) brokerPatch.useBrokerData = data.useBrokerData;
   if (Object.keys(brokerPatch).length) {
     Object.assign(STATE.config, brokerPatch);
     saveConfig(brokerPatch);   // local-device cache only, same as the trackers path
@@ -3488,7 +3498,125 @@ function buildToolList(session) {
     return tile;
   }
 
-  // 4a) Assignment auto-tiles (Path A): one stage-gate tile per assignment.
+  // ───────────────────────────────────────────────────────────────────────────
+  // 4-NEW) Objective tiles from the portfolio (the flip).
+  //
+  // Everything the old path fetched asynchronously is already in memory here, so
+  // fetchStatus resolves instantly from STATE rather than hitting a bin. It still
+  // returns the same { text, severity, gates, url, badge, meta } contract, so
+  // fetchTileStatuses and renderTileEl need no changes at all.
+  //
+  // Note what is NOT here: no company overlay, no dedup-by-name, no tracker
+  // lookup. One portfolio means one record per objective — the reconciliation
+  // those existed to do has nothing left to reconcile.
+  // ───────────────────────────────────────────────────────────────────────────
+  function statusFromView(view) {
+    // Ended objectives read as their end state; live ones read as their band.
+    // 'abandoned' is deliberately distinct from 'achieved' — the old model could
+    // only say complete/not, and collapsing them here would relabel abandoned
+    // work as finished.
+    const key = view.isComplete ? 'complete' : bandClass(view.band);
+    const label = view.isComplete ? 'Complete'
+                : view.isAbandoned ? 'Abandoned'
+                : bandLabel(view.band);
+    const sev = view.isComplete ? 'success'
+              : ({ ontrack: 'success', watch: 'warning', atrisk: 'danger' }[key] || 'subtle');
+    const healthText = Number.isFinite(view.score) ? `Health ${Math.round(view.score)}` : '';
+    const bits = [healthText, view.labels.initiative].filter(Boolean);
+    return {
+      text: bits.join(' · ') || 'View progress',
+      severity: sev,
+      // Gate dots land in 3c — RDCore exposes them via setsForObjective /
+      // gatesForSet / classifyGate, which is its own piece of work. An empty
+      // array renders no dot row (the container is :empty-hidden), rather than
+      // inventing dots from data this stage has not mapped yet.
+      gates: [],
+      url: view.url || null,
+      badge: label ? { label, key } : null,
+      meta: [view.labels.division, view.labels.initiative].filter(Boolean).join(' · ')
+    };
+  }
+
+  function buildPortfolioObjectiveTile(view, viewType, removable) {
+    if (!VIEW_TYPES[viewType]) return null;
+    const vt = VIEW_TYPES[viewType];
+    const section = objectiveSection(session, findObjective(view.id));
+    const tile = {
+      // No tracker in the id — there are no trackers. The prefix still matches
+      // the subsection matchers and the Leadership filter's viewTypeOf().
+      id: `obj__${viewType}__${view.id}`,
+      name: shortLabel(view.name, 32),
+      description: view.labels.division || '',
+      icon: vt.icon,
+      url: view.url || '#',
+      section,
+      removable: !!removable,
+      objTriple: { objectiveId: String(view.id), viewType },
+      titleAttr: `${vt.label} for: ${view.name}`,
+      fetchStatus: async () => statusFromView(view),
+      // Grouping reads groupAttrs (raw, the grouping key) + groupLabels (display).
+      groupAttrs:  { division: view.divisionId, productLine: view.productId, productModel: view.modelId },
+      groupLabels: { division: view.labels.division, productLine: view.labels.product, productModel: view.labels.model },
+      keyResults: view.keyResults,
+      kpis: [],
+      // Leadership filter metadata.
+      filterTracker: view.divisionId,   // 3c renames this to filterDivision
+      filterStatus: view.isComplete ? 'complete' : bandClass(view.band),
+      filterActive: view.isActive
+    };
+    return tile;
+  }
+
+  function buildPortfolioObjectiveTiles() {
+    const objs = portfolioObjectives();
+    const seen = new Set();
+    const key = (id, vt) => `${id}__${vt}`;
+
+    // 4a-new) Auto-tiles for everything you own or lead. Ownership is derived
+    // from the portfolio, so there is no assignment list to keep in sync.
+    objs.forEach(o => {
+      const section = objectiveSection(session, o);
+      if (section === 'watching') return;      // watching is opt-in, via configured tiles
+      const view = getObjectiveView(o.id);
+      if (!view) return;
+      const k = key(o.id, 'stagegate');
+      if (seen.has(k)) return;
+      const tile = buildPortfolioObjectiveTile(view, 'stagegate', false);
+      if (!tile) return;
+      seen.add(k);
+      list.push(tile);
+    });
+
+    // 4b-new) User-configured tiles. Objective ids did NOT survive the migration
+    // from the old bins, so pre-migration entries simply will not resolve and are
+    // dropped here. That is the intended wipe — re-add them from the modal — but
+    // it is logged rather than silent, because "my tiles vanished" deserves an
+    // explanation in the console at minimum.
+    const configured = (session && session.configuredTiles) || [];
+    let stale = 0;
+    configured.forEach(ct => {
+      if (!ct || ct.objectiveId == null) return;
+      const viewType = ct.viewType || 'stagegate';
+      const k = key(ct.objectiveId, viewType);
+      if (seen.has(k)) return;
+      const view = getObjectiveView(ct.objectiveId);
+      if (!view) { stale++; return; }         // id belongs to the retired bins
+      const tile = buildPortfolioObjectiveTile(view, viewType, true);
+      if (!tile) return;
+      seen.add(k);
+      list.push(tile);
+    });
+    if (stale) {
+      console.info(`[rd] ${stale} configured tile(s) reference objective ids that do not exist in the ` +
+                   `portfolio — these are pre-migration leftovers. Re-add them from "Add tiles".`);
+    }
+  }
+
+  // THE BRANCH. Flag off → the old tracker/snapshot path below, untouched.
+  const useBroker = !!(STATE.config && STATE.config.useBrokerData) && !!STATE.portfolio && !!window.RDCore;
+  if (useBroker) {
+    buildPortfolioObjectiveTiles();
+  } else {
   // Not removable (removing would just regenerate from the assignment).
   assignments.forEach(a => {
     const key = tripleKey(a.tracker, a.id, 'stagegate');
@@ -3537,6 +3665,8 @@ function buildToolList(session) {
     seenTriples.add(key);
     list.push(tile);
   });
+
+  } // end of the old (flag-off) objective-tile path
 
   // Visibility filter: tiles can declare access requirements via two optional
   // fields, and any tile failing them is dropped before render.
