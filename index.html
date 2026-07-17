@@ -2732,6 +2732,57 @@ function gateLanesForObjective(objId) {
     gates: l.gates.map(g => ({ name: g.name || g.id || '', state: RD.classifyGate(g, today) }))
   }));
 }
+// Every KPI across every loaded doc, flattened. Mirrors the apps' poolOf(): the
+// effTarget/effValue/kpiUnit resolvers walk a KPI's parent chain through this
+// pool, so they need the whole set, not just one doc's.
+function kpiPool() {
+  const out = [];
+  const m = STATE.pfMap || {};
+  for (const k in m) {
+    if (!Object.prototype.hasOwnProperty.call(m, k)) continue;
+    const ks = (m[k] && m[k].kpis) || [];
+    for (let i = 0; i < ks.length; i++) out.push(ks[i]);
+  }
+  return out;
+}
+
+// Key results in the shape renderOkrBody actually reads.
+//
+// It reads kr.name and kr.score. RDCore's key results carry `.statement`, and
+// the score is a FUNCTION of the id, not a field — so handing the raw records
+// straight to the renderer (which is what this did) produced a blank label and a
+// 0% bar on every row: `escText(undefined)` renders empty, and
+// `Number(undefined) || 0` is 0. Both failed quietly and looked like styling.
+function okrRowsForObjective(objId) {
+  const RD = window.RDCore;
+  if (!RD || !STATE.pfMap) return [];
+  return (RD.krsForObjective(objId, STATE.pfMap) || []).map(kr => {
+    const row = {
+      name: kr.statement || kr.name || String(kr.id),
+      // The engine's answer, whatever it is. Do not recompute from kr.progress —
+      // that field only exists for percentage-tracked KRs, and reading it
+      // directly would quietly ignore subkr and kpi tracking types.
+      score: RD.keyResultScore(kr.id, STATE.pfMap)
+    };
+    // The "current → target" sub-line renders only when both are present, and it
+    // only means anything for a KR measured by exactly ONE kpi. With several,
+    // there is no single target to show, so it is omitted rather than picking
+    // one arbitrarily — that is what the KPI view is for.
+    const kpis = RD.kpisFor('keyResult', kr.id, STATE.pfMap) || [];
+    if (kpis.length === 1) {
+      const pool = kpiPool();
+      const t = RD.effTarget(kpis[0], pool);
+      const v = RD.effValue(kpis[0], pool, STATE.pfMap);
+      if (t != null && v != null) {
+        const unit = RD.kpiUnit(kpis[0], pool) || '';
+        row.target = unit ? `${t} ${unit}` : t;
+        row.current = unit ? `${v} ${unit}` : v;
+        row.direction = kpis[0].direction || '';
+      }
+    }
+    return row;
+  });
+}
 // The Hub-shaped view of one objective, computed through RDCore. This is the
 // single accessor the tile layer will read — the replacement for the old
 // getObjectiveData()/getSnapshot() pair, minus the company overlay and the
@@ -2774,7 +2825,9 @@ function getObjectiveView(objId) {
       model: modelLabel(modelId),
       initiative: initiativeLabel(o.initiativeId)
     },
-    keyResults: RD.krsForObjective(o.id, STATE.pfMap) || [],
+    // Mapped, not raw: the renderer reads .name/.score, RDCore gives .statement
+    // and a score function. See okrRowsForObjective.
+    keyResults: okrRowsForObjective(o.id),
     // Grouped by workstream. Flat gate lists interleave parallel sets.
     gateLanes: gateLanesForObjective(o.id),
     // Editable only for owners — see objectiveUrl.
