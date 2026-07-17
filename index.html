@@ -452,6 +452,9 @@
      state and not an error. Also the landing spot for any band name the Hub does
      not recognise, so a future RDCore band renders neutral instead of unstyled. */
   .tile-badge.noband   { background: var(--surface-alt); color: var(--text-subtle); }
+  .tile-gate-row       { display: flex; align-items: center; gap: 6px; }
+  .tile-gate-lane      { font-size: 10px; font-weight: 600; color: var(--text-subtle);
+                         min-width: 10px; text-align: center; flex: 0 0 auto; }
 
   /* ---- Edit mode ---- */
   .edit-banner {
@@ -2667,36 +2670,58 @@ function objectiveUrl(o) {
 const RD_EPOCH = Date.UTC(2020, 0, 1);
 function rdToday() { return Math.round((Date.now() - RD_EPOCH) / 86400000); }
 
-// Gate dots for an objective, in the { name, state } shape renderGateBubblesHtml
-// already consumes. No translation table needed: classifyGate returns
-// passed | passed-late | overdue | pending, and the renderer understands all
-// four already (its '' and '-' cases are for gates with no state at all, which
-// the engine never produces).
+// Gate lanes for an objective — ONE LANE PER WORKSTREAM (stage-gate set).
 //
-// An objective's gates live across its stage-gate SETS, so this walks
-// setsForObjective -> gatesForSet rather than reading stageGates directly —
-// gates belonging to another objective's set would otherwise leak in.
-function gatesForObjective(objId) {
+// An objective can run several stage-gate sets in parallel. Flattening them into
+// one chronological row (what this did before) interleaves independent
+// workstreams and reads as a single sequence that does not exist: gate 2 of set A
+// landing between gates 1 and 2 of set B implies an ordering nobody planned.
+// The planning app renders one lane per set and only collapses to a single
+// unlabelled strip when there is exactly one, so the common case is unchanged.
+//
+// Mirrors planGroupGates() deliberately, including the bit that matters most:
+// gates are selected by g.objectiveId and THEN grouped by setId — not walked
+// setsForObjective -> gatesForSet. That ordering is not cosmetic. A gate whose
+// setId matches no declared set still belongs to the objective, and walking sets
+// first drops it silently; the app collects those into an "Ungrouped" lane and
+// so does this.
+function gateLanesForObjective(objId) {
   const RD = window.RDCore;
-  if (!RD || !STATE.pfMap) return [];
+  if (!RD || !STATE.portfolio) return [];
+  const o = findObjective(objId);
+  if (!o) return [];
+  const doc = STATE.execDocs[o.divisionId] || {};
   const today = rdToday();
-  const out = [];
-  (RD.setsForObjective(objId, STATE.pfMap) || []).forEach(set => {
-    if (!set || set.id == null) return;
-    (RD.gatesForSet(set.id, STATE.pfMap) || []).forEach(g => {
-      if (!g) return;
-      out.push({
-        name: g.name || g.id || '',
-        state: RD.classifyGate(g, today),
-        // kept for ordering only; the renderer reads name/state
-        _at: (g.baselineDate != null ? g.baselineDate : g.plannedDate)
-      });
-    });
-  });
-  // Chronological, so the dot row reads left-to-right as the plan runs.
-  // Undated gates sort last rather than jumping to the front on a null compare.
-  out.sort((a, b) => (a._at == null ? Infinity : a._at) - (b._at == null ? Infinity : b._at));
-  return out;
+  // Same comparator the app uses: due date, then name, then id. Undated gates
+  // sort last rather than jumping the queue on a null compare.
+  const byDue = (a, b) => {
+    const pa = a.plannedDate == null ? Infinity : a.plannedDate;
+    const pb = b.plannedDate == null ? Infinity : b.plannedDate;
+    return (pa - pb)
+        || String(a.name || '').localeCompare(String(b.name || ''))
+        || String(a.id).localeCompare(String(b.id));
+  };
+  const all = (doc.stageGates || []).filter(g => g && g.objectiveId === objId);
+  if (!all.length) return [];
+  const sets = (doc.stageGateSets || [])
+    .filter(s => s && s.objectiveId === objId)
+    .slice()
+    .sort((a, b) => ((a.order || 0) - (b.order || 0))
+                 || String(a.name || '').localeCompare(String(b.name || '')));
+  const lanes = sets
+    .map(st => ({ set: st, gates: all.filter(g => g.setId === st.id).sort(byDue) }))
+    .filter(l => l.gates.length);
+  const valid = new Set(sets.map(s => s.id));
+  const orphans = all.filter(g => !valid.has(g.setId)).sort(byDue);
+  if (orphans.length) lanes.push({ set: { id: '__ung__:' + objId, name: 'Ungrouped' }, gates: orphans });
+  return lanes.map((l, i) => ({
+    id: l.set.id,
+    // A lone workstream keeps the old unlabelled strip. Letters (A, B, C…) only
+    // appear once there is something to tell apart — same rule as the app.
+    label: lanes.length > 1 ? String.fromCharCode(65 + i) : '',
+    name: l.set.name || 'Set',
+    gates: l.gates.map(g => ({ name: g.name || g.id || '', state: RD.classifyGate(g, today) }))
+  }));
 }
 // The Hub-shaped view of one objective, computed through RDCore. This is the
 // single accessor the tile layer will read — the replacement for the old
@@ -2741,8 +2766,10 @@ function getObjectiveView(objId) {
       initiative: initiativeLabel(o.initiativeId)
     },
     keyResults: RD.krsForObjective(o.id, STATE.pfMap) || [],
-    gates: gatesForObjective(o.id),
-    url: objectiveUrl(o)
+    // Grouped by workstream. Flat gate lists interleave parallel sets.
+    gateLanes: gateLanesForObjective(o.id),
+    // Editable only for owners — see objectiveUrl.
+    url: objectiveUrl(o, ownsObjective(STATE.session && STATE.session.email, o))
   };
 }
 
@@ -3566,7 +3593,10 @@ function buildToolList(session) {
     return {
       text: bits.join(' · ') || 'View progress',
       severity: sev,
-      gates: view.gates || [],
+      gateLanes: view.gateLanes || [],
+      // Flat list retained ONLY for callers that count gates; the dot rows are
+      // rendered per lane. Do not render from this — it interleaves workstreams.
+      gates: (view.gateLanes || []).reduce((a, l) => a.concat(l.gates), []),
       url: view.url || null,
       badge: label ? { label, key } : null,
       meta: [view.labels.division, view.labels.initiative].filter(Boolean).join(' · ')
@@ -4166,6 +4196,22 @@ function fetchStageGateStatus(trackerId, objectiveId, objectiveName) {
     badge: badgeLabel ? { label: badgeLabel, key: statusKey } : null,
     meta
   };
+}
+// Render one dot row per workstream. A lone workstream renders exactly as before
+// (no label), so nothing changes for the common case; multiple workstreams get
+// the same A/B/C letters the planning app uses, with the set name on hover.
+function renderGateLanesHtml(lanes) {
+  if (!lanes || !lanes.length) return '';
+  const escAttr = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
+  const escText = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  return lanes.map(l => {
+    const row = renderGateBubblesHtml(l.gates);
+    if (!row) return '';
+    const lbl = l.label
+      ? `<span class="tile-gate-lane" title="${escAttr(l.name)}">${escText(l.label)}</span>`
+      : '';
+    return lbl ? `<div class="tile-gate-row">${lbl}${row}</div>` : row;
+  }).join('');
 }
 
 // Renders the stage-gate dot row that mirrors the active panel's bubbles.
@@ -5491,7 +5537,11 @@ async function fetchTileStatuses() {
       // Optional: tile-gates slot for stage-gate dot rows.
       if (result.gates) {
         const gatesEl = document.querySelector(`[data-gates="${tool.id}"]`);
-        if (gatesEl) gatesEl.innerHTML = renderGateBubblesHtml(result.gates);
+        // Lanes when the new data layer supplied them (one row per workstream);
+        // the flat renderer otherwise, for the old snapshot path.
+        if (gatesEl) gatesEl.innerHTML = result.gateLanes
+          ? renderGateLanesHtml(result.gateLanes)
+          : renderGateBubblesHtml(result.gates);
       }
       // Optional: status tag in the tile head (stage-gate tiles only).
       if (result.badge !== undefined) {
