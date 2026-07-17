@@ -452,6 +452,35 @@
      state and not an error. Also the landing spot for any band name the Hub does
      not recognise, so a future RDCore band renders neutral instead of unstyled. */
   .tile-badge.noband   { background: var(--surface-alt); color: var(--text-subtle); }
+  /* ---- merged objective tile body (mirrors the planning app's ovObjTile) ---- */
+  .tile-objective      { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .ov-ktbl             { display: grid; grid-template-columns: 10px 1fr auto auto;
+                         gap: 3px 6px; align-items: center; font-size: 11px; }
+  .ov-kh               { font-size: 9px; text-transform: uppercase; letter-spacing: .04em;
+                         color: var(--text-subtle); font-weight: 600; }
+  .ov-r                { text-align: right; }
+  .ov-kdot             { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+  .ov-kdot.ontrack     { background: #4E9A2A; }
+  .ov-kdot.watch       { background: #C68A1E; }
+  .ov-kdot.atrisk      { background: #C0453E; }
+  .ov-kdot.noband      { background: var(--border); }
+  .ov-kname            { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ov-ktgt, .ov-kcur   { text-align: right; color: var(--text-subtle); font-variant-numeric: tabular-nums; }
+  .ov-kcur             { color: var(--text); font-weight: 600; }
+  .ov-prog             { display: flex; align-items: center; gap: 6px; }
+  .ov-ptrack           { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-alt); overflow: hidden; }
+  .ov-pfill            { height: 100%; border-radius: 2px; background: var(--border); }
+  .ov-pfill.ontrack    { background: #4E9A2A; }
+  .ov-pfill.watch      { background: #C68A1E; }
+  .ov-pfill.atrisk     { background: #C0453E; }
+  .ov-pfill.noband     { background: var(--border); }
+  .ov-ppct             { font-size: 10px; font-weight: 600; color: var(--text-subtle);
+                         font-variant-numeric: tabular-nums; min-width: 26px; text-align: right; }
+  .ov-gates            { display: flex; flex-direction: column; gap: 4px; }
+  .ov-gatehd           { display: flex; align-items: baseline; gap: 8px; }
+  .ov-gt               { font-size: 9px; text-transform: uppercase; letter-spacing: .04em;
+                         color: var(--text-subtle); font-weight: 600; }
+  .ov-behind           { font-size: 9px; font-weight: 600; color: #A32D2D; }
   .tile-gate-row       { display: flex; align-items: center; gap: 6px; }
   .tile-gate-lane      { font-size: 10px; font-weight: 600; color: var(--text-subtle);
                          min-width: 10px; text-align: center; flex: 0 0 auto; }
@@ -2003,6 +2032,7 @@ const STATE = {
   portfolio: null,        // the `portfolio` doc (divisions/products/models/initiatives/objectives/…)
   execDocs: {},           // bare division id → EXEC-<div> doc
   pfMap: null,            // RD.withPortfolio(portfolio, execDocs) — the shape RDCore takes
+  cascade: null,          // RD.cascade(...) — computed ONCE per load, never per tile
   portfolioVersions: {},  // doc id → version, for cheap /version polling later
   portfolioLoadedAt: 0,
   engineReady: false,     // window.RDCore fetched from the broker
@@ -2173,7 +2203,11 @@ async function jbFetchUsers() {
           // migration on the next page load. Silent, permanent, and invisible.
           // objectiveId is the only field a tile genuinely cannot do without.
           if (!t || typeof t !== 'object' || t.objectiveId == null) return null;
-          const vt = (t.viewType === 'okr' || t.viewType === 'kpi') ? t.viewType : 'stagegate';
+          // stagegate/okr both collapse to 'objective'. Two tiles for one objective
+          // would otherwise survive the merge and render identically — a duplicate
+          // nobody asked for and can only remove one at a time.
+          const raw = t.viewType || 'objective';
+          const vt = (raw === 'kpi') ? 'kpi' : (LEGACY_VIEW_MAP[raw] || (VIEW_TYPES[raw] ? raw : 'objective'));
           const out = { objectiveId: String(t.objectiveId), viewType: vt, name: t.name || '' };
           // Preserved when present: the flag-off path still keys tiles by tracker.
           if (t.tracker != null) out.tracker = String(t.tracker);
@@ -2198,11 +2232,15 @@ async function jbFetchUsers() {
     // Leadership view filter — which objective view types show in Leadership.
     // A durable preference (default: stage-gates only). Validated against the
     // known view types; an empty/invalid stored value falls back to the default.
-    const VALID_VIEWS = ['stagegate', 'okr', 'kpi'];
+    // Migrated through the merge: a saved ['stagegate'] becomes ['objective'] rather
+    // than being filtered out as invalid, which would silently reset every user's
+    // preference to the default and look like the setting had never worked.
+    const VALID_VIEWS = ['objective', 'kpi'];
     const storedViews = Array.isArray(u.leadershipViewFilter)
-      ? u.leadershipViewFilter.filter(v => VALID_VIEWS.includes(v))
+      ? Array.from(new Set(u.leadershipViewFilter.map(v => LEGACY_VIEW_MAP[v] || v)))
+          .filter(v => VALID_VIEWS.includes(v))
       : null;
-    u.leadershipViewFilter = (storedViews && storedViews.length) ? storedViews : ['stagegate'];
+    u.leadershipViewFilter = (storedViews && storedViews.length) ? storedViews : ['objective'];
 
     if (!Array.isArray(u.assignedObjectives)) {
       u.assignedObjectives = [];
@@ -2614,6 +2652,18 @@ async function loadPortfolio() {
   // RDCore wants the portfolio folded in under PORTFOLIO_KEY for cross-doc KPI
   // resolution — the same call the apps make.
   STATE.pfMap = window.RDCore.withPortfolio(portfolio, execDocs);
+  // The schedule cascade: projected ends, slip, gate effective dates. Computed
+  // ONCE here, not per tile — it walks every objective, initiative and milestone
+  // in the portfolio, so a per-tile call is quadratic. Measured at ~14ms over 120
+  // objectives, which is ~1.7s of render if each tile asked for its own.
+  try {
+    STATE.cascade = window.RDCore.cascade(portfolio, STATE.pfMap, rdToday());
+  } catch (err) {
+    // A cascade failure must not cost you the whole dashboard — the tiles just
+    // lose their days-left/slip line.
+    console.warn('[rd] cascade failed; tiles will render without schedule projection:', err);
+    STATE.cascade = null;
+  }
   STATE.portfolioVersions = versions;
   STATE.portfolioLoadedAt = Date.now();
   return portfolio;
@@ -2678,6 +2728,9 @@ function objectiveUrl(o) {
 // record overdue — silently, and plausibly, which is the worst kind of wrong.
 const RD_EPOCH = Date.UTC(2020, 0, 1);
 function rdToday() { return Math.round((Date.now() - RD_EPOCH) / 86400000); }
+function rdDayToIso(d) {
+  return (d == null) ? '' : new Date(RD_EPOCH + d * 86400000).toISOString().slice(0, 10);
+}
 
 // Gate lanes for an objective — ONE LANE PER WORKSTREAM (stage-gate set).
 //
@@ -2862,6 +2915,9 @@ function getObjectiveView(objId) {
     // Mapped, not raw: the renderer reads .name/.score, RDCore gives .statement
     // and a score function. See okrRowsForObjective.
     keyResults: okrRowsForObjective(o.id),
+    // Schedule projection (cascade). `schedule.text` is the days line, `.slip` the
+    // chip. Null-safe: a failed cascade degrades to no line, not no tile.
+    schedule: scheduleOf(o, end),
     // Grouped by workstream. Flat gate lists interleave parallel sets.
     gateLanes: gateLanesForObjective(o.id),
     // Editable only for owners — see objectiveUrl.
@@ -3028,7 +3084,7 @@ async function createUserRecord(email, pin, role) {
     assignedObjectives: [],
     configuredTiles: [],
     groupingConfig: { projects: [], leadership: [] },
-    leadershipViewFilter: ['stagegate'],
+    leadershipViewFilter: ['objective'],
     createdAt: Date.now(),
     lastLogin: null,
     disabled: false
@@ -3056,7 +3112,7 @@ function makeSession(user, days) {
       : { projects: [], leadership: [] },
     leadershipViewFilter: (Array.isArray(user.leadershipViewFilter) && user.leadershipViewFilter.length)
       ? user.leadershipViewFilter.slice()
-      : ['stagegate'],
+      : ['objective'],
     issuedAt: now,
     expiresAt: now + sessionDays * 24 * 60 * 60 * 1000,
     tokenId: (crypto.randomUUID && crypto.randomUUID()) || generateSalt(8)
@@ -3685,7 +3741,12 @@ function buildToolList(session) {
     const sev = view.isComplete ? 'success'
               : ({ ontrack: 'success', watch: 'warning', atrisk: 'danger' }[key] || 'subtle');
     const healthText = Number.isFinite(view.score) ? `Health ${Math.round(view.score)}` : '';
-    const bits = [healthText, view.labels.initiative].filter(Boolean);
+    // The schedule line the app puts under the name: "12d left", "+18d slip".
+    // Distinct from the band on purpose — one is dates, the other outcomes, and
+    // they disagree often enough that merging them would lose the disagreement.
+    const sched = view.schedule || {};
+    const slipText = sched.slip ? `+${sched.slip}d slip` : '';
+    const bits = [healthText, sched.text, slipText].filter(Boolean);
     return {
       text: bits.join(' · ') || 'View progress',
       severity: sev,
@@ -3721,6 +3782,10 @@ function buildToolList(session) {
       groupLabels: { division: view.labels.division, productLine: view.labels.product, productModel: view.labels.model },
       keyResults: view.keyResults,
       kpis: [],
+      // The whole view rides on the tile: renderObjectiveBody needs the KR rows,
+      // the gate lanes and the schedule together, and re-deriving them at render
+      // would mean a second RDCore pass per tile.
+      view,
       // Leadership filter metadata.
       filterTracker: view.divisionId,   // 3c renames this to filterDivision
       filterStatus: view.isComplete ? 'complete' : bandClass(view.band),
@@ -3741,9 +3806,9 @@ function buildToolList(session) {
       if (section === 'watching') return;      // watching is opt-in, via configured tiles
       const view = getObjectiveView(o.id);
       if (!view) return;
-      const k = key(o.id, 'stagegate');
+      const k = key(o.id, 'objective');
       if (seen.has(k)) return;
-      const tile = buildPortfolioObjectiveTile(view, 'stagegate', false);
+      const tile = buildPortfolioObjectiveTile(view, 'objective', false);
       if (!tile) return;
       seen.add(k);
       list.push(tile);
@@ -3758,7 +3823,12 @@ function buildToolList(session) {
     let stale = 0;
     configured.forEach(ct => {
       if (!ct || ct.objectiveId == null) return;
-      const viewType = ct.viewType || 'stagegate';
+      // Map legacy view types at READ time, not just in the record migration. A
+      // session already in localStorage still carries viewType:'okr', and
+      // migrateUserRecord never touches it — so without this, everyone's OKR
+      // tiles vanish the moment this deploys and come back only when their
+      // session happens to refresh from the users bin.
+      const viewType = LEGACY_VIEW_MAP[ct.viewType] || ct.viewType || 'objective';
       const k = key(ct.objectiveId, viewType);
       if (seen.has(k)) return;
       const view = getObjectiveView(ct.objectiveId);
@@ -3781,9 +3851,9 @@ function buildToolList(session) {
   } else {
   // Not removable (removing would just regenerate from the assignment).
   assignments.forEach(a => {
-    const key = tripleKey(a.tracker, a.id, 'stagegate');
+    const key = tripleKey(a.tracker, a.id, 'objective');
     if (seenTriples.has(key)) return;
-    const tile = buildObjectiveTile(a.tracker, a.id, 'stagegate', a.name, false);
+    const tile = buildObjectiveTile(a.tracker, a.id, 'objective', a.name, false);
     if (!tile) return;
     seenTriples.add(key);
     list.push(tile);
@@ -3798,10 +3868,10 @@ function buildToolList(session) {
   if (led.length) {
     const ledObjectives = gatherLeadershipObjectives(led);
     ledObjectives.forEach(it => {
-      const key = tripleKey(it.tracker.id, it.id, 'stagegate');
+      const key = tripleKey(it.tracker.id, it.id, 'objective');
       if (seenTriples.has(key)) return;
       const tile = buildObjectiveTile(
-        it.tracker.id, it.id, 'stagegate', it.name, false,
+        it.tracker.id, it.id, 'objective', it.name, false,
         { status: it.status, isComplete: it.isComplete, isActive: it.isActive }
       );
       if (!tile) return;
@@ -3819,7 +3889,7 @@ function buildToolList(session) {
   const configured = (session && session.configuredTiles) || [];
   configured.forEach(ct => {
     if (!ct || !ct.tracker || ct.objectiveId == null) return;
-    const viewType = ct.viewType || 'stagegate';
+    const viewType = ct.viewType || 'objective';
     const key = tripleKey(ct.tracker, ct.objectiveId, viewType);
     if (seenTriples.has(key)) return;
     const tile = buildObjectiveTile(ct.tracker, ct.objectiveId, viewType, ct.name, true);
@@ -4499,8 +4569,7 @@ const TILE_SECTIONS = [
 // these by id prefix; anything that doesn't match falls into a fallback
 // unlabeled grid before the labeled subsections (so future tiles won't be lost).
 const PROJECTS_SUBSECTIONS = [
-  { id: 'stage-gates', label: 'Stage-gates', match: id => id.startsWith('stage-gate__') || id.startsWith('obj__stagegate__') },
-  { id: 'okr',         label: 'OKR',         match: id => id.startsWith('obj__okr__') },
+  { id: 'objective',   label: 'Objectives',  match: id => id.startsWith('obj__objective__') || id.startsWith('stage-gate__') || id.startsWith('obj__stagegate__') || id.startsWith('obj__okr__') },
   { id: 'kpi',         label: 'KPIs',        match: id => id.startsWith('obj__kpi__') },
   { id: 'meetings',    label: 'Meetings',    match: id => id.startsWith('meeting__') },
   { id: 'gantts',      label: 'Gantts',      match: id => id.startsWith('gantt__') }
@@ -4516,13 +4585,21 @@ const OBJECTIVE_SUBSECTIONS = [
 ];
 
 // View type labels/icons for objective tiles.
+// 'stagegate' and 'okr' MERGED into 'objective'. They were two views of the same
+// record that each hid half of it: the schedule answer and the outcome answer,
+// with the tile forcing a choice between them. One tile now carries both, so the
+// choice disappears rather than being made easier. 'kpi' stays separate — it is a
+// different cut (every measure grouped by source), not half of this one.
 const VIEW_TYPES = {
-  stagegate: { label: 'Stage-gates', icon: 'stack-2' },
-  okr:       { label: 'OKR',         icon: 'target-arrow' },
-  kpi:       { label: 'KPIs',        icon: 'chart-dots' }
+  objective: { label: 'Objective', icon: 'target-arrow' },
+  kpi:       { label: 'KPIs',      icon: 'chart-dots' }
 };
+// Legacy view keys → the merged one. Used by the migrations below; kept as data
+// so the mapping is stated once rather than re-guessed at each call site.
+const LEGACY_VIEW_MAP = { stagegate: 'objective', okr: 'objective' };
+
 // View types selectable in the picker. Stage 4 unlocks all three.
-const ACTIVE_VIEW_TYPES = ['stagegate', 'okr', 'kpi'];
+const ACTIVE_VIEW_TYPES = ['objective', 'kpi'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Layered grouping
@@ -4884,17 +4961,23 @@ function renderTileEl(tool) {
   // fetchTileStatuses — the objective's overall health is the same regardless
   // of which lens the body shows.
   const idStr = typeof tool.id === 'string' ? tool.id : '';
-  const isStageGate = idStr.startsWith('stage-gate__') || idStr.startsWith('obj__stagegate__');
-  const isOkr = idStr.startsWith('obj__okr__');
+  // 'stagegate' and 'okr' merged into 'objective'; the legacy prefixes still match
+  // so a tile rendered from a not-yet-migrated record does not fall through to a
+  // blank body.
+  const isMerged = idStr.startsWith('obj__objective__') ||
+                   idStr.startsWith('stage-gate__') ||
+                   idStr.startsWith('obj__stagegate__') ||
+                   idStr.startsWith('obj__okr__');
   const isKpi = idStr.startsWith('obj__kpi__');
-  const isObjective = isStageGate || isOkr || isKpi;
+  const isObjective = isMerged || isKpi;
   // Body slot varies by view type; header (badge + meta + status) is shared by
   // all objective tiles.
   let bodyHtml = '';
-  if (isStageGate) {
-    bodyHtml = `<div class="tile-gates" data-gates="${tool.id}"></div>`;
-  } else if (isOkr) {
-    bodyHtml = renderOkrBody(tool.keyResults);
+  if (isMerged) {
+    // tool.view is stamped by the portfolio generator. Without it (old snapshot
+    // path) fall back to the gates slot fetchTileStatuses fills in.
+    bodyHtml = tool.view ? renderObjectiveBody(tool.view)
+                         : `<div class="tile-gates" data-gates="${tool.id}"></div>`;
   } else if (isKpi) {
     bodyHtml = renderKpiBody(tool.kpis);
   }
@@ -5114,11 +5197,11 @@ async function setSectionGrouping(sectionId, nextChain) {
 // sticks across renders and devices.
 async function saveLeadershipViewFilter(views) {
   if (!STATE.session) return;
-  const VALID_VIEWS = ['stagegate', 'okr', 'kpi'];
+  const VALID_VIEWS = ['objective', 'kpi'];
   const next = (Array.isArray(views) ? views : []).filter(v => VALID_VIEWS.includes(v));
   // Never persist an empty set (it would hide everything on next load with no
   // obvious way back); fall back to the default.
-  const toStore = next.length ? next : ['stagegate'];
+  const toStore = next.length ? next : ['objective'];
   STATE.session.leadershipViewFilter = toStore.slice();
   saveSession(STATE.session);
   try {
@@ -5157,13 +5240,13 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
 
   // Map a tile ID to its view type (same prefixes the subsections use).
   const viewTypeOf = (id) => {
-    if (typeof id !== 'string') return 'stagegate';
-    if (id.startsWith('obj__okr__')) return 'okr';
+    if (typeof id !== 'string') return 'objective';
     if (id.startsWith('obj__kpi__')) return 'kpi';
-    return 'stagegate'; // obj__stagegate__ or legacy stage-gate__
+    // objective, plus the legacy stagegate/okr prefixes that merged into it.
+    return 'objective';
   };
   // View types actually present among Leadership tiles, in canonical order.
-  const VIEW_ORDER = ['stagegate', 'okr', 'kpi'];
+  const VIEW_ORDER = ['objective', 'kpi'];
   const presentViews = VIEW_ORDER.filter(v =>
     sectionTools.some(t => viewTypeOf(t.id) === v)
   );
@@ -5174,7 +5257,7 @@ function appendLeadershipFilter(wrap, head, sectionTools) {
   // return. The ACTIVE filter set intersects the preference with present views.
   const prefViews = (STATE.session && Array.isArray(STATE.session.leadershipViewFilter) && STATE.session.leadershipViewFilter.length)
     ? STATE.session.leadershipViewFilter.slice()
-    : ['stagegate'];
+    : ['objective'];
   const prefSet = new Set(prefViews);
 
   // Filter state. Status/tracker reset each render (transient). `views` is
@@ -5398,7 +5481,7 @@ async function removeConfiguredTile(triple) {
   if (!triple || !STATE.session) return;
   const tiles = (STATE.session.configuredTiles || []).filter(t => {
     const sameObj = String(t.objectiveId) === String(triple.objectiveId) &&
-                    (t.viewType || 'stagegate') === triple.viewType;
+                    (t.viewType || 'objective') === triple.viewType;
     if (!sameObj) return true;                 // keep: different tile entirely
     // Only compare tracker when the tile being removed actually carries one.
     // Broker-mode tiles have none, and a blanket `t.tracker === triple.tracker`
