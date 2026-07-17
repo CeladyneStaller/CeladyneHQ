@@ -2045,6 +2045,9 @@ const STATE = {
   portfolio: null,        // the `portfolio` doc (divisions/products/models/initiatives/objectives/…)
   execDocs: {},           // bare division id → EXEC-<div> doc
   pfMap: null,            // RD.withPortfolio(portfolio, execDocs) — the shape RDCore takes
+  specDocs: {},           // SPEC-<div> → doc. Keyed WITH the prefix, matching the
+                          // apps' specMap(); execDocs are keyed bare. Both live in
+                          // pfMap together, which is why the key shapes differ.
   cascade: null,          // RD.cascade(...) — computed ONCE per load, never per tile
   portfolioVersions: {},  // doc id → version, for cheap /version polling later
   portfolioLoadedAt: 0,
@@ -2647,7 +2650,7 @@ async function loadPortfolio() {
   const portfolio = pf.doc;
   const versions = { portfolio: pf.version };
   const divisions = Array.isArray(portfolio.divisions) ? portfolio.divisions : [];
-  const execDocs = {};
+  const execDocs = {}, specDocs = {};
   await Promise.all(divisions.map(async d => {
     if (!d || !d.id) return;
     const docId = `EXEC-${d.id}`;
@@ -2658,13 +2661,30 @@ async function loadPortfolio() {
       // One unreachable division must not blank the whole Hub.
       console.warn(`[rd] failed to load ${docId}:`, err);
     }
+    // SPEC-<div>: the product-designer doc. Needed because a KR's KPI can inherit
+    // its target from a product/model KPI defined HERE — effTarget/effValue walk
+    // the parent chain through the pool, and without these docs that walk dead-ends
+    // and the KPI silently reads "no target" rather than erroring. The apps resolve
+    // against fullEm() = execMap() + specMap() for exactly this reason.
+    // A division with no spec doc is normal, not an error.
+    const specId = `SPEC-${d.id}`;
+    try {
+      const sres = await brokerGet(specId);
+      if (sres && sres.doc) { specDocs[specId] = sres.doc; versions[specId] = sres.version; }
+    } catch (err) {
+      console.warn(`[rd] no ${specId} (KPIs inheriting from specs will not resolve):`, err);
+    }
   }));
   STATE.portfolio = portfolio;
   // Keyed by BARE division id, matching the apps' execMap() (they strip 'EXEC-').
   STATE.execDocs = execDocs;
-  // RDCore wants the portfolio folded in under PORTFOLIO_KEY for cross-doc KPI
-  // resolution — the same call the apps make.
-  STATE.pfMap = window.RDCore.withPortfolio(portfolio, execDocs);
+  STATE.specDocs = specDocs;
+  // This is fullEm() = withPortfolio(portfolio, {...execMap(), ...specMap()}).
+  // The differing key shapes are deliberate and safe — execFor(divisionId) looks
+  // up the bare key, so a SPEC- key can never shadow a division's exec doc, and
+  // the resolvers iterate every key regardless.
+  STATE.pfMap = window.RDCore.withPortfolio(portfolio,
+    Object.assign({}, execDocs, specDocs));
   // The schedule cascade: projected ends, slip, gate effective dates. Computed
   // ONCE here, not per tile — it walks every objective, initiative and milestone
   // in the portfolio, so a per-tile call is quadratic. Measured at ~14ms over 120
@@ -2904,6 +2924,66 @@ function scheduleOf(o, end, workSlip) {
   // gates 10d late each compound to 30d rather than reporting the worst one.
   return { text, slip: (workSlip != null && workSlip > 0) ? workSlip : null, projectedEnd: eff };
 }
+// Format a KPI target for display. A 'range' KPI's target is an OBJECT
+// {lo, hi}, not a number — String() on it renders "[object Object]". Mirrors
+// execution_app's fmtTarget.
+function rdFmtTarget(t, unit) {
+  if (t == null) return null;
+  const v = (typeof t === 'object') ? `${rdNum(t.lo)}\u2013${rdNum(t.hi)}` : rdNum(t);
+  return unit ? `${v} ${unit}` : String(v);
+}
+
+// KPI-view rows for an objective: every measurable KPI hanging off its key
+// results and its stage-gates, in the shape renderKpiBody groups by.
+//
+// The score comes from RD.kpiScoreResolved — the engine — NOT the Hub's local
+// kpiProgressPct, which invents its own curve (a 10%-of-target tolerance band for
+// 'maintain', a target*2 baseline for 'decrease') that exists nowhere else in the
+// stack. Two tools disagreeing about whether a KPI is at 60% or 80% is exactly
+// what this migration is for.
+//
+// Resolution runs against the full pool, which now includes the SPEC docs — a
+// KR's KPI that inherits its target from a product/model KPI resolves only
+// because those are loaded.
+function kpiRowsForObjective(objId) {
+  const RD = window.RDCore;
+  if (!RD || !STATE.pfMap) return [];
+  const o = findObjective(objId);
+  if (!o) return [];
+  const pool = kpiPool();
+  const out = [];
+  const add = (kpi, source, srcName) => {
+    if (!kpi) return;
+    const unit = RD.kpiUnit(kpi, pool) || kpi.unit || '';
+    out.push({
+      name: kpi.name || kpi.id,
+      source,                                   // 'kr' | 'gate' — drives grouping
+      krName:   source === 'kr'   ? srcName : undefined,
+      gateName: source === 'gate' ? srcName : undefined,
+      direction: kpi.direction,
+      // Pre-formatted: the renderer only String()s these, and a range target
+      // would otherwise print as [object Object].
+      target:  rdFmtTarget(RD.effTarget(kpi, pool, STATE.pfMap), unit),
+      current: rdFmtTarget(RD.effValue(kpi, pool, STATE.pfMap), unit),
+      // The engine's answer. renderKpiBody prefers this over kpiProgressPct.
+      score: RD.kpiScoreResolved(kpi, pool, STATE.pfMap)
+    });
+  };
+  (RD.krsForObjective(objId, STATE.pfMap) || []).forEach(kr => {
+    (RD.kpisFor('keyResult', kr.id, STATE.pfMap) || [])
+      .forEach(k => add(k, 'kr', kr.statement || kr.name || String(kr.id)));
+  });
+  // Gates by objectiveId, matching gateLanesForObjective — walking sets->gates
+  // would drop orphans whose setId matches no declared set.
+  const doc = STATE.execDocs[o.divisionId] || {};
+  (doc.stageGates || [])
+    .filter(g => g && g.objectiveId === objId)
+    .forEach(g => {
+      (RD.kpisFor('stageGate', g.id, STATE.pfMap) || [])
+        .forEach(k => add(k, 'gate', g.name || String(g.id)));
+    });
+  return out;
+}
 
 // The Hub-shaped view of one objective, computed through RDCore. This is the
 // single accessor the tile layer will read — the replacement for the old
@@ -2966,6 +3046,8 @@ function getObjectiveView(objId) {
     // inventing a more careful word for the same number; a tooltip carries the
     // caveat, exactly as it does there.
     gateHealth: RD.objectiveGateReadiness(o.id, STATE.pfMap, rdToday()),
+    // KPI-view rows (engine-scored, spec-resolved). See kpiRowsForObjective.
+    kpis: kpiRowsForObjective(o.id),
     // The schedule ALARM, defined exactly as execution_app defines it:
     //   schedAlarm = !ended && slip > CATCHUP_SLIP_THRESHOLD
     // where slip is cascade.objectiveScheduleSlip — NOT projectedEnd-plannedEnd.
@@ -3835,7 +3917,7 @@ function buildToolList(session) {
       groupAttrs:  { division: view.divisionId, productLine: view.productId, productModel: view.modelId },
       groupLabels: { division: view.labels.division, productLine: view.labels.product, productModel: view.labels.model },
       keyResults: view.keyResults,
-      kpis: [],
+      kpis: view.kpis,
       // The whole view rides on the tile: renderObjectiveBody needs the KR rows,
       // the gate lanes and the schedule together, and re-deriving them at render
       // would mean a second RDCore pass per tile.
@@ -4820,9 +4902,13 @@ function scoreToStatus(score) { return bandClass(hubBand(score)); }
 
 // Direction → a subtle cue glyph for KPI rows. Increase/decrease/maintain.
 function kpiDirectionCue(direction) {
-  if (direction === 'decrease') return '↓';
-  if (direction === 'maintain') return '±';
-  return '↑'; // increase (default)
+  // RDCore's vocabulary is up | down | decrease | range. 'maintain' is the old
+  // snapshot word, kept so the flag-off path still reads correctly. 'range' used
+  // to fall through to the increase arrow, pointing the wrong way at every
+  // band-target KPI in the portfolio.
+  if (direction === 'decrease' || direction === 'down') return '↓';
+  if (direction === 'range' || direction === 'maintain') return '±';
+  return '↑'; // 'up' / unset
 }
 
 // The merged objective body: key results, one overall progress bar, then gates.
@@ -4959,7 +5045,10 @@ function renderKpiBody(kpis) {
     const g = groups.get(gk);
     const tag = g.source === 'gate' ? 'Gate' : 'KR';
     const rows = g.items.map(kpi => {
-      const pct = Math.max(0, Math.min(100, Math.round(kpiProgressPct(kpi))));
+      // Prefer the engine's score when the new data layer supplied one;
+      // kpiProgressPct is the old snapshot path's local curve and disagrees.
+      const raw = Number.isFinite(kpi.score) ? kpi.score : kpiProgressPct(kpi);
+      const pct = Math.max(0, Math.min(100, Math.round(raw)));
       const status = scoreToStatus(pct);
       const cue = kpiDirectionCue(kpi.direction);
       const cur = kpi.current != null ? String(kpi.current) : '—';
