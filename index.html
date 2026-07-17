@@ -459,14 +459,15 @@
   .tile-alarm          { border-color: #C0453E !important;
                          box-shadow: 0 0 0 1px #C0453E, 0 0 12px rgba(192,69,62,.35); }
   .ov-catchup          { font-size: 11px; font-weight: 700; color: #A32D2D;
-                         letter-spacing: .01em; }
+                         letter-spacing: .01em; white-space: nowrap; margin-top: 2px; }
 
   /* the two named scores */
   .ov-stats            { display: flex; align-items: baseline; gap: 16px; }
   .ov-stat             { display: flex; align-items: baseline; gap: 4px; }
-  /* pushed to the right edge, level with the two scores */
-  .ov-sched            { margin-left: auto; font-size: 11px; color: var(--text-subtle);
-                         white-space: nowrap; flex: 0 0 auto; }
+  /* right-hand column, level with the two scores: schedule, and the alarm under
+     it. Alarm lives here rather than on its own row to keep the tile short. */
+  .ov-schedcol         { margin-left: auto; flex: 0 0 auto; text-align: right; }
+  .ov-sched            { font-size: 11px; color: var(--text-subtle); white-space: nowrap; }
   .ov-statnum          { font-size: 18px; font-weight: 600; line-height: 1;
                          font-variant-numeric: tabular-nums; color: var(--text-subtle); }
   .ov-statnum.ontrack  { color: #3B6D11; }
@@ -2896,6 +2897,8 @@ function kpiPool() {
 // view is where the full set lives.
 // Key result rows for the objective tile.
 //
+// Key result rows for the objective tile.
+//
 // Two things that are easy to get wrong: the label is `.statement` (RDCore key
 // results have no `.name`), and the score is keyResultScore(id) — a FUNCTION, not
 // a field. Handing the raw records to a renderer yields a blank label and a 0%
@@ -2928,6 +2931,10 @@ function okrRowsForObjective(objId) {
       name: kr.statement || kr.name || String(kr.id),
       score,
       band: hubBand(score),
+      // Why the KR has no KPIs matters. RDCore scores 'percentage' off kr.progress
+      // and 'subkr' off kr.subKrs — neither wants KPIs, so "No KPIs yet" would
+      // report a gap that does not exist. Default is 'kpi', where it is true.
+      trackingType: kr.trackingType || 'kpi',
       kpis
     };
   });
@@ -4597,7 +4604,10 @@ function renderGateDotsHtml(gates) {
     const tooltip = `Gate ${i + 1}: ${g.name || '(unnamed)'} \u2014 ${state.replace('-', ' ')}`;
     return `<span class="gate-dot ${state}" title="${escAttr(tooltip)}">${escText(inner)}</span>`;
   });
-  return `<div class="gate-track">${dots.join('<span class="gate-conn"></span>')}</div>`;
+  // .tile-gates-track, NOT "gate-track" — the latter is not a class this stylesheet
+  // has ever defined, and without it the row loses display:flex and .gate-conn's
+  // flex:1 does nothing.
+  return `<div class="tile-gates-track">${dots.join('<span class="gate-conn"></span>')}</div>`;
 }
 
 // Header + dots. Still used by the flag-off snapshot path, which fills the
@@ -5013,8 +5023,18 @@ function renderObjectiveBody(view) {
   // sit in the tile's status slot above them; that slot is now empty and hidden.
   const sched = view.schedule || {};
   const schedBits = [sched.text, sched.slip ? `+${sched.slip}d slip` : ''].filter(Boolean);
-  const schedHtml = schedBits.length
-    ? `<div class="ov-sched">${escText(schedBits.join(' \u00b7 '))}</div>`
+  // The alarm sits UNDER the schedule in the same right-hand column rather than
+  // on its own full-width row above the stats — same information, one row less
+  // tile. No button: building a catch-up plan happens in the execution app, and a
+  // Hub button would either duplicate that flow or lie about where the work lives.
+  const alarmHtml = view.catchupNeeded
+    ? `<div class="ov-catchup" title="Work is ${view.scheduleSlip} days behind its own plan \u2014 past the ${CATCHUP_SLIP_THRESHOLD}-day threshold the execution app alarms on.">Catch-up plan needed</div>`
+    : '';
+  const schedHtml = (schedBits.length || alarmHtml)
+    ? `<div class="ov-schedcol">` +
+        (schedBits.length ? `<div class="ov-sched">${escText(schedBits.join(' \u00b7 '))}</div>` : '') +
+        alarmHtml +
+      `</div>`
     : '';
   const statRow = `<div class="ov-stats">` +
     stat('OKR score', view.score, 'Mean of key result scores') +
@@ -5038,11 +5058,14 @@ function renderObjectiveBody(view) {
       const more = hidden > 0
         ? `<div class="ov-kpmore" title="${escAttr(kpis.slice(KR_KPI_CAP).map(k => k.name).join(', '))}">+${hidden} more</div>`
         : '';
-      // A KR with nothing measurable says so, rather than rendering an empty
-      // indent that looks like a load failure.
+      // A KR with no KPIs says WHY, rather than reporting a gap that isn't one.
+      // Only a 'kpi' KR is actually missing something.
+      const empty = r.trackingType === 'percentage' ? 'Tracked by percentage'
+                  : r.trackingType === 'subkr'      ? 'Tracked by sub-results'
+                  : 'No KPIs yet';
       const body = kpis.length
         ? `<div class="ov-kpis">${kpiRows}</div>${more}`
-        : `<div class="ov-kpnone">No KPIs yet</div>`;
+        : `<div class="ov-kpnone">${escText(empty)}</div>`;
       return `
         <div class="ov-kr">
           <span class="ov-krdot ${bandClass(r.band)}"></span>
@@ -5081,14 +5104,7 @@ function renderObjectiveBody(view) {
     gateBlock = `<div class="ov-sec">${head}${body}</div>`;
   }
 
-  // The alarm, stated plainly. No button: building a catch-up plan happens in the
-  // execution app, and a Hub button would either duplicate that flow or lie about
-  // where the work lives. Sits above the numbers because it is the reason you
-  // stopped at this tile.
-  const alarmBlock = view.catchupNeeded
-    ? `<div class="ov-catchup" title="Work is ${view.scheduleSlip} days behind its own plan \u2014 past the ${CATCHUP_SLIP_THRESHOLD}-day threshold the execution app alarms on.">Catch-up plan needed</div>`
-    : '';
-  return `<div class="tile-objective">${alarmBlock}${statRow}${krBlock}${gateBlock}</div>`;
+  return `<div class="tile-objective">${statRow}${krBlock}${gateBlock}</div>`;
 }
 
 // Render the OKR-view tile body: one row per Key Result, each with a mini
