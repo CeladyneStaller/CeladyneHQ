@@ -452,48 +452,75 @@
      state and not an error. Also the landing spot for any band name the Hub does
      not recognise, so a future RDCore band renders neutral instead of unstyled. */
   .tile-badge.noband   { background: var(--surface-alt); color: var(--text-subtle); }
-  /* ---- merged objective tile body (mirrors the planning app's ovObjTile) ---- */
-  .tile-objective      { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-  .ov-ktbl             { display: grid; grid-template-columns: 10px 1fr auto auto;
-                         gap: 3px 6px; align-items: center; font-size: 11px; }
-  .ov-kh               { font-size: 9px; text-transform: uppercase; letter-spacing: .04em;
-                         color: var(--text-subtle); font-weight: 600; }
-  .ov-r                { text-align: right; }
-  .ov-kdot             { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
-  .ov-kdot.ontrack     { background: #4E9A2A; }
-  .ov-kdot.watch       { background: #C68A1E; }
-  .ov-kdot.atrisk      { background: #C0453E; }
-  .ov-kdot.noband      { background: var(--border); }
-  .ov-kname            { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ov-ktgt, .ov-kcur   { text-align: right; color: var(--text-subtle); font-variant-numeric: tabular-nums; }
-  .ov-kcur             { color: var(--text); font-weight: 600; }
+  /* ---- merged objective tile body ---------------------------------------- */
+  .tile-objective      { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+
+  /* the schedule alarm: glow on the tile, bold line in the body */
   .tile-alarm          { border-color: #C0453E !important;
                          box-shadow: 0 0 0 1px #C0453E, 0 0 12px rgba(192,69,62,.35); }
   .ov-catchup          { font-size: 11px; font-weight: 700; color: #A32D2D;
                          letter-spacing: .01em; }
-  .ov-metrics          { display: flex; flex-direction: column; gap: 4px; }
-  .ov-metric           { display: grid; grid-template-columns: 88px 1fr 34px;
-                         align-items: center; gap: 6px; }
-  .ov-mlabel           { font-size: 9px; text-transform: uppercase; letter-spacing: .03em;
-                         color: var(--text-subtle); font-weight: 600;
+
+  /* the two named scores */
+  .ov-stats            { display: flex; gap: 16px; }
+  .ov-stat             { display: flex; align-items: baseline; gap: 4px; }
+  .ov-statnum          { font-size: 18px; font-weight: 600; line-height: 1;
+                         font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+  .ov-statnum.ontrack  { color: #3B6D11; }
+  .ov-statnum.watch    { color: #854F0B; }
+  .ov-statnum.atrisk   { color: #A32D2D; }
+  .ov-statlbl          { font-size: 10px; color: var(--text-subtle); }
+
+  /* section wrapper + heading. ov-behind sets NO font-size on purpose: it is used
+     inside both the 9px section label and the 10px lane fraction, and pinning a
+     size here would shrink it in the lane. */
+  .ov-sec              { border-top: 0.5px solid var(--border); padding-top: 8px; }
+  .ov-seclbl           { font-size: 9px; color: var(--text-subtle); font-weight: 600;
+                         letter-spacing: .03em; margin-bottom: 6px; }
+  .ov-behind           { color: #A32D2D; font-weight: 600; }
+
+  /* key result: dot | name | own score */
+  .ov-kr               { display: flex; align-items: center; gap: 6px; }
+  .ov-krdot            { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+                         background: var(--border); }
+  .ov-krdot.ontrack    { background: #4E9A2A; }
+  .ov-krdot.watch      { background: #C68A1E; }
+  .ov-krdot.atrisk     { background: #C0453E; }
+  .ov-krname           { font-size: 11px; font-weight: 600; flex: 1; min-width: 0;
                          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ov-ppct.ontrack     { color: #3B6D11; }
-  .ov-ppct.watch       { color: #854F0B; }
-  .ov-ppct.atrisk      { color: #A32D2D; }
-  .ov-prog             { display: flex; align-items: center; gap: 6px; }
-  .ov-ptrack           { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-alt); overflow: hidden; }
-  .ov-pfill            { height: 100%; border-radius: 2px; background: var(--border); }
-  .ov-pfill.ontrack    { background: #4E9A2A; }
-  .ov-pfill.watch      { background: #C68A1E; }
-  .ov-pfill.atrisk     { background: #C0453E; }
-  .ov-pfill.noband     { background: var(--border); }
-  .ov-ppct             { font-size: 10px; font-weight: 600; color: var(--text-subtle);
-                         font-variant-numeric: tabular-nums; min-width: 26px; text-align: right; }
-  .ov-gates            { display: flex; flex-direction: column; gap: 4px; }
-  .ov-gatehd           { display: flex; align-items: baseline; gap: 8px; }
-  .ov-gt               { font-size: 9px; text-transform: uppercase; letter-spacing: .04em;
-                         color: var(--text-subtle); font-weight: 600; }
-  .ov-behind           { font-size: 9px; font-weight: 600; color: #A32D2D; }
+  .ov-krpct            { font-size: 11px; font-weight: 600; flex: 0 0 auto;
+                         font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+  .ov-krpct.ontrack    { color: #3B6D11; }
+  .ov-krpct.watch      { color: #854F0B; }
+  .ov-krpct.atrisk     { color: #A32D2D; }
+
+  /* KPIs nested under a KR. minmax(0,1fr) on the name lets it ellipsise instead
+     of shoving the target/now columns off a 240px tile. */
+  .ov-kpis             { display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+                         gap: 2px 8px; font-size: 10px; margin: 3px 0 8px 13px; }
+  .ov-kpname           { color: var(--text-subtle); overflow: hidden;
+                         text-overflow: ellipsis; white-space: nowrap; }
+  .ov-kptgt            { color: var(--text-subtle); text-align: right;
+                         font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ov-kpcur            { text-align: right; font-variant-numeric: tabular-nums;
+                         white-space: nowrap; }
+  .ov-kpmore           { font-size: 9px; color: var(--text-subtle); margin: -4px 0 8px 13px; }
+  .ov-kpnone           { font-size: 10px; color: var(--text-subtle); margin: 3px 0 8px 13px; }
+
+  /* one section per workstream — only rendered when there is more than one */
+  .ov-lanehd           { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; }
+  .ov-lanename         { font-size: 10px; font-weight: 600; flex: 1; min-width: 0;
+                         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ov-lanefrac         { font-size: 10px; font-weight: 600; flex: 0 0 auto;
+                         font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+  .ov-lanefrac.ontrack { color: #3B6D11; }
+  .ov-lanefrac.watch   { color: #854F0B; }
+  .ov-lanefrac.atrisk  { color: #A32D2D; }
+  .ov-lane             { margin-bottom: 8px; }
+  .ov-lane:last-child  { margin-bottom: 0; }
+
+  /* still live: renderGateLanesHtml fills the data-gates slot on the flag-off
+     snapshot path, which has no view object to render a body from. */
   .tile-gate-row       { display: flex; align-items: center; gap: 6px; }
   .tile-gate-lane      { font-size: 10px; font-weight: 600; color: var(--text-subtle);
                          min-width: 10px; text-align: center; flex: 0 0 auto; }
@@ -2813,14 +2840,23 @@ function gateLanesForObjective(objId) {
   const valid = new Set(sets.map(s => s.id));
   const orphans = all.filter(g => !valid.has(g.setId)).sort(byDue);
   if (orphans.length) lanes.push({ set: { id: '__ung__:' + objId, name: 'Ungrouped' }, gates: orphans });
-  return lanes.map((l, i) => ({
-    id: l.set.id,
-    // A lone workstream keeps the old unlabelled strip. Letters (A, B, C…) only
-    // appear once there is something to tell apart — same rule as the app.
-    label: lanes.length > 1 ? String.fromCharCode(65 + i) : '',
-    name: l.set.name || 'Set',
-    gates: l.gates.map(g => ({ name: g.name || g.id || '', state: RD.classifyGate(g, today) }))
-  }));
+  return lanes.map((l, i) => {
+    const gates = l.gates.map(g => ({ name: g.name || g.id || '', state: RD.classifyGate(g, today) }));
+    return {
+      id: l.set.id,
+      // A lone workstream keeps the old unlabelled strip. Letters (A, B, C…) only
+      // appear once there is something to tell apart — same rule as the app.
+      label: lanes.length > 1 ? String.fromCharCode(65 + i) : '',
+      name: l.set.name || 'Set',
+      gates,
+      // Per-lane counts. These are what make the objective's gate health legible:
+      // health is the MIN across lanes, so without each lane's own fraction the
+      // number looks arbitrary — you cannot see which workstream produced it.
+      passed: gates.filter(g => g.state === 'passed' || g.state === 'passed-late').length,
+      total: gates.length,
+      behind: gates.filter(g => g.state === 'overdue').length
+    };
+  });
 }
 // Every KPI across every loaded doc, flattened. Mirrors the apps' poolOf(): the
 // effTarget/effValue/kpiUnit resolvers walk a KPI's parent chain through this
@@ -2853,24 +2889,42 @@ function kpiPool() {
 // Target/Now come from the FIRST kpi hosting the KR, matching the app. With
 // several, the first is shown rather than none: the row is a summary, and the KPI
 // view is where the full set lives.
+// Key result rows for the objective tile.
+//
+// Two things that are easy to get wrong: the label is `.statement` (RDCore key
+// results have no `.name`), and the score is keyResultScore(id) — a FUNCTION, not
+// a field. Handing the raw records to a renderer yields a blank label and a 0%
+// bar, quietly, on every row.
+//
+// Every KPI on the KR is returned, not just the first. The renderer caps what it
+// SHOWS, which is a display decision; deciding it here would mean the count in
+// "+N more" had nothing to count.
 function okrRowsForObjective(objId) {
   const RD = window.RDCore;
   if (!RD || !STATE.pfMap) return [];
   const pool = kpiPool();
   return (RD.krsForObjective(objId, STATE.pfMap) || []).map(kr => {
     const score = RD.keyResultScore(kr.id, STATE.pfMap);
-    const kk = (RD.kpisFor('keyResult', kr.id, STATE.pfMap) || [])[0];
-    let tgt = '\u2014', cur = '\u2014';
-    if (kk) {
-      const u = RD.kpiUnit(kk, pool) || kk.unit;
-      const unit = u ? (' ' + u) : '';
-      const dir = kk.direction === 'down' ? '\u2264' : '\u2265';
-      const tv = RD.effTarget(kk, pool, STATE.pfMap);
-      const cv = RD.effValue(kk, pool, STATE.pfMap);
-      if (tv != null) tgt = dir + ' ' + rdNum(tv) + unit;
-      if (cv != null) cur = rdNum(cv) + unit;
-    }
-    return { name: kr.statement || kr.name || String(kr.id), score, band: hubBand(score), tgt, cur };
+    const kpis = (RD.kpisFor('keyResult', kr.id, STATE.pfMap) || []).map(k => {
+      const unit = RD.kpiUnit(k, pool) || k.unit || '';
+      const t = RD.effTarget(k, pool, STATE.pfMap);
+      const v = RD.effValue(k, pool, STATE.pfMap);
+      // A range target already reads as a span ("60–80 C") — prefixing it with a
+      // direction glyph would claim a direction it does not have.
+      const ranged = (t != null && typeof t === 'object');
+      const dir = (k.direction === 'down' || k.direction === 'decrease') ? '\u2264' : '\u2265';
+      return {
+        name: k.name || String(k.id),
+        tgt: t == null ? '\u2014' : (ranged ? rdFmtTarget(t, unit) : dir + ' ' + rdFmtTarget(t, unit)),
+        cur: v == null ? '\u2014' : rdFmtTarget(v, unit)
+      };
+    });
+    return {
+      name: kr.statement || kr.name || String(kr.id),
+      score,
+      band: hubBand(score),
+      kpis
+    };
   });
 }
 
@@ -3875,14 +3929,14 @@ function buildToolList(session) {
                 : bandLabel(view.band);
     const sev = view.isComplete ? 'success'
               : ({ ontrack: 'success', watch: 'warning', atrisk: 'danger' }[key] || 'subtle');
-    const healthText = Number.isFinite(view.score) ? `Health ${Math.round(view.score)}` : '';
-    // The schedule line under the name: "12d left", "+30d slip". The slip is the
-    // work-slip the catch-up alarm uses, so chip and glow never contradict.
-    // Distinct from the band on purpose — one is dates, the other outcomes, and
-    // they disagree often enough that merging them would lose the disagreement.
+    // "Health N" is gone. It was objectiveScore under an older name, printed
+    // alongside the body's own "OKR score" row — the same number twice, and the
+    // word "health" already means gate readiness everywhere else in this stack.
+    // The schedule line is what belongs here: "12d left", "+30d slip". The slip
+    // is the work-slip the catch-up alarm uses, so chip and glow never contradict.
     const sched = view.schedule || {};
     const slipText = sched.slip ? `+${sched.slip}d slip` : '';
-    const bits = [healthText, sched.text, slipText].filter(Boolean);
+    const bits = [sched.text, slipText].filter(Boolean);
     return {
       text: bits.join(' · ') || 'View progress',
       severity: sev,
@@ -4911,84 +4965,103 @@ function kpiDirectionCue(direction) {
   return '↑'; // 'up' / unset
 }
 
-// The merged objective body: key results, one overall progress bar, then gates.
-// Mirrors the planning app's ovObjTile body (ovKpiTbl -> ovProg -> gatesBlock) so
-// the same objective reads the same way in both tools. The Hub's own tile header
-// sits above this and is unchanged.
+// How many KPIs to show under a key result before collapsing to "+N more". A
+// display cap, not a data one — okrRowsForObjective returns them all.
+const KR_KPI_CAP = 2;
+
+// The merged objective body: two named scores, key results with their KPIs, then
+// stage-gates broken out per workstream.
 //
 // Both signals, one tile. They answer different questions — "are we hitting our
 // numbers" and "are we hitting our dates" — and they routinely disagree: a green
-// band beside two overdue gates is not a bug, it is the actual situation. The old
-// split made you pick which half to see.
+// OKR score beside a red gate health is not a bug, it is an objective whose
+// numbers are good and whose plan has barely started. The old split made you pick
+// which half to look at.
 function renderObjectiveBody(view) {
   if (!view) return '';
   const krs = Array.isArray(view.keyResults) ? view.keyResults : [];
   const lanes = Array.isArray(view.gateLanes) ? view.gateLanes : [];
 
-  // ---- key results -------------------------------------------------------
-  let krBlock = '';
-  if (krs.length) {
-    const rows = krs.map(r => `
-      <div class="ov-kdot ${bandClass(r.band)}"></div>
-      <span class="ov-kname" title="${escAttr(r.name)}">${escText(r.name)}</span>
-      <span class="ov-ktgt">${escText(r.tgt)}</span>
-      <span class="ov-kcur">${escText(r.cur)}</span>`).join('');
-    krBlock = `<div class="ov-ktbl">
-      <div class="ov-kh"></div><div class="ov-kh">Key result</div>
-      <div class="ov-kh ov-r">Target</div><div class="ov-kh ov-r">Now</div>${rows}</div>`;
-  } else {
-    krBlock = `<div class="tile-okr-empty">No key results defined.</div>`;
-  }
-
-  // ---- the two scores, named --------------------------------------------
-  // They are DIFFERENT questions and they disagree routinely, so the tile names
-  // both rather than showing one anonymous bar and letting you guess which it is.
+  // ---- the two scores, named ---------------------------------------------
   //   OKR score         — mean of key result scores. Are we hitting the numbers?
-  //   Stage-Gate Health — % of gates passed, weakest workstream. Where in the plan?
-  // A green OKR beside a low gate health is not a contradiction; it is an
-  // objective whose numbers are good and whose plan has barely started.
-  const metric = (label, val, title) => {
+  //   Stage-gate health — % of gates passed, WEAKEST workstream. Where in the plan?
+  const stat = (label, val, title) => {
     const has = Number.isFinite(val);
-    const pct = has ? Math.max(0, Math.min(100, Math.round(val))) : 0;
     const cls = bandClass(has ? hubBand(val) : 'no-band');
-    return `<div class="ov-metric" title="${escAttr(title)}">
-        <span class="ov-mlabel">${escText(label)}</span>
-        <div class="ov-ptrack"><div class="ov-pfill ${cls}" style="width:${pct}%"></div></div>
-        <span class="ov-ppct ${cls}">${has ? pct + '%' : '\u2014'}</span>
-      </div>`;
+    return `<div class="ov-stat" title="${escAttr(title)}">` +
+      `<span class="ov-statnum ${cls}">${has ? Math.round(val) : '\u2014'}</span>` +
+      `<span class="ov-statlbl">${escText(label)}</span></div>`;
   };
-  const progBlock = `<div class="ov-metrics">` +
-    metric('OKR score', view.score, 'Mean of key result scores') +
-    metric('Stage-Gate Health', view.gateHealth,
-           'Weakest workstream \u2014 % of gates passed. 0% means the plan has not started, not that it is failing.') +
+  const statRow = `<div class="ov-stats">` +
+    stat('OKR score', view.score, 'Mean of key result scores') +
+    stat('Gate health', view.gateHealth,
+         'Weakest workstream \u2014 % of gates passed. 0% means the plan has not started, not that it is failing.') +
     `</div>`;
 
-  // ---- gates -------------------------------------------------------------
+  // ---- key results, with their KPIs nested -------------------------------
+  let krBlock = '';
+  if (krs.length) {
+    const rows = krs.map(r => {
+      const has = Number.isFinite(r.score);
+      const kpis = Array.isArray(r.kpis) ? r.kpis : [];
+      const shown = kpis.slice(0, KR_KPI_CAP);
+      const hidden = kpis.length - shown.length;
+      const kpiRows = shown.map(k => `
+        <span class="ov-kpname" title="${escAttr(k.name)}">${escText(k.name)}</span>
+        <span class="ov-kptgt">${escText(k.tgt)}</span>
+        <span class="ov-kpcur">${escText(k.cur)}</span>`).join('');
+      const more = hidden > 0
+        ? `<div class="ov-kpmore" title="${escAttr(kpis.slice(KR_KPI_CAP).map(k => k.name).join(', '))}">+${hidden} more</div>`
+        : '';
+      // A KR with nothing measurable says so, rather than rendering an empty
+      // indent that looks like a load failure.
+      const body = kpis.length
+        ? `<div class="ov-kpis">${kpiRows}</div>${more}`
+        : `<div class="ov-kpnone">No KPIs yet</div>`;
+      return `
+        <div class="ov-kr">
+          <span class="ov-krdot ${bandClass(r.band)}"></span>
+          <span class="ov-krname" title="${escAttr(r.name)}">${escText(r.name)}</span>
+          <span class="ov-krpct ${bandClass(r.band)}">${has ? Math.round(r.score) + '%' : '\u2014'}</span>
+        </div>${body}`;
+    }).join('');
+    krBlock = `<div class="ov-sec"><div class="ov-seclbl">Key results</div>${rows}</div>`;
+  } else {
+    krBlock = `<div class="ov-sec"><div class="ov-kpnone">No key results defined.</div></div>`;
+  }
+
+  // ---- stage-gates -------------------------------------------------------
   let gateBlock = '';
   const all = lanes.reduce((a, l) => a.concat(l.gates), []);
   if (all.length) {
-    const passed = all.filter(g => g.state === 'passed' || g.state === 'passed-late').length;
-    const behind = all.filter(g => g.state === 'overdue').length;
-    const laneHtml = lanes.map(l => {
-      const lbl = l.label
-        ? `<span class="tile-gate-lane" title="${escAttr(l.name)}">${escText(l.label)}</span>`
-        : '';
-      return `<div class="tile-gate-row">${lbl}${renderGateBubblesHtml(l.gates)}</div>`;
-    }).join('');
-    gateBlock = `<div class="ov-gates">
-      <div class="ov-gatehd"><span class="ov-gt">Gates ${passed}/${all.length}</span>` +
-      (behind ? `<span class="ov-behind">\u2691 ${behind} behind</span>` : '') +
-      `</div>${laneHtml}</div>`;
+    const passed = lanes.reduce((n, l) => n + l.passed, 0);
+    const behind = lanes.reduce((n, l) => n + l.behind, 0);
+    const head = `<div class="ov-seclbl">Stage-gates ${passed}/${all.length}` +
+      (behind ? ` \u00b7 <span class="ov-behind">${behind} behind</span>` : '') + `</div>`;
+    // Per-lane headers ONLY when there is more than one workstream. With one lane
+    // its fraction is the objective's fraction and its name is the only name —
+    // printing them again just says the same thing three times.
+    const body = lanes.length > 1
+      ? lanes.map(l => {
+          const lbandCls = bandClass(hubBand(l.total ? (100 * l.passed / l.total) : null));
+          return `<div class="ov-lanehd">` +
+            `<span class="ov-lanename" title="${escAttr(l.name)}">${escText(l.name)}</span>` +
+            `<span class="ov-lanefrac ${lbandCls}">${l.passed}/${l.total}` +
+            (l.behind ? ` \u00b7 ${l.behind} behind` : '') + `</span></div>` +
+            `<div class="ov-lane">${renderGateBubblesHtml(l.gates)}</div>`;
+        }).join('')
+      : `<div class="ov-lane">${renderGateBubblesHtml(lanes[0].gates)}</div>`;
+    gateBlock = `<div class="ov-sec">${head}${body}</div>`;
   }
 
   // The alarm, stated plainly. No button: building a catch-up plan happens in the
   // execution app, and a Hub button would either duplicate that flow or lie about
-  // where the work lives. This says what is true and where it is true; the tile
-  // already links through.
+  // where the work lives. Sits above the numbers because it is the reason you
+  // stopped at this tile.
   const alarmBlock = view.catchupNeeded
     ? `<div class="ov-catchup" title="Work is ${view.scheduleSlip} days behind its own plan \u2014 past the ${CATCHUP_SLIP_THRESHOLD}-day threshold the execution app alarms on.">Catch-up plan needed</div>`
     : '';
-  return `<div class="tile-objective">${alarmBlock}${krBlock}${progBlock}${gateBlock}</div>`;
+  return `<div class="tile-objective">${alarmBlock}${statRow}${krBlock}${gateBlock}</div>`;
 }
 
 // Render the OKR-view tile body: one row per Key Result, each with a mini
