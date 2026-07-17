@@ -2133,6 +2133,16 @@ async function jbFetchUsers() {
     if (u.orgRole !== 'lead' && u.orgRole !== 'cto') u.orgRole = 'ic';
     u.leadOf = Array.isArray(u.leadOf) ? u.leadOf.filter(x => typeof x === 'string') : [];
 
+    // Leads lead DIVISIONS in the new stack, not tracker bins. This field is the
+    // successor to `leadOf` and is left EMPTY on migration on purpose: an empty
+    // value makes divisionsLed() fall back to resolving the legacy `leadOf` ids
+    // against the live portfolio, so leadership keeps working with nobody
+    // editing anything. Writing a guess in here instead would bake that guess
+    // into the record, where a wrong one is indistinguishable from a decision.
+    // Stage 4 persists the resolved value and drops `leadOf`.
+    u.leadDivisions = Array.isArray(u.leadDivisions)
+      ? u.leadDivisions.filter(x => typeof x === 'string' && x) : [];
+
     // Configured tiles (custom-tile build). Each entry:
     //   { tracker, objectiveId, viewType, name }
     // viewType ∈ 'stagegate' | 'okr' | 'kpi' (only 'stagegate' active in Stage 1).
@@ -2269,7 +2279,105 @@ function trackersLed(session) {
   const set = new Set(session.leadOf || []);
   return all.filter(t => set.has(t.id));
 }
-// Find the current CTO, if any. Used by the user-edit modal to enforce single-CTO.
+return all.filter(t => set.has(t.id));
+}
+// ═════════════════════════════════════════════════════════════════════════════
+//  IDENTITY — NEW STACK  (divisions + derived ownership)
+//
+//  Two changes from the tracker model:
+//
+//  1. Leads lead DIVISIONS, not tracker bins. A division is a field on the
+//     objective (o.divisionId), so routing is a direct lookup — no tracker
+//     indirection, no company overlay, no dedup-by-name.
+//
+//  2. Ownership is DERIVED, not stored. `owner` lives on the portfolio objective
+//     and is authored in the planning app from the same users bin the Hub
+//     authenticates against. So the Hub reads it rather than keeping its own
+//     copy — one fact, one home. `assignedObjectives` becomes dead weight.
+//
+//  Stage 2 is ADDITIVE: nothing below is wired into rendering yet, and the old
+//  tracker functions are untouched. Stage 3 flips the tiles over; Stage 4
+//  deletes the old layer. Doing the deletions here would empty Projects and
+//  Leadership in the window before Stage 3 lands.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Legacy tracker id → the division it became. Matched against division NAME and
+// id, because the new ids are authored by hand and cannot be derived from the
+// old ones. Deliberately patterns, not a literal id map: a literal would be a
+// guess at ids I cannot see, and would fail silently when wrong.
+// The old 'celadyne' company bin has no entry on purpose — company scope is now
+// every division, computed by RD.rollupCompany, not a bin.
+const LEGACY_TRACKER_TO_DIVISION = {
+  'fuel-cell':    [/fuel.?cell/i],
+  'fuelcell':     [/fuel.?cell/i],
+  'electrolyzer': [/electrolyz/i],
+  'nrel':         [/exploration/i]   // NREL became Exploration
+};
+
+// Resolve legacy leadOf tracker ids to division ids using the live portfolio.
+// Best-effort by design: an unmatched tracker yields nothing rather than a
+// wrong division, and __rdDiag() reports exactly what resolved to what.
+function _legacyLeadDivisions(session, divisions) {
+  const override = (STATE.config && STATE.config.legacyDivisionMap) || null;
+  const out = [];
+  (session.leadOf || []).forEach(trackerId => {
+    const key = String(trackerId).toLowerCase();
+    // An explicit map in the hub config bin wins — the escape hatch for when the
+    // division names do not match the patterns above.
+    if (override && override[key]) {
+      if (divisions.some(d => d.id === override[key]) && !out.includes(override[key])) out.push(override[key]);
+      return;
+    }
+    const pats = LEGACY_TRACKER_TO_DIVISION[key];
+    if (!pats) return;
+    const hit = divisions.find(d => pats.some(p => p.test(d.name || '') || p.test(d.id || '')));
+    if (hit && !out.includes(hit.id)) out.push(hit.id);
+  });
+  return out;
+}
+
+// Divisions this user leads. CTO leads every division, matching the old rule
+// that the CTO leads every tracker.
+function divisionsLed(session) {
+  if (!session) return [];
+  const divisions = (STATE.portfolio && Array.isArray(STATE.portfolio.divisions))
+    ? STATE.portfolio.divisions : [];
+  if (session.orgRole === 'cto') return divisions.map(d => d.id);
+  if (session.orgRole !== 'lead') return [];
+  const explicit = Array.isArray(session.leadDivisions) ? session.leadDivisions.filter(Boolean) : [];
+  // Explicit wins, but only for divisions that still exist — a stale id from a
+  // deleted division should not grant leadership over nothing.
+  if (explicit.length) return explicit.filter(id => divisions.some(d => d.id === id));
+  return _legacyLeadDivisions(session, divisions);
+}
+
+function leadsDivision(session, divisionId) {
+  if (!session || !divisionId) return false;
+  if (session.orgRole === 'cto') return true;
+  if (session.orgRole !== 'lead') return false;
+  return divisionsLed(session).includes(divisionId);
+}
+
+// The objectives this user owns. Derived from the portfolio every time — there
+// is no stored assignment to drift from it. An objective can have several
+// owners, so this is not a partition: a shared objective is in each owner's list.
+function myObjectives(session) {
+  const email = session && session.email;
+  if (!email) return [];
+  return portfolioObjectives().filter(o => ownsObjective(email, o));
+}
+
+// Route an objective to a section. Same shape as the old objectiveTileSection,
+// but keyed on the objective itself rather than its tracker:
+//   owns it                  → 'projects'
+//   else leads its division  → 'leadership'
+//   else                     → 'watching'
+function objectiveSection(session, o) {
+  if (!o) return 'watching';
+  if (ownsObjective(session && session.email, o)) return 'projects';
+  if (leadsDivision(session, o.divisionId)) return 'leadership';
+  return 'watching';
+}
 function findExistingCTO(usersRecord, exceptEmail) {
   const except = exceptEmail ? normaliseEmail(exceptEmail) : null;
   return (usersRecord.users || []).find(u => u.orgRole === 'cto' && normaliseEmail(u.email) !== except) || null;
@@ -2605,6 +2713,33 @@ window.__rdDiag = async function () {
     const email = STATE.session && STATE.session.email;
     out.mine = objs.filter(o => ownsObjective(email, o)).map(o => o.statement || o.id);
     out.sample = objs.length ? getObjectiveView(objs[0].id) : null;
+
+    // ---- identity resolution (Stage 2) ----
+    // The thing worth checking here is `leadResolvedFrom`. If it says 'legacy',
+    // the division ids below were inferred by matching your old tracker ids
+    // against division NAMES — verify they are the ones you mean before Stage 3
+    // starts routing tiles by them.
+    const s = STATE.session || {};
+    const explicit = Array.isArray(s.leadDivisions) && s.leadDivisions.length;
+    out.identity = {
+      email,
+      orgRole: s.orgRole || 'ic',
+      legacyLeadOf: s.leadOf || [],
+      leadResolvedFrom: s.orgRole === 'cto' ? 'cto (all divisions)'
+                        : explicit ? 'leadDivisions (explicit)'
+                        : 'legacy leadOf -> division name match',
+      divisionsLed: divisionsLed(STATE.session),
+      divisionsLedLabels: divisionsLed(STATE.session).map(divisionLabel)
+    };
+    // Where every objective WOULD route once Stage 3 flips the tiles over.
+    const sections = { projects: [], leadership: [], watching: [] };
+    objs.forEach(o => sections[objectiveSection(STATE.session, o)].push(o.statement || o.id));
+    out.routing = {
+      projects: sections.projects.length,
+      leadership: sections.leadership.length,
+      watching: sections.watching.length,
+      projectsList: sections.projects
+    };
   } catch (e) { out.portfolio = 'FAILED: ' + e.message; }
   console.log(out);
   return out;
@@ -2712,6 +2847,7 @@ async function createUserRecord(email, pin, role) {
     role: role || 'user',
     orgRole: 'ic',
     leadOf: [],
+    leadDivisions: [],
     pinHash,
     salt,
     iterations: STATE.config.pbkdf2Iterations,
@@ -2738,6 +2874,7 @@ function makeSession(user, days) {
     role: user.role || 'user',
     orgRole: (user.orgRole === 'lead' || user.orgRole === 'cto') ? user.orgRole : 'ic',
     leadOf: Array.isArray(user.leadOf) ? user.leadOf.slice() : [],
+    leadDivisions: Array.isArray(user.leadDivisions) ? user.leadDivisions.slice() : [],
     assignedObjectives: Array.isArray(user.assignedObjectives) ? user.assignedObjectives.slice() : [],
     configuredTiles: Array.isArray(user.configuredTiles) ? user.configuredTiles.slice() : [],
     groupingConfig: (user.groupingConfig && typeof user.groupingConfig === 'object')
