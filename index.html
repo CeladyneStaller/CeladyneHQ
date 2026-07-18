@@ -5918,19 +5918,34 @@ function openFolderModal(tool) {
 }
  
 // ---- Org role field (shared by add-user and edit-user modals) ----
-// Returns the HTML for the org role dropdown + tracker multi-select. The
-// multi-select is hidden by default and toggled visible when 'lead' is chosen.
-function orgRoleFieldHtml(currentOrgRole, currentLeadOf) {
-  const trackers = getConfiguredTrackers();
+// Org role dropdown + DIVISION multi-select, hidden unless 'lead' is chosen.
+//
+// This listed trackers and wrote `leadOf`. Leads are scoped by division now, so
+// it lists divisions and writes `leadDivisions`.
+//
+// `currentLeadDivisions` is the user's explicit list if they have one. Otherwise
+// the boxes are pre-ticked from whatever the legacy resolver makes of their old
+// leadOf ids — and that pre-tick IS the migration: an admin opens the user, sees
+// the inferred divisions, and saving makes them explicit. Bulk-writing a pattern
+// match into every record instead would freeze a guess nobody looked at.
+function orgRoleFieldHtml(currentOrgRole, currentLeadDivisions, legacyUser) {
   const role = currentOrgRole || 'ic';
-  const leadOf = new Set(Array.isArray(currentLeadOf) ? currentLeadOf : []);
-  const trackerCheckboxes = trackers.length
-    ? trackers.map(t => `
+  const divisions = (STATE.portfolio && Array.isArray(STATE.portfolio.divisions))
+    ? STATE.portfolio.divisions : [];
+  let led = Array.isArray(currentLeadDivisions) ? currentLeadDivisions.filter(Boolean) : [];
+  let inferred = false;
+  if (!led.length && legacyUser && Array.isArray(legacyUser.leadOf) && legacyUser.leadOf.length) {
+    led = _legacyLeadDivisions(legacyUser, divisions);
+    inferred = led.length > 0;
+  }
+  const set = new Set(led);
+  const divisionCheckboxes = divisions.length
+    ? divisions.map(d => `
         <label class="checkbox-row" style="margin-bottom: 6px;">
-          <input type="checkbox" name="org-leadof" value="${t.id}" ${leadOf.has(t.id) ? 'checked' : ''}>
-          <span>${t.name}</span>
+          <input type="checkbox" name="org-leaddiv" value="${d.id}" ${set.has(d.id) ? 'checked' : ''}>
+          <span>${String(d.name || d.id).replace(/</g, '&lt;')}</span>
         </label>`).join('')
-    : '<div class="obj-empty">No trackers configured. Add one in Hub configuration first.</div>';
+    : '<div class="obj-empty">No divisions loaded yet — wait for tiles to appear, then reopen.</div>';
   return `
     <label class="field">
       <span class="label-row">Org role</span>
@@ -5939,14 +5954,16 @@ function orgRoleFieldHtml(currentOrgRole, currentLeadOf) {
         <option value="lead" ${role === 'lead' ? 'selected' : ''}>Lead</option>
         <option value="cto"  ${role === 'cto'  ? 'selected' : ''}>CTO</option>
       </select>
-      <div class="obj-picker-meta">Independent of admin role. CTO automatically leads every tracker.</div>
+      <div class="obj-picker-meta">Independent of admin role. CTO automatically leads every division.</div>
     </label>
     <div id="org-leadof-wrap" class="field" style="display: ${role === 'lead' ? 'block' : 'none'};">
-      <span class="label-row">Leads which trackers</span>
+      <span class="label-row">Leads which divisions</span>
       <div style="border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 10px;">
-        ${trackerCheckboxes}
+        ${divisionCheckboxes}
       </div>
-      <div class="obj-picker-meta" id="org-leadof-help">A Lead with no trackers selected won't see any leadership tiles.</div>
+      <div class="obj-picker-meta" id="org-leadof-help">${inferred
+        ? 'Ticked from this user&rsquo;s old tracker list. Check they are right — saving makes them explicit.'
+        : 'A Lead with no divisions selected won&rsquo;t see any leadership tiles.'}</div>
     </div>
     <div id="org-cto-warn" class="inline-error" style="display: none; margin-bottom: 14px;"></div>
   `;
@@ -5979,15 +5996,14 @@ function bindOrgRoleField(excludeEmail) {
   refresh();
 }
 
-// Reads the form into { orgRole, leadOf }. Validates that 'lead' has trackers.
+// Reads the form into { orgRole, leadDivisions }.
 function readOrgRoleField() {
   const orgRole = (document.getElementById('org-role-select') || {}).value || 'ic';
-  const leadOf = orgRole === 'lead'
-    ? Array.from(document.querySelectorAll('input[name="org-leadof"]:checked')).map(cb => cb.value)
+  const leadDivisions = orgRole === 'lead'
+    ? Array.from(document.querySelectorAll('input[name="org-leaddiv"]:checked')).map(cb => cb.value)
     : [];
-  return { orgRole, leadOf };
+  return { orgRole, leadDivisions };
 }
-
 // Demote any existing CTO other than `exceptEmail` to IC. Mutates `record`.
 function enforceSingleCTO(record, exceptEmail) {
   const except = exceptEmail ? normaliseEmail(exceptEmail) : null;
