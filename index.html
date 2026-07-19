@@ -2152,17 +2152,12 @@ async function jbFetchUsers() {
   // `name` may be missing for older records — tile labels fall back to id.
   data.users.forEach(u => {
     // Org role / leadership fields — added in the leadership build.
-    // Default everyone to 'ic'. `leadOf` only meaningful for orgRole === 'lead'.
+    // Default everyone to 'ic'.
     if (u.orgRole !== 'lead' && u.orgRole !== 'cto') u.orgRole = 'ic';
-    u.leadOf = Array.isArray(u.leadOf) ? u.leadOf.filter(x => typeof x === 'string') : [];
 
-    // Leads lead DIVISIONS in the new stack, not tracker bins. This field is the
-    // successor to `leadOf` and is left EMPTY on migration on purpose: an empty
-    // value makes divisionsLed() fall back to resolving the legacy `leadOf` ids
-    // against the live portfolio, so leadership keeps working with nobody
-    // editing anything. Writing a guess in here instead would bake that guess
-    // into the record, where a wrong one is indistinguishable from a decision.
-    // Stage 4 persists the resolved value and drops `leadOf`.
+    // Leads lead divisions. The old `leadOf` tracker-id list is no longer read;
+    // any still on a record is inert and left alone rather than deleted, so a
+    // rollback to a pre-4d build would still find it.
     u.leadDivisions = Array.isArray(u.leadDivisions)
       ? u.leadDivisions.filter(x => typeof x === 'string' && x) : [];
 
@@ -2249,10 +2244,10 @@ async function jbSaveUsers(record) {
 // it as a single default tracker.
 
 // ---- Leadership helpers ----
-// `orgRole` and `leadOf` define a user's position in the org hierarchy:
+// `orgRole` and `leadDivisions` define a user's position in the org hierarchy:
 //   - 'ic'   (default): individual contributor; owns personal objectives
-//   - 'lead': owns specific trackers via leadOf array, plus personal objectives
-//   - 'cto': implicit lead of every configured tracker, plus personal objectives
+//   - 'lead': leads the divisions in leadDivisions, plus personal objectives
+//   - 'cto': implicit lead of every division, plus personal objectives
 // These are independent of the `role` field (admin vs user, which controls
 // hub-config permissions).
 function isLeadership(session) {
@@ -2296,41 +2291,6 @@ async function adminSaveTrackers(trackers) {
 //  Leadership in the window before Stage 3 lands.
 // ═════════════════════════════════════════════════════════════════════════════
 
-// Legacy tracker id → the division it became. Matched against division NAME and
-// id, because the new ids are authored by hand and cannot be derived from the
-// old ones. Deliberately patterns, not a literal id map: a literal would be a
-// guess at ids I cannot see, and would fail silently when wrong.
-// The old 'celadyne' company bin has no entry on purpose — company scope is now
-// every division, computed by RD.rollupCompany, not a bin.
-const LEGACY_TRACKER_TO_DIVISION = {
-  'fuel-cell':    [/fuel.?cell/i],
-  'fuelcell':     [/fuel.?cell/i],
-  'electrolyzer': [/electrolyz/i],
-  'nrel':         [/exploration/i]   // NREL became Exploration
-};
-
-// Resolve legacy leadOf tracker ids to division ids using the live portfolio.
-// Best-effort by design: an unmatched tracker yields nothing rather than a
-// wrong division, and __rdDiag() reports exactly what resolved to what.
-function _legacyLeadDivisions(session, divisions) {
-  const override = (STATE.config && STATE.config.legacyDivisionMap) || null;
-  const out = [];
-  (session.leadOf || []).forEach(trackerId => {
-    const key = String(trackerId).toLowerCase();
-    // An explicit map in the hub config bin wins — the escape hatch for when the
-    // division names do not match the patterns above.
-    if (override && override[key]) {
-      if (divisions.some(d => d.id === override[key]) && !out.includes(override[key])) out.push(override[key]);
-      return;
-    }
-    const pats = LEGACY_TRACKER_TO_DIVISION[key];
-    if (!pats) return;
-    const hit = divisions.find(d => pats.some(p => p.test(d.name || '') || p.test(d.id || '')));
-    if (hit && !out.includes(hit.id)) out.push(hit.id);
-  });
-  return out;
-}
-
 // Divisions this user leads. CTO leads every division, matching the old rule
 // that the CTO leads every tracker.
 function divisionsLed(session) {
@@ -2339,11 +2299,10 @@ function divisionsLed(session) {
     ? STATE.portfolio.divisions : [];
   if (session.orgRole === 'cto') return divisions.map(d => d.id);
   if (session.orgRole !== 'lead') return [];
+  // Only divisions that still exist: a stale id from a deleted division should
+  // not grant leadership over nothing.
   const explicit = Array.isArray(session.leadDivisions) ? session.leadDivisions.filter(Boolean) : [];
-  // Explicit wins, but only for divisions that still exist — a stale id from a
-  // deleted division should not grant leadership over nothing.
-  if (explicit.length) return explicit.filter(id => divisions.some(d => d.id === id));
-  return _legacyLeadDivisions(session, divisions);
+  return explicit.filter(id => divisions.some(d => d.id === id));
 }
 
 function leadsDivision(session, divisionId) {
@@ -3043,14 +3002,10 @@ window.__rdDiag = async function () {
     // against division NAMES — verify they are the ones you mean before Stage 3
     // starts routing tiles by them.
     const s = STATE.session || {};
-    const explicit = Array.isArray(s.leadDivisions) && s.leadDivisions.length;
     out.identity = {
       email,
       orgRole: s.orgRole || 'ic',
-      legacyLeadOf: s.leadOf || [],
-      leadResolvedFrom: s.orgRole === 'cto' ? 'cto (all divisions)'
-                        : explicit ? 'leadDivisions (explicit)'
-                        : 'legacy leadOf -> division name match',
+      leadDivisions: s.leadDivisions || [],
       divisionsLed: divisionsLed(STATE.session),
       divisionsLedLabels: divisionsLed(STATE.session).map(divisionLabel)
     };
@@ -3134,7 +3089,6 @@ async function createUserRecord(email, pin, role) {
     email: normaliseEmail(email),
     role: role || 'user',
     orgRole: 'ic',
-    leadOf: [],
     leadDivisions: [],
     pinHash,
     salt,
@@ -3160,7 +3114,6 @@ function makeSession(user, days) {
     email: user.email,
     role: user.role || 'user',
     orgRole: (user.orgRole === 'lead' || user.orgRole === 'cto') ? user.orgRole : 'ic',
-    leadOf: Array.isArray(user.leadOf) ? user.leadOf.slice() : [],
     leadDivisions: Array.isArray(user.leadDivisions) ? user.leadDivisions.slice() : [],
     configuredTiles: Array.isArray(user.configuredTiles) ? user.configuredTiles.slice() : [],
     groupingConfig: (user.groupingConfig && typeof user.groupingConfig === 'object')
@@ -4687,9 +4640,7 @@ function renderTiles() {
 
   TILE_SECTIONS.forEach(section => {
     // Leadership only renders for Lead/CTO sessions with at least one led
-    // division. This must ask divisionsLed, not the old trackersLed: a Lead
-    // created through the division picker has leadDivisions set and no leadOf
-    // at all, so a leadOf-based gate would hide their section entirely.
+    // division.
     if (section.id === 'leadership') {
       const led = divisionsLed(STATE.session);
       if (!isLeadership(STATE.session) || !led.length) return;
@@ -5630,22 +5581,13 @@ function openManageTrackersModal() {
 }
 
 // Add or edit a single tracker. onDone() is called after save/cancel.
-// Division <option>s for the tracker editor, with the right one pre-selected.
-//
-// Selection order: an explicit divisionId if the entry has one; otherwise the
-// legacy tracker id resolved through LEGACY_TRACKER_TO_DIVISION. That pre-select
-// IS the migration — an admin opens the entry, sees the inferred division, and
-// saving makes it explicit. Nothing is bulk-written behind their back.
+// Division <option>s for the tracker editor, with the entry's division selected.
+// The legacy-id guess that used to seed this is gone with the resolver — every
+// entry that needed one was migrated before 4d.
 function _trackerDivisionOptions(existing) {
   const divisions = (STATE.portfolio && Array.isArray(STATE.portfolio.divisions))
     ? STATE.portfolio.divisions : [];
-  let selected = (existing && existing.divisionId) || '';
-  if (!selected && existing && existing.id) {
-    // _legacyLeadDivisions takes a session-shaped object; a bare { leadOf } is
-    // all it reads, so reuse it rather than duplicating the matching rules.
-    const guess = _legacyLeadDivisions({ leadOf: [existing.id] }, divisions);
-    if (guess.length === 1) selected = guess[0];
-  }
+  const selected = (existing && existing.divisionId) || '';
   return divisions.map(d => {
     const label = String(d.name || d.id).replace(/</g, '&lt;');
     return `<option value="${d.id}" ${d.id === selected ? 'selected' : ''}>${label}</option>`;
@@ -5757,13 +5699,9 @@ function openTrackerEditModal(existing, onDone) {
 // ============================================================
 //  USER LIST (admin)
 // ============================================================
-// How many divisions a Lead leads, for the user-list meta line. Prefers the
-// explicit list; falls back to the legacy count so an unmigrated lead still
-// shows a number rather than nothing.
+// How many divisions a Lead leads, for the user-list meta line.
 function _leadCount(user) {
-  if (!user) return 0;
-  if (Array.isArray(user.leadDivisions) && user.leadDivisions.length) return user.leadDivisions.length;
-  return Array.isArray(user.leadOf) ? user.leadOf.length : 0;
+  return (user && Array.isArray(user.leadDivisions)) ? user.leadDivisions.length : 0;
 }
 async function renderUserList() {
   const list = document.getElementById('drawer-user-list');
@@ -5920,24 +5858,13 @@ function openFolderModal(tool) {
 // ---- Org role field (shared by add-user and edit-user modals) ----
 // Org role dropdown + DIVISION multi-select, hidden unless 'lead' is chosen.
 //
-// This listed trackers and wrote `leadOf`. Leads are scoped by division now, so
-// it lists divisions and writes `leadDivisions`.
-//
-// `currentLeadDivisions` is the user's explicit list if they have one. Otherwise
-// the boxes are pre-ticked from whatever the legacy resolver makes of their old
-// leadOf ids — and that pre-tick IS the migration: an admin opens the user, sees
-// the inferred divisions, and saving makes them explicit. Bulk-writing a pattern
-// match into every record instead would freeze a guess nobody looked at.
-function orgRoleFieldHtml(currentOrgRole, currentLeadDivisions, legacyUser) {
+// `currentLeadDivisions` is the user's division list. The legacy pre-tick that
+// seeded this during the migration is gone with the resolver.
+function orgRoleFieldHtml(currentOrgRole, currentLeadDivisions) {
   const role = currentOrgRole || 'ic';
   const divisions = (STATE.portfolio && Array.isArray(STATE.portfolio.divisions))
     ? STATE.portfolio.divisions : [];
-  let led = Array.isArray(currentLeadDivisions) ? currentLeadDivisions.filter(Boolean) : [];
-  let inferred = false;
-  if (!led.length && legacyUser && Array.isArray(legacyUser.leadOf) && legacyUser.leadOf.length) {
-    led = _legacyLeadDivisions(legacyUser, divisions);
-    inferred = led.length > 0;
-  }
+  const led = Array.isArray(currentLeadDivisions) ? currentLeadDivisions.filter(Boolean) : [];
   const set = new Set(led);
   const divisionCheckboxes = divisions.length
     ? divisions.map(d => `
@@ -5961,9 +5888,7 @@ function orgRoleFieldHtml(currentOrgRole, currentLeadDivisions, legacyUser) {
       <div style="border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 10px;">
         ${divisionCheckboxes}
       </div>
-      <div class="obj-picker-meta" id="org-leadof-help">${inferred
-        ? 'Ticked from this user&rsquo;s old tracker list. Check they are right — saving makes them explicit.'
-        : 'A Lead with no divisions selected won&rsquo;t see any leadership tiles.'}</div>
+      <div class="obj-picker-meta" id="org-leadof-help">A Lead with no divisions selected won&rsquo;t see any leadership tiles.</div>
     </div>
     <div id="org-cto-warn" class="inline-error" style="display: none; margin-bottom: 14px;"></div>
   `;
@@ -6011,7 +5936,9 @@ function enforceSingleCTO(record, exceptEmail) {
   (record.users || []).forEach(u => {
     if (u.orgRole === 'cto' && normaliseEmail(u.email) !== except) {
       u.orgRole = 'ic';
-      u.leadOf = [];
+      // Clear the divisions: a demoted CTO later promoted to Lead must not
+      // inherit what they had as CTO.
+      u.leadDivisions = [];
       demoted.push(u.email);
     }
   });
@@ -6035,7 +5962,7 @@ function openAddUserModal() {
       <input type="checkbox" id="adduser-admin">
       <span>Grant admin role</span>
     </label>
-    ${orgRoleFieldHtml('ic', [], null)}
+    ${orgRoleFieldHtml('ic', [])}
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">Add user</button>
@@ -6092,7 +6019,7 @@ function openEditUserModal(user) {
       <input type="checkbox" id="edituser-admin" ${user.role === 'admin' ? 'checked' : ''}>
       <span>Admin role</span>
     </label>
-    ${orgRoleFieldHtml(user.orgRole || 'ic', user.leadDivisions || [], user)}
+    ${orgRoleFieldHtml(user.orgRole || 'ic', user.leadDivisions || [])}
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">Save changes</button>
@@ -6112,9 +6039,6 @@ function openEditUserModal(user) {
       if (!target) throw new Error('User no longer exists.');
       target.role = isAdmin ? 'admin' : 'user';
       target.orgRole = orgRole;
-      // Saving is what makes the division list explicit. leadOf stays on the
-      // record until 4d: divisionsLed prefers leadDivisions the moment it is
-      // non-empty, and the resolver still answers for anyone not yet re-saved.
       target.leadDivisions = orgRole === 'lead' ? leadDivisions : [];
       // Single-CTO enforcement — only triggers if promoting THIS user to CTO.
       const demoted = orgRole === 'cto' ? enforceSingleCTO(record, target.email) : [];
