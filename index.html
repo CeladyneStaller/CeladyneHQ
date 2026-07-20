@@ -447,11 +447,16 @@
   .tile-badge.ontrack  { background: #EAF3DE; color: #3B6D11; }
   .tile-badge.watch    { background: #FAEEDA; color: #854F0B; }
   .tile-badge.atrisk   { background: #FCEBEB; color: #A32D2D; }
-  .tile-badge.complete { background: var(--surface-alt); color: var(--text-subtle); }
+  .tile-badge.complete { background: #EAF3DE; color: #3B6D11; }  /* achieved = green */
   /* no-band: RDCore scored this as null — nothing measurable, which is a real
      state and not an error. Also the landing spot for any band name the Hub does
      not recognise, so a future RDCore band renders neutral instead of unstyled. */
   .tile-badge.noband   { background: var(--surface-alt); color: var(--text-subtle); }
+  /* Projected-score tag colours, on the 80/60 thresholds. Same swatches the body
+     scores use, so green/orange/red read identically across the tile. */
+  .tile-badge.proj-green  { background: #EAF3DE; color: #3B6D11; }
+  .tile-badge.proj-orange { background: #FAEEDA; color: #854F0B; }
+  .tile-badge.proj-red    { background: #FCEBEB; color: #A32D2D; }
   /* ---- merged objective tile body ---------------------------------------- */
   .tile-objective      { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 
@@ -2585,6 +2590,47 @@ function initiativeLabel(id) { return _pfLabel(STATE.portfolio && STATE.portfoli
 // Objective tiles deep-link into the execution app, read-only: ?division= and
 // ?objective= are its own params, and ?readonly keeps a browsing click out of an
 // editable surface.
+// ---- Projected OKR score ------------------------------------------------
+// Replaces the on-track/at-risk tag with a forecast of where the objective
+// lands. base = min(measured OKR, gate-implied) keeps it conservative; the
+// gate-vs-time feasibility ratio F decides how much of the remaining gap gets
+// closed. Two identities fall out of the shape and are relied on:
+//   g = 1  -> S = 100  (well-constructed gates complete => score complete)
+//   on-pace midpoint (g=t=0.5, o=0.5) -> S = 80  (fixes k)
+// k = 0.667 is not a free knob: those two anchors pin it.
+const PROJ_K = 0.667;
+const PROJ_EARLY_T = 0.15;   // below this the pace ratio is too noisy to show
+
+// g, o in [0,1]; t in [0,1]. Returns a 0..100 number.
+function projScore(g, o, t) {
+  const base = Math.min(o, g) * 100;
+  if (t <= 0) return base;          // no time elapsed -> finish where you are
+  if (g >= 1) return 100;           // all gates passed -> 100, for any base
+  const F = (g * (1 - t)) / (t * (1 - g));
+  const m = F / (F + PROJ_K);
+  return base + m * (100 - base);
+}
+
+// The tag object { label, key } for a view. Handles every state the projection
+// itself doesn't: ended, not-yet-scorable, no-gates, no-dates. `key` is used
+// verbatim as the badge's CSS class.
+function projTag(view) {
+  if (view.isComplete)  return { label: 'Complete',  key: 'complete' };   // green
+  if (view.isAbandoned) return { label: 'Abandoned', key: 'noband' };
+  // Nothing measurable yet (null OKR score), or no gate spine to project along.
+  if (view.score == null || view.gateHealth == null) return { label: '\u2014', key: 'noband' };
+  // No valid plan span: show the current score, no forecast. Mirrors the app's
+  // keyResultPaceBand, which drops pace and falls back to the raw score.
+  if (view.elapsedFraction == null) return { label: Math.round(view.score) + '%', key: 'noband' };
+  // Too early: the pace ratio explodes on thin data, so suppress rather than
+  // paint a volatile number in week one.
+  if (view.elapsedFraction <= PROJ_EARLY_T) return { label: '\u2014', key: 'noband' };
+  const S = Math.round(projScore(view.gateHealth / 100, view.score / 100, view.elapsedFraction));
+  // Colour off the SHOWN (rounded) number so the tag never disagrees with itself.
+  const key = S >= 80 ? 'proj-green' : S >= 60 ? 'proj-orange' : 'proj-red';
+  return { label: S + '% proj.', key };
+}
+
 function objectiveUrl(o, editable) {
   const base = ((STATE.config && STATE.config.executionAppUrl) || '').trim();
   if (!base || !o) return '';
@@ -2893,10 +2939,20 @@ function getObjectiveView(objId) {
   const productId = RD.effProduct(o, STATE.portfolio) || '';
   const modelId = RD.effModel(o, STATE.portfolio) || '';
 
+  // Elapsed fraction of the PLANNED span, the same clock keyResultPace uses in
+  // the apps (planned dates, not the projected end) so the Hub's forecast and
+  // the apps' pace bands share one notion of "how far along". Null when the plan
+  // has no valid span — projTag falls back to the raw score then.
+  const _ps = o.plannedStart, _pe = o.plannedEnd;
+  const elapsedFraction = (_ps != null && _pe != null && _pe > _ps)
+    ? Math.max(0, Math.min(1, (rdToday() - _ps) / (_pe - _ps)))
+    : null;
+
   return {
     id: o.id,
     name: o.statement || o.name || String(o.id),
     divisionId: o.divisionId || '',
+    elapsedFraction,               // planned-span progress 0..1, or null (see projTag)
     initiativeId: o.initiativeId || '',
     quarter: o.quarter || '',
     owners: RD.ownersOf(o),
@@ -2934,6 +2990,11 @@ function getObjectiveView(objId) {
     // The schedule ALARM, defined exactly as execution_app defines it:
     //   schedAlarm = !ended && slip > CATCHUP_SLIP_THRESHOLD
     // where slip is cascade.objectiveScheduleSlip — NOT projectedEnd-plannedEnd.
+    // The two differ on purpose: objectiveScheduleSlip is driven by OVERDUE gates
+    // and answers "is the work late", independent of whatever buffer the
+    // objective's span still has. Reading the span number here instead would make
+    // the Hub glow on objectives the execution app calls fine, and stay dark on
+    // ones it flags — same data, two tools, opposite answers.
     scheduleSlip: sched,
     catchupNeeded: !end && sched != null && sched > CATCHUP_SLIP_THRESHOLD,
     // Grouped by workstream. Flat gate lists interleave parallel sets.
@@ -3582,27 +3643,19 @@ function buildToolList(session) {
   // those existed to do has nothing left to reconcile.
   // ───────────────────────────────────────────────────────────────────────────
   function statusFromView(view) {
-    // Ended objectives read as their end state; live ones read as their band.
-    // 'abandoned' is deliberately distinct from 'achieved' — the old model could
-    // only say complete/not, and collapsing them here would relabel abandoned
-    // work as finished.
-    const key = view.isComplete ? 'complete' : bandClass(view.band);
-    const label = view.isComplete ? 'Complete'
-                : view.isAbandoned ? 'Abandoned'
-                : bandLabel(view.band);
+    // The head tag is now a projected final OKR score (projTag), not the
+    // on-track/at-risk band. It handles every state itself — ended, not-yet-
+    // scorable, no-dates — and returns { label, key } used verbatim as the
+    // badge's text and CSS class.
+    const badge = projTag(view);
+    // severity is SEPARATE from the tag and still band-derived: it feeds the
+    // header's urgent count, which should track real current risk, not the
+    // forecast. A green projection on a currently at-risk objective should not
+    // quietly drop it from the urgent tally.
     const sev = view.isComplete ? 'success'
-              : ({ ontrack: 'success', watch: 'warning', atrisk: 'danger' }[key] || 'subtle');
-    // This slot is empty by design, and the renderer hides it rather than paint a
-    // bare dot. Two things used to live here and both moved:
-    //   "Health N"  — objectiveScore under an older name, printed alongside the
-    //                 body's own "OKR score" row. The same number twice, and
-    //                 "health" already means gate readiness everywhere else here.
-    //   the schedule — now in the body's stat row, level with the two scores.
-    // Severity is still returned: the urgent count keys off it, not off text.
+              : ({ ontrack: 'success', watch: 'warning', atrisk: 'danger' }[bandClass(view.band)] || 'subtle');
     return {
-      // Empty string, NOT `bits.join() || 'View progress'`. That fallback existed
-      // to keep the slot from going blank; with nothing left to put here it would
-      // print filler above the scores instead.
+      // Empty: the tile body carries the scores; the head tag is the projection.
       text: '',
       severity: sev,
       gateLanes: view.gateLanes || [],
@@ -3610,7 +3663,7 @@ function buildToolList(session) {
       // rendered per lane. Do not render from this — it interleaves workstreams.
       gates: (view.gateLanes || []).reduce((a, l) => a.concat(l.gates), []),
       url: view.url || null,
-      badge: label ? { label, key } : null,
+      badge,
       meta: [view.labels.division, view.labels.initiative].filter(Boolean).join(' · ')
     };
   }
