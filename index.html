@@ -2577,7 +2577,7 @@ function initiativeLabel(id) { return _pfLabel(STATE.portfolio && STATE.portfoli
 // Objective tiles deep-link into the execution app, read-only: ?division= and
 // ?objective= are its own params, and ?readonly keeps a browsing click out of an
 // editable surface.
-function objectiveUrl(o) {
+function objectiveUrl(o, editable) {
   const base = ((STATE.config && STATE.config.executionAppUrl) || '').trim();
   if (!base || !o) return '';
   const sep = base.includes('?') ? '&' : '?';
