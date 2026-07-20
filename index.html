@@ -1640,6 +1640,10 @@ const CONFIG_DEFAULTS = {
   // Where objective tiles point. The execution app takes ?division=&objective=
   // &readonly as deep-link params, so a tile can land on the exact objective.
   executionAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/execution_app.html',
+  // Where per-division Gantt tiles point. The planning app renders a division's
+  // Gantt from ?present&division=&tab=gantt&ganttquarter=1, so the tile is
+  // derived from the division id — no per-division URL to store.
+  planningAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/planning_app.html',
   logoPath: 'logo.png',     // drop a logo.png or logo.svg next to index.html
   sessionDays: 30,
   pinMinLength: 6,
@@ -1677,15 +1681,20 @@ function getSafetyClient() {
 //  Wire fetchStatus to real bins as those tools settle. For now,
 //  most return placeholder text that matches the mockup.
 
-function ganttUrlFor(tracker) {
-  if (!tracker || !tracker.ganttUrl) return null;
-  let url = tracker.ganttUrl;
-  // Always open Gantts in read-only mode. Idempotent: if `?readonly` (as a
-  // bare flag or readonly=value) is already in the URL, don't add a second one.
-  if (!/[?&]readonly(=|&|$)/.test(url)) {
-    url += url.includes('?') ? '&readonly' : '?readonly';
-  }
-  return url;
+// A division's Gantt, rendered by the planning app. `present` gives the clean
+// read-only UI; tab=gantt&ganttquarter=1 lands on the quarter Gantt. The token
+// mirrors objectiveUrl: appended only when non-empty, because the app stores
+// whatever it receives and an empty one would wipe a good token from a prior
+// visit. Returns '' when the planning app is unconfigured, so callers can skip
+// the tile the same way a missing URL used to.
+function ganttUrlForDivision(divisionId) {
+  const base = ((STATE.config && STATE.config.planningAppUrl) || '').trim();
+  if (!base) return '';
+  const sep = base.includes('?') ? '&' : '?';
+  const tok = ((STATE.config && STATE.config.brokerToken) || '').trim();
+  return `${base}${sep}present&division=${encodeURIComponent(divisionId || '')}` +
+         `&tab=gantt&ganttquarter=1` +
+         (tok ? `&token=${encodeURIComponent(tok)}` : '');
 }
 function meetingPageUrlFor(tracker) {
   return (tracker && tracker.meetingPageUrl) || null;
@@ -1889,7 +1898,7 @@ const TOOLS = [
   {
     id: 'github-org',
     name: 'GitHub',
-    description: 'Repos for the hub, Gantts, and trackers',
+    description: 'Repos for the hub and its apps',
     icon: 'brand-github',
     url: 'https://github.com/celadynestaller', // adjust to your org
     section: 'coding',
@@ -2302,7 +2311,6 @@ function getConfiguredTrackers() {
       id: t.id,
       name: t.name || t.id,
       divisionId: t.divisionId || '',
-      ganttUrl: t.ganttUrl || '',
       meetingPageUrl: t.meetingPageUrl || '',
       // companyLevel: pin this tracker's Gantt AND Meeting page tiles to
       // Useful links (never Projects). Migrated from legacy `companyLevelGantt`
@@ -3319,6 +3327,8 @@ async function refreshHubConfig() {
       data.brokerToken !== STATE.config.brokerToken) brokerPatch.brokerToken = data.brokerToken;
   if (typeof data.executionAppUrl === 'string' &&
       data.executionAppUrl !== STATE.config.executionAppUrl) brokerPatch.executionAppUrl = data.executionAppUrl;
+  if (typeof data.planningAppUrl === 'string' &&
+      data.planningAppUrl !== STATE.config.planningAppUrl) brokerPatch.planningAppUrl = data.planningAppUrl;
     if (Object.keys(brokerPatch).length) {
     Object.assign(STATE.config, brokerPatch);
     saveConfig(brokerPatch);   // local-device cache only, same as the trackers path
@@ -3491,23 +3501,28 @@ function buildToolList(session) {
     }
   });
 
-  // 2) Per-tracker Gantt tiles
-  trackers.forEach(t => {
-    const url = ganttUrlFor(t);
-    if (!url) return;
-    const section = sectionFor(t);
+  // 2) Per-division Gantt tiles. Derived from the portfolio, not from tracker
+  //    entries: every division gets one, keyed on its id, whether or not anyone
+  //    configured a links entry for it. Routes to Projects for that division's
+  //    lead, Useful links otherwise — the same split sectionFor gives the
+  //    meeting tiles, but asked of the division directly.
+  const _pfDivisions = (STATE.portfolio && Array.isArray(STATE.portfolio.divisions))
+    ? STATE.portfolio.divisions : [];
+  _pfDivisions.forEach(d => {
+    if (!d || !d.id) return;
+    const url = ganttUrlForDivision(d.id);
+    if (!url) return;                      // planning app unconfigured
+    const led = leadsDivision(session, d.id);
     const tile = {
-      id: `gantt__${t.id}`,
-      name: `${t.name} Gantt`,
-      description: section === 'projects'
-        ? 'Project timelines and stage-gates'
-        : 'Project timelines',
+      id: `gantt__${d.id}`,
+      name: `${d.name || d.id} Gantt`,
+      description: led ? 'Project timelines and stage-gates' : 'Project timelines',
       icon: 'chart-gantt',
       url,
-      section,
+      section: led ? 'projects' : 'links',
       fetchStatus: async () => ({ text: 'Open chart', severity: 'subtle' })
     };
-    if (section === 'projects') {
+    if (led) {
       list.push(tile);
     } else {
       linksGantts.push(tile);
@@ -3519,17 +3534,17 @@ function buildToolList(session) {
     list.push({
       id: 'gantts-folder',
       name: 'Gantts',
-      description: 'Reference Gantts across trackers',
+      description: 'Gantts for divisions outside your own',
       icon: 'chart-gantt',
       section: 'links',
       isFolder: true,
       folder: {
         title: 'Gantts',
-        intro: 'Project timelines for trackers outside your assigned work.',
+        intro: 'Project timelines for divisions outside your assigned work.',
         sections: [{ id: 'all', tiles: linksGantts }]
       },
       fetchStatus: async () => ({
-        text: `${linksGantts.length} tracker${linksGantts.length === 1 ? '' : 's'}`,
+        text: `${linksGantts.length} division${linksGantts.length === 1 ? '' : 's'}`,
         severity: 'subtle'
       })
     });
@@ -5427,7 +5442,6 @@ function openManageTrackersModal() {
     const rows = trackers.map((t, i) => {
       const urls = [];
       urls.push(t.meetingPageUrl ? '<span style="color: var(--success);">meeting ✓</span>' : '<span style="color: var(--text-subtle);">meeting —</span>');
-      urls.push(t.ganttUrl ? '<span style="color: var(--success);">gantt ✓</span>' : '<span style="color: var(--text-subtle);">gantt —</span>');
       if (t.companyLevel) urls.push('<span style="color: var(--accent-text);">company-level</span>');
       return `
       <div class="user-row">
@@ -5448,7 +5462,7 @@ function openManageTrackersModal() {
     }).join('');
     return `
       <h3>Division links</h3>
-      <p class="intro">External links for each division — its Confluence meeting page and Gantt. These appear as tiles: in <em>Projects</em> for that division's lead, in <em>Useful links</em> otherwise.</p>
+      <p class="intro">Each division's Confluence meeting page, shown as a tile — in <em>Projects</em> for that division's lead, in <em>Useful links</em> otherwise. Gantt tiles are generated automatically and need no entry here.</p>
       <div id="manage-trackers-list" style="margin-bottom: 14px;">
         ${trackers.length ? rows : '<div class="obj-empty">No trackers configured yet.</div>'}
       </div>
@@ -5522,7 +5536,7 @@ function openTrackerEditModal(existing, onDone) {
   const esc = s => String(s || '').replace(/"/g, '&quot;');
   openModal(`
     <h3>${isEdit ? 'Edit' : 'Add'} tracker</h3>
-    <p class="intro">External links for one division — its Confluence meeting page and Gantt. The internal ID is used in URLs and shouldn't change after first use.</p>
+    <p class="intro">A division's Confluence meeting page. (The Gantt tile is generated from the division automatically — nothing to enter for it.) The internal ID is used in URLs and shouldn't change after first use.</p>
     <div id="tracker-edit-error" class="inline-error" style="display: none;"></div>
     <label class="field">
       <span class="label-row">Display name</span>
@@ -5538,17 +5552,12 @@ function openTrackerEditModal(existing, onDone) {
         <option value="">— none —</option>
         ${_trackerDivisionOptions(existing)}
       </select>
-      <div class="obj-picker-meta">Which division these links belong to. Decides whether the Gantt and Meeting page tiles land in <em>Projects</em> (for that division's lead) or <em>Useful links</em>.</div>
+      <div class="obj-picker-meta">Which division this meeting page belongs to. Decides whether its tile lands in <em>Projects</em> (for that division's lead) or <em>Useful links</em>.</div>
     </label>
     <label class="field">
       <span class="label-row">Project Meeting Page URL <span class="subtle">(optional)</span></span>
       <input type="text" id="meeting-page-url" autocomplete="off" value="${esc(existing && existing.meetingPageUrl)}" placeholder="https://celadyne.atlassian.net/wiki/spaces/...">
       <div class="obj-picker-meta">Confluence page for this division's project meetings. Same visibility rules as the Gantt tile.</div>
-    </label>
-    <label class="field">
-      <span class="label-row">Gantt URL <span class="subtle">(optional)</span></span>
-      <input type="text" id="gantt-url" autocomplete="off" value="${esc(existing && existing.ganttUrl)}" placeholder="https://...github.io/celadyne-gantt/">
-      <div class="obj-picker-meta">Used by the Gantt tile. Leave blank to hide the Gantt tile for this tracker.</div>
     </label>
     <label class="checkbox-row" style="margin-bottom: 14px;">
       <input type="checkbox" id="gantt-always-show" ${existing && existing.companyLevel ? 'checked' : ''}>
@@ -5584,7 +5593,6 @@ function openTrackerEditModal(existing, onDone) {
     const id = document.getElementById('tracker-id').value.trim();
     const divisionId = document.getElementById('tracker-division').value;
     const meetingPageUrl = document.getElementById('meeting-page-url').value.trim();
-    const ganttUrl = document.getElementById('gantt-url').value.trim();
     const companyLevel = document.getElementById('gantt-always-show').checked;
     if (!name) return showError('tracker-edit-error', 'Display name is required.');
     if (!id || !/^[a-z0-9-]+$/.test(id)) return showError('tracker-edit-error', 'ID must be lowercase letters, numbers, and dashes only.');
@@ -5598,7 +5606,7 @@ function openTrackerEditModal(existing, onDone) {
     // save/verify/roll-back dance existed only to prove one was readable.
     const trackers = getConfiguredTrackers().slice();
     const idx = trackers.findIndex(t => t.id === id);
-    const updated = { id, name, divisionId, ganttUrl, meetingPageUrl, companyLevel };
+    const updated = { id, name, divisionId, meetingPageUrl, companyLevel };
     if (idx >= 0) trackers[idx] = updated; else trackers.push(updated);
     try {
       await adminSaveTrackers(trackers);
