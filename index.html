@@ -2618,14 +2618,16 @@ function projTag(view) {
   if (view.isComplete)  return { label: 'Complete',  key: 'complete' };   // green
   if (view.isAbandoned) return { label: 'Abandoned', key: 'noband' };
   // Nothing measurable yet (null OKR score), or no gate spine to project along.
-  if (view.score == null || view.gateHealth == null) return { label: '\u2014', key: 'noband' };
+  if (view.score == null || view.gatePooled == null) return { label: '\u2014', key: 'noband' };
   // No valid plan span: show the current score, no forecast. Mirrors the app's
   // keyResultPaceBand, which drops pace and falls back to the raw score.
   if (view.elapsedFraction == null) return { label: Math.round(view.score) + '%', key: 'noband' };
   // Too early: the pace ratio explodes on thin data, so suppress rather than
   // paint a volatile number in week one.
   if (view.elapsedFraction <= PROJ_EARLY_T) return { label: '\u2014', key: 'noband' };
-  const S = Math.round(projScore(view.gateHealth / 100, view.score / 100, view.elapsedFraction));
+  // Pooled gate completion drives the forecast (see getObjectiveView); the tile
+  // body's Gate-health number stays the MIN. They read differently on purpose.
+  const S = Math.round(projScore(view.gatePooled / 100, view.score / 100, view.elapsedFraction));
   // Colour off the SHOWN (rounded) number so the tag never disagrees with itself.
   const key = S >= 80 ? 'proj-green' : S >= 60 ? 'proj-orange' : 'proj-red';
   return { label: S + '% proj.', key };
@@ -2948,6 +2950,22 @@ function getObjectiveView(objId) {
     ? Math.max(0, Math.min(1, (rdToday() - _ps) / (_pe - _ps)))
     : null;
 
+  // Pooled gate completion — sum(passed)/sum(total) across the objective's gate
+  // sets — which the PROJECTION uses, while the body's "Gate health" stat keeps
+  // objectiveGateReadiness (the MIN across sets). Two aggregations of the same
+  // gates: min answers "is any workstream a blocker", pooled answers "how much
+  // of the outcome-linked gate work is done". Pooled is the better forecast
+  // input when gate sets are parallel KPI checkpoints rather than hard
+  // dependencies. Scoped to DECLARED sets (the ungrouped orphan lane is
+  // excluded) so it covers the same gates objectiveGateReadiness does; null when
+  // there are no declared gates, exactly when gateHealth is null.
+  const _gateLanes = gateLanesForObjective(o.id);
+  let _gPassed = 0, _gTotal = 0;
+  _gateLanes.forEach(l => {
+    if (!String(l.id).startsWith('__ung__')) { _gPassed += l.passed; _gTotal += l.total; }
+  });
+  const gatePooled = _gTotal > 0 ? (100 * _gPassed / _gTotal) : null;   // 0..100, or null
+
   return {
     id: o.id,
     name: o.statement || o.name || String(o.id),
@@ -2985,6 +3003,9 @@ function getObjectiveView(objId) {
     // inventing a more careful word for the same number; a tooltip carries the
     // caveat, exactly as it does there.
     gateHealth: RD.objectiveGateReadiness(o.id, STATE.pfMap, rdToday()),
+    // Pooled gate completion (0..100) for the projection; see the computation
+    // above. gateHealth (the MIN) is what the tile body shows.
+    gatePooled,
     // KPI-view rows (engine-scored, spec-resolved). See kpiRowsForObjective.
     kpis: kpiRowsForObjective(o.id),
     // The schedule ALARM, defined exactly as execution_app defines it:
@@ -2998,7 +3019,7 @@ function getObjectiveView(objId) {
     scheduleSlip: sched,
     catchupNeeded: !end && sched != null && sched > CATCHUP_SLIP_THRESHOLD,
     // Grouped by workstream. Flat gate lists interleave parallel sets.
-    gateLanes: gateLanesForObjective(o.id),
+    gateLanes: _gateLanes,
     // Editable only for owners — see objectiveUrl.
     url: objectiveUrl(o, ownsObjective(STATE.session && STATE.session.email, o))
   };
