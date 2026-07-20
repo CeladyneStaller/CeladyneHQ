@@ -1449,33 +1449,6 @@
 </div>
  
 <!-- ============================================================ -->
-<!-- SETUP (first device run / no JSONBin config)                  -->
-<!-- ============================================================ -->
-<div id="view-setup" class="view">
-  <div class="center-shell">
-    <div class="auth-card">
-      <div class="brand" style="margin-bottom: 1.75rem;">
-        <span class="brand-mark"><span class="fallback"><i class="ti ti-atom-2" aria-hidden="true"></i></span></span>
-        <span class="brand-name">Celadyne Employee Hub</span>
-      </div>
-      <h1>One-time setup</h1>
-      <p class="small muted" style="margin: 6px 0 1.5rem;">Connect this device to your shared hub bin.</p>
-      <div id="setup-error" class="inline-error" style="display: none;"></div>
-      <label class="field">
-        <span class="label-row">JSONBin users bin ID</span>
-        <input type="text" id="setup-bin-id" autocomplete="off" placeholder="e.g. 65a1b2c3d4e5f6...">
-      </label>
-      <label class="field">
-        <span class="label-row">Master key</span>
-        <input type="password" id="setup-master-key" autocomplete="off">
-      </label>
-      <button class="btn btn-primary btn-block" id="setup-save">Connect</button>
-      <p class="auth-footnote">Stored in this device's local storage. Not committed to source.</p>
-    </div>
-  </div>
-</div>
- 
-<!-- ============================================================ -->
 <!-- BOOTSTRAP FIRST ADMIN                                         -->
 <!-- ============================================================ -->
 <div id="view-bootstrap" class="view">
@@ -1620,7 +1593,7 @@
       <div class="tiny muted" style="margin-bottom: 12px;">
         Trackers: <span id="drawer-tracker-summary">&mdash;</span>
       </div>
-      <button class="btn btn-block btn-sm" id="drawer-manage-trackers" style="margin-bottom: 8px;">Manage tracker bins</button>
+      <button class="btn btn-block btn-sm" id="drawer-manage-trackers" style="margin-bottom: 8px;">Manage division links</button>
       <button class="btn btn-block btn-sm" id="drawer-reset-config">Reset device configuration</button>
     </div>
  
@@ -1704,29 +1677,6 @@ function getSafetyClient() {
 //  Wire fetchStatus to real bins as those tools settle. For now,
 //  most return placeholder text that matches the mockup.
 
-// Append query params to a URL that may already have some.
-function appendParams(baseUrl, params) {
-  if (!baseUrl) return null;
-  const qs = new URLSearchParams();
-  Object.keys(params || {}).forEach(k => {
-    if (params[k] != null && params[k] !== '') qs.set(k, params[k]);
-  });
-  const qsStr = qs.toString();
-  if (!qsStr) return baseUrl;
-  const sep = baseUrl.includes('?') ? '&' : '?';
-  return `${baseUrl}${sep}${qsStr}`;
-}
-
-function stageGateUrlFor(tracker, objectiveId, slug) {
-  if (!tracker || !tracker.trackerUrl) return null;
-  // Receiving tracker pages match objectives by their generated slug (e.g.
-  // "ez-tera-system-develop-the-electr-10002") via the `?name=` param. Fall
-  // back to `?objective=<id>` only if the snapshot doesn't carry a slug
-  // (older Gantt save). Once every Gantt is on the new code path, the slug
-  // path is the only one actually exercised.
-  if (slug) return appendParams(tracker.trackerUrl, { name: String(slug) });
-  return appendParams(tracker.trackerUrl, { objective: String(objectiveId) });
-}
 function ganttUrlFor(tracker) {
   if (!tracker || !tracker.ganttUrl) return null;
   let url = tracker.ganttUrl;
@@ -1949,7 +1899,7 @@ const TOOLS = [
   {
     id: 'jsonbin-dashboard',
     name: 'JSONBin',
-    description: 'Manage tracker bins and master keys',
+    description: 'Manage a division\'s external links',
     icon: 'database',
     url: 'https://jsonbin.io/app/bins',
     section: 'coding',
@@ -2351,10 +2301,7 @@ function getConfiguredTrackers() {
     return list.map(t => ({
       id: t.id,
       name: t.name || t.id,
-      // Empty until an admin picks one in the tracker editor. Pre-selected there
-      // from the legacy id, so saving is the migration.
       divisionId: t.divisionId || '',
-      trackerUrl: t.trackerUrl || '',
       ganttUrl: t.ganttUrl || '',
       meetingPageUrl: t.meetingPageUrl || '',
       // companyLevel: pin this tracker's Gantt AND Meeting page tiles to
@@ -2634,8 +2581,15 @@ function objectiveUrl(o) {
   const base = ((STATE.config && STATE.config.executionAppUrl) || '').trim();
   if (!base || !o) return '';
   const sep = base.includes('?') ? '&' : '?';
+  // The execution app reads ?token=, stores it in localStorage, and strips it
+  // from the URL. Append it ONLY when non-empty: the app overwrites its stored
+  // token with whatever it receives, so passing an empty one would wipe a good
+  // token from a prior visit. Matches brokerHeaders' non-empty guard.
+  const tok = ((STATE.config && STATE.config.brokerToken) || '').trim();
   return `${base}${sep}division=${encodeURIComponent(o.divisionId || '')}` +
-         `&objective=${encodeURIComponent(o.id)}&readonly`;
+         `&objective=${encodeURIComponent(o.id)}` +
+         (tok ? `&token=${encodeURIComponent(tok)}` : '') +
+         (editable ? '' : '&readonly');
 }
 
 // The apps store dates as DAY COUNTS from 2020-01-01 UTC, not milliseconds
@@ -3199,37 +3153,6 @@ function relativeTime(ts) {
 }
  
 // ============================================================
-//  SETUP VIEW
-// ============================================================
-function bindSetupView() {
-  document.getElementById('setup-save').addEventListener('click', async () => {
-    const binId = document.getElementById('setup-bin-id').value.trim();
-    const masterKey = document.getElementById('setup-master-key').value.trim();
-    if (!binId || !masterKey) {
-      showError('setup-error', 'Users bin ID and master key are required.');
-      return;
-    }
-    showError('setup-error', '');
-    saveConfig({ usersBinId: binId, masterKey });
-    setLogoSrc();
-    // Validate by attempting a fetch
-    try {
-      const record = await jbFetchUsers();
-      STATE.usersRecord = record;
-      if (!record.users || record.users.length === 0) {
-        showView('bootstrap');
-      } else {
-        showView('login');
-        focusLoginEmail();
-      }
-    } catch (e) {
-      showError('setup-error', e.message || 'Could not connect to JSONBin.');
-      clearDeviceConfig();
-    }
-  });
-}
- 
-// ============================================================
 //  BOOTSTRAP FIRST ADMIN
 // ============================================================
 function bindBootstrapView() {
@@ -3517,10 +3440,7 @@ function renderHubChrome() {
 //
 // In the Useful links section, per-tracker Gantts and Meetings are grouped
 // into "Gantts" and "Meetings" folder tiles to keep the section uncluttered.
-//
-// Per-objective Stage-gate tiles (Projects section):
-//   - One per assigned objective, provided the objective's tracker has a
-//     trackerUrl set. Stage-gate is the unified view (Q tracker is the same UI).
+
 function buildToolList(session) {
   const list = TOOLS.slice();
   const trackers = getConfiguredTrackers();
@@ -5502,7 +5422,6 @@ function openManageTrackersModal() {
     const trackers = getConfiguredTrackers();
     const rows = trackers.map((t, i) => {
       const urls = [];
-      urls.push(t.trackerUrl ? '<span style="color: var(--success);">tracker ✓</span>' : '<span style="color: var(--text-subtle);">tracker —</span>');
       urls.push(t.meetingPageUrl ? '<span style="color: var(--success);">meeting ✓</span>' : '<span style="color: var(--text-subtle);">meeting —</span>');
       urls.push(t.ganttUrl ? '<span style="color: var(--success);">gantt ✓</span>' : '<span style="color: var(--text-subtle);">gantt —</span>');
       if (t.companyLevel) urls.push('<span style="color: var(--accent-text);">company-level</span>');
@@ -5524,8 +5443,8 @@ function openManageTrackersModal() {
     `;
     }).join('');
     return `
-      <h3>Tracker bins</h3>
-      <p class="intro">Each tracker bin holds the objectives for one division. Users can be assigned objectives from any of these.</p>
+      <h3>Division links</h3>
+      <p class="intro">External links for each division — its Confluence meeting page and Gantt. These appear as tiles: in <em>Projects</em> for that division's lead, in <em>Useful links</em> otherwise.</p>
       <div id="manage-trackers-list" style="margin-bottom: 14px;">
         ${trackers.length ? rows : '<div class="obj-empty">No trackers configured yet.</div>'}
       </div>
@@ -5599,7 +5518,7 @@ function openTrackerEditModal(existing, onDone) {
   const esc = s => String(s || '').replace(/"/g, '&quot;');
   openModal(`
     <h3>${isEdit ? 'Edit' : 'Add'} tracker</h3>
-    <p class="intro">External links for one division — Confluence meeting page, Gantt, tracker UI. The internal ID is used in URLs and shouldn't change after first use.</p>
+    <p class="intro">External links for one division — its Confluence meeting page and Gantt. The internal ID is used in URLs and shouldn't change after first use.</p>
     <div id="tracker-edit-error" class="inline-error" style="display: none;"></div>
     <label class="field">
       <span class="label-row">Display name</span>
@@ -5616,11 +5535,6 @@ function openTrackerEditModal(existing, onDone) {
         ${_trackerDivisionOptions(existing)}
       </select>
       <div class="obj-picker-meta">Which division these links belong to. Decides whether the Gantt and Meeting page tiles land in <em>Projects</em> (for that division's lead) or <em>Useful links</em>.</div>
-    </label>
-    <label class="field">
-      <span class="label-row">Tracker URL <span class="subtle">(optional)</span></span>
-      <input type="text" id="tracker-url" autocomplete="off" value="${esc(existing && existing.trackerUrl)}" placeholder="https://...github.io/celadyne-tracker/">
-      <div class="obj-picker-meta">Used by Q tracker and Stage-gate tiles. Leave blank to skip those tiles for this tracker.</div>
     </label>
     <label class="field">
       <span class="label-row">Project Meeting Page URL <span class="subtle">(optional)</span></span>
@@ -5665,7 +5579,6 @@ function openTrackerEditModal(existing, onDone) {
     const name = document.getElementById('tracker-name').value.trim();
     const id = document.getElementById('tracker-id').value.trim();
     const divisionId = document.getElementById('tracker-division').value;
-    const trackerUrl = document.getElementById('tracker-url').value.trim();
     const meetingPageUrl = document.getElementById('meeting-page-url').value.trim();
     const ganttUrl = document.getElementById('gantt-url').value.trim();
     const companyLevel = document.getElementById('gantt-always-show').checked;
@@ -5681,7 +5594,7 @@ function openTrackerEditModal(existing, onDone) {
     // save/verify/roll-back dance existed only to prove one was readable.
     const trackers = getConfiguredTrackers().slice();
     const idx = trackers.findIndex(t => t.id === id);
-    const updated = { id, name, divisionId, trackerUrl, ganttUrl, meetingPageUrl, companyLevel };
+    const updated = { id, name, divisionId, ganttUrl, meetingPageUrl, companyLevel };
     if (idx >= 0) trackers[idx] = updated; else trackers.push(updated);
     try {
       await adminSaveTrackers(trackers);
@@ -6180,18 +6093,10 @@ function openChangePinModal() {
 async function boot() {
   STATE.config = loadConfig();
   setLogoSrc();
-  bindSetupView();
   bindBootstrapView();
   bindLoginView();
   bindDrawer();
- 
-  // No JSONBin config? → setup
-  if (!STATE.config.usersBinId || !STATE.config.masterKey) {
-    showView('setup');
-    return;
-  }
- 
-  // Have an active session? → straight to hub
+   // Have an active session? → straight to hub
   STATE.session = loadSession();
   if (STATE.session) {
     enterHub();
@@ -6209,8 +6114,12 @@ async function boot() {
       focusLoginEmail();
     }
   } catch (e) {
-    showView('setup');
-    showError('setup-error', e.message || 'Could not connect to JSONBin.');
+    // Config is baked in, so this is a real connectivity/credential failure,
+    // not a missing-setup case. Surface it on the login screen rather than the
+    // deleted setup view.
+    showView('login');
+    focusLoginEmail();
+    showError('login-error', e.message || 'Could not connect to the hub. Check your connection and try again.');
   }
 }
  
