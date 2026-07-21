@@ -244,6 +244,29 @@
     align-items: center;
     gap: 8px;
   }
+  /* Companion-app icons in the header — a small cluster, divided from the
+     edit/settings controls by a hairline. Each is a plain icon button that
+     opens its app in a new tab. */
+  .header-apps {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding-right: 8px;
+    margin-right: 2px;
+    border-right: 1px solid var(--border);
+  }
+  .app-link {
+    color: var(--text-subtle);
+    text-decoration: none;
+  }
+  .app-link:hover {
+    color: var(--accent);
+    background: var(--accent-bg);
+  }
+  .app-link i { font-size: 18px; }
+  @media (max-width: 600px) {
+    .header-apps { display: none; }   /* header stays uncluttered on narrow screens */
+  }
   .user-pill {
     display: flex;
     align-items: center;
@@ -792,6 +815,8 @@
     background: currentColor;
     flex-shrink: 0;
   }
+
+  /* Stage-gate bubbles (mirrors the active panel of the Gantt) */
 
   /* ---- OKR view tile body ---- */
   .tile-okr-empty {
@@ -1510,6 +1535,9 @@
 </div>
  
 <!-- ============================================================ -->
+<!-- SETUP (first device run / no JSONBin config)                  -->
+<!-- ============================================================ -->
+<!-- ============================================================ -->
 <!-- BOOTSTRAP FIRST ADMIN                                         -->
 <!-- ============================================================ -->
 <div id="view-bootstrap" class="view">
@@ -1580,6 +1608,12 @@
       <span class="brand-name">Celadyne Employee Hub</span>
     </div>
     <div class="header-right">
+      <nav class="header-apps" aria-label="Companion apps">
+        <a class="btn btn-icon app-link" id="app-link-planning" target="_blank" rel="noopener" aria-label="Planning app" title="Planning app"><i class="ti ti-timeline" aria-hidden="true"></i></a>
+        <a class="btn btn-icon app-link" id="app-link-execution" target="_blank" rel="noopener" aria-label="Execution app" title="Execution app"><i class="ti ti-checklist" aria-hidden="true"></i></a>
+        <a class="btn btn-icon app-link" id="app-link-sales" target="_blank" rel="noopener" aria-label="Sales app" title="Sales app"><i class="ti ti-businessplan" aria-hidden="true"></i></a>
+        <a class="btn btn-icon app-link" id="app-link-design" target="_blank" rel="noopener" aria-label="Product design app" title="Product design app"><i class="ti ti-vector-bezier-2" aria-hidden="true"></i></a>
+      </nav>
       <button class="btn btn-icon" id="header-edit-btn" aria-label="Edit dashboard" title="Edit dashboard">
         <i class="ti ti-pencil" aria-hidden="true" style="font-size: 18px;"></i>
       </button>
@@ -1697,7 +1731,7 @@ const CONFIG_DEFAULTS = {
   // brokerToken is NOT baked in — an admin sets it once in the shared hub config
   // bin and every user picks it up from there (see refreshHubConfig).
   brokerUrl: 'https://web-production-b17a2.up.railway.app',
-  brokerToken: 'vpjshbfgtplybz5sfbjfcomygtcunkn1',
+  brokerToken: '',
   // Where objective tiles point. The execution app takes ?division=&objective=
   // &readonly as deep-link params, so a tile can land on the exact objective.
   // Biz (kind:'biz') divisions execute in the SALES app, not the execution app —
@@ -1705,6 +1739,8 @@ const CONFIG_DEFAULTS = {
   // deep-link params, different shell; objectiveUrl routes by divisionKind.
   executionAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/execution_app.html',
   salesAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/sales_app.html',
+  // Product design app — header icon target. TODO: replace with the real URL.
+  designAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/design_app.html',
   // Where per-division Gantt tiles point. The planning app renders a division's
   // Gantt from ?present&division=&tab=gantt&ganttquarter=1, so the tile is
   // derived from the division id — no per-division URL to store.
@@ -1752,20 +1788,38 @@ function getSafetyClient() {
 // whatever it receives and an empty one would wipe a good token from a prior
 // visit. Returns '' when the planning app is unconfigured, so callers can skip
 // the tile the same way a missing URL used to.
-function ganttUrlForDivision(divisionId) {
-  const base = ((STATE.config && STATE.config.planningAppUrl) || '').trim();
-  if (!base) return '';
-  const sep = base.includes('?') ? '&' : '?';
-  const tok = ((STATE.config && STATE.config.brokerToken) || '').trim();
-  return `${base}${sep}present&division=${encodeURIComponent(divisionId || '')}` +
-         `&tab=gantt&ganttquarter=1` +
-         (tok ? `&token=${encodeURIComponent(tok)}` : '');
-}
-function meetingPageUrlFor(tracker) {
-  return (tracker && tracker.meetingPageUrl) || null;
-}
 
 const TOOLS = [
+  // ── Meetings section (static links; edit the URLs below) ──────────────────
+  // These three render as the "Meetings" section under Projects. Replace the
+  // placeholder URLs with the real meeting pages/links.
+  {
+    id: 'meeting-company',
+    name: 'Celadyne Company Meeting',
+    description: 'All-hands',
+    icon: 'users-group',
+    url: 'https://example.com/celadyne-company-meeting', // TODO: replace with real meeting URL
+    section: 'meetings',
+    fetchStatus: async () => ({ text: 'Open', severity: 'subtle' })
+  },
+  {
+    id: 'meeting-fuel-cell',
+    name: 'Fuel Cell Meeting',
+    description: 'Division sync',
+    icon: 'battery-charging',
+    url: 'https://example.com/fuel-cell-meeting', // TODO: replace with real meeting URL
+    section: 'meetings',
+    fetchStatus: async () => ({ text: 'Open', severity: 'subtle' })
+  },
+  {
+    id: 'meeting-electrolyzer',
+    name: 'Electrolyzer Meeting',
+    description: 'Division sync',
+    icon: 'droplet',
+    url: 'https://example.com/electrolyzer-meeting', // TODO: replace with real meeting URL
+    section: 'meetings',
+    fetchStatus: async () => ({ text: 'Open', severity: 'subtle' })
+  },
   {
     id: 'timesheets',
     name: 'Timesheets',
@@ -2296,7 +2350,6 @@ async function adminSaveTrackers(trackers) {
     toast(`Saved locally; failed to share: ${err.message}`, 'error');
   }
 }
-
 // ═════════════════════════════════════════════════════════════════════════════
 //  IDENTITY — NEW STACK  (divisions + derived ownership)
 //
@@ -2316,6 +2369,7 @@ async function adminSaveTrackers(trackers) {
 //  deletes the old layer. Doing the deletions here would empty Projects and
 //  Leadership in the window before Stage 3 lands.
 // ═════════════════════════════════════════════════════════════════════════════
+
 
 // Divisions this user leads. CTO leads every division, matching the old rule
 // that the CTO leads every tracker.
@@ -2469,6 +2523,8 @@ function objectiveSection(session, o) {
   if (leadershipTileDivisions(session).includes(o.divisionId)) return 'leadership';
   return 'watching';
 }
+
+// Find the current CTO, if any. Used by the user-edit modal to enforce single-CTO.
 function findExistingCTO(usersRecord, exceptEmail) {
   const except = exceptEmail ? normaliseEmail(exceptEmail) : null;
   return (usersRecord.users || []).find(u => u.orgRole === 'cto' && normaliseEmail(u.email) !== except) || null;
@@ -2527,7 +2583,6 @@ function findTracker(trackerId) {
 function trackersConfigured() {
   return getConfiguredTrackers().length > 0;
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared hub config (Option C — tracker list lives in JSONBin, not localStorage).
 //
@@ -2726,10 +2781,12 @@ async function loadPortfolio() {
   // Keyed by BARE division id, matching the apps' execMap() (they strip 'EXEC-').
   STATE.execDocs = execDocs;
   STATE.specDocs = specDocs;
-  // This is fullEm() = withPortfolio(portfolio, {...execMap(), ...specMap()}).
-  // The differing key shapes are deliberate and safe — execFor(divisionId) looks
-  // up the bare key, so a SPEC- key can never shadow a division's exec doc, and
-  // the resolvers iterate every key regardless.
+  // RDCore wants the portfolio folded in under PORTFOLIO_KEY for cross-doc KPI
+  // resolution — the same call the apps make. Spec docs go in alongside, under
+  // their SPEC- prefixed keys: this is fullEm() = withPortfolio(portfolio,
+  // {...execMap(), ...specMap()}). The differing key shapes are deliberate and
+  // safe — execFor(divisionId) looks up the bare key, so a SPEC- key can never
+  // shadow a division's exec doc, and the resolvers iterate every key regardless.
   STATE.pfMap = window.RDCore.withPortfolio(portfolio,
     Object.assign({}, execDocs, specDocs));
   // The schedule cascade: projected ends, slip, gate effective dates. Computed
@@ -2793,6 +2850,13 @@ function initiativeLabel(id) { return _pfLabel(STATE.portfolio && STATE.portfoli
 // Objective tiles deep-link into the execution app, read-only: ?division= and
 // ?objective= are its own params, and ?readonly keeps a browsing click out of an
 // editable surface.
+// Owners land in the editable app; everyone else lands read-only.
+//
+// The asymmetry is the point. An owner clicking their own objective is going
+// there to change something, and bouncing them to a read-only view means a
+// second navigation every time. A lead clicking into a division they oversee is
+// going there to look — handing them an editable surface over someone else's
+// work invites an accidental edit that the owner never sees happen.
 // ---- Projected OKR score ------------------------------------------------
 // Replaces the on-track/at-risk tag with a forecast of where the objective
 // lands. base = min(measured OKR, gate-implied) keeps it conservative; the
@@ -2876,6 +2940,7 @@ function rdToday() { return Math.round((Date.now() - RD_EPOCH) / 86400000); }
 // that trips the schedule alarm". Same value, deliberately — a Hub that glowed at
 // 7d while the execution app stayed calm would make one of the two a liar.
 const CATCHUP_SLIP_THRESHOLD = 10;
+
 function rdDayToIso(d) {
   return (d == null) ? '' : new Date(RD_EPOCH + d * 86400000).toISOString().slice(0, 10);
 }
@@ -2972,6 +3037,7 @@ function gateLanesForObjective(objId) {
     };
   });
 }
+
 // Every KPI across every loaded doc, flattened. Mirrors the apps' poolOf(): the
 // effTarget/effValue/kpiUnit resolvers walk a KPI's parent chain through this
 // pool, so they need the whole set, not just one doc's.
@@ -2986,25 +3052,6 @@ function kpiPool() {
   return out;
 }
 
-// Key results in the shape renderOkrBody actually reads.
-//
-// It reads kr.name and kr.score. RDCore's key results carry `.statement`, and
-// the score is a FUNCTION of the id, not a field — so handing the raw records
-// straight to the renderer (which is what this did) produced a blank label and a
-// 0% bar on every row: `escText(undefined)` renders empty, and
-// `Number(undefined) || 0` is 0. Both failed quietly and looked like styling.
-// Key result rows for the objective tile: dot | name | Target | Now.
-//
-// Mirrors the app's ovKrRows. Two things it does that are easy to get wrong:
-// the label is `.statement` (RDCore key results have no `.name`), and the score
-// is keyResultScore(id) — a FUNCTION, not a field. Handing the raw records to a
-// renderer yields a blank label and a 0% bar, quietly, on every row.
-//
-// Target/Now come from the FIRST kpi hosting the KR, matching the app. With
-// several, the first is shown rather than none: the row is a summary, and the KPI
-// view is where the full set lives.
-// Key result rows for the objective tile.
-//
 // Key result rows for the objective tile.
 //
 // Two things that are easy to get wrong: the label is `.statement` (RDCore key
@@ -3066,13 +3113,7 @@ function rdNum(v) {
   if (!isFinite(n)) return String(v);
   return (Math.abs(n) >= 100 || Number.isInteger(n)) ? String(Math.round(n)) : String(Math.round(n * 100) / 100);
 }
-// Schedule line for an objective: "12d left" / "3d overdue" / "ended 2026-05-01",
-// plus the slip in days. Mirrors ovObjTile's daysStr/schedChip exactly.
-//
-// The projected end comes from the cascade, which resolves the LATEST binding
-// gate across ALL of an objective's workstreams — not the lane you happen to be
-// looking at. That is why the tile can read "+28d slip" when every dot in lane A
-// is green: lane B is what moved the date.
+
 // Schedule line for an objective: "12d left" / "3d overdue" / "ended 2026-05-01",
 // plus the slip in days. Mirrors ovObjTile's daysStr/schedChip exactly.
 //
@@ -3108,6 +3149,7 @@ function scheduleOf(o, end, workSlip) {
   // gates 10d late each compound to 30d rather than reporting the worst one.
   return { text, slip: (workSlip != null && workSlip > 0) ? workSlip : null, projectedEnd: eff };
 }
+
 // Format a KPI target for display. A 'range' KPI's target is an OBJECT
 // {lo, hi}, not a number — String() on it renders "[object Object]". Mirrors
 // execution_app's fmtTarget.
@@ -3332,6 +3374,8 @@ window.__rdDiag = async function () {
   return out;
 };
 
+                                            
+
 // Read the canonical project ID. IDs in storage may be numeric; coerce to string
 // so URL params, comparisons, and Set membership work consistently throughout.
 function projectId(p) {
@@ -3509,6 +3553,7 @@ function relativeTime(ts) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
  
+ 
 // ============================================================
 //  BOOTSTRAP FIRST ADMIN
 // ============================================================
@@ -3676,7 +3721,7 @@ async function refreshHubConfig() {
       data.salesAppUrl !== STATE.config.salesAppUrl) brokerPatch.salesAppUrl = data.salesAppUrl;
   if (typeof data.planningAppUrl === 'string' &&
       data.planningAppUrl !== STATE.config.planningAppUrl) brokerPatch.planningAppUrl = data.planningAppUrl;
-    if (Object.keys(brokerPatch).length) {
+  if (Object.keys(brokerPatch).length) {
     Object.assign(STATE.config, brokerPatch);
     saveConfig(brokerPatch);   // local-device cache only, same as the trackers path
   }
@@ -3761,6 +3806,24 @@ function renderHubChrome() {
   const initials = initialsFor(s.email);
   document.getElementById('header-avatar').textContent = initials;
   document.getElementById('header-email').textContent = s.email;
+  // Companion-app header icons: point each at its configured URL (broker-overridable),
+  // appending the broker token when present, exactly like the objective/app links.
+  // An icon with no configured URL is hidden rather than left dangling.
+  (function setAppLinks() {
+    const cfg = STATE.config || {};
+    const tok = (cfg.brokerToken || '').trim();
+    const withTok = (u) => { if (!u) return ''; const b = u.trim(); if (!b) return ''; return b + (b.includes('?') ? '&' : '?') + (tok ? 'token=' + encodeURIComponent(tok) : ''); };
+    [['app-link-planning', cfg.planningAppUrl],
+     ['app-link-execution', cfg.executionAppUrl],
+     ['app-link-sales', cfg.salesAppUrl],
+     ['app-link-design', cfg.designAppUrl]].forEach(([id, url]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const href = withTok(url);
+      if (href) { el.href = href; el.style.display = ''; }
+      else { el.removeAttribute('href'); el.style.display = 'none'; }
+    });
+  })();
   document.getElementById('drawer-avatar').textContent = initials;
   document.getElementById('drawer-email').textContent = s.email;
   document.getElementById('drawer-role-line').textContent =
@@ -3791,130 +3854,13 @@ function renderHubChrome() {
   document.getElementById('drawer-admin-section').style.display =
     s.role === 'admin' ? 'block' : 'none';
 }
-// Build the full tile list: static TOOLS plus dynamic tiles generated from
-// configured trackers and the current user's assigned objectives.
-//
-// Per-tracker Meeting Page and Gantt tiles share the same routing rules:
-//   - companyLevel → Useful links (always, regardless of assignment)
-//   - Otherwise: assigned → Projects, unassigned → Useful links
-//   - No admin override (admins follow the same rule)
-//
-// In the Useful links section, per-tracker Gantts and Meetings are grouped
-// into "Gantts" and "Meetings" folder tiles to keep the section uncluttered.
-
+// Build the full tile list: static TOOLS plus objective tiles generated from
+// the current user's portfolio. (Per-tracker Meeting Page tiles and per-division
+// Gantt tiles were removed — meetings are now a static section, and division
+// Gantts are reached from the header's planning-app icon.)
 function buildToolList(session) {
   const list = TOOLS.slice();
   const trackers = getConfiguredTrackers();
-  // Section routing for a division's link tiles (Meeting Page + Gantt).
-  //
-  // This used to ask two questions — do you have an assignment in this tracker,
-  // and do you lead it — against legacy tracker ids. Assignments are derived from
-  // the portfolio now and carry no tracker, so only leadership remains, asked of
-  // the division the entry points at.
-  //
-  // An entry with no divisionId routes to links: that is the honest answer for
-  // "we don't know whose this is" and it is what an unmigrated entry does until
-  // an admin picks its division.
-  function sectionFor(t) {
-    if (t.companyLevel) return 'links';
-    if (t.divisionId && leadsDivision(session, t.divisionId)) return 'projects';
-    return 'links';
-  }
-
-  // Accumulate links-bound per-tracker tiles for the folder bundles.
-  const linksGantts = [];
-  const linksMeetings = [];
-
-  // 1) Per-tracker Meeting Page tiles
-  trackers.forEach(t => {
-    const url = meetingPageUrlFor(t);
-    if (!url) return;
-    const section = sectionFor(t);
-    const tile = {
-      id: `meeting__${t.id}`,
-      name: `${t.name} project meetings`,
-      description: section === 'projects'
-        ? 'Confluence meeting page'
-        : 'Confluence meeting page',
-      icon: 'calendar-event',
-      url,
-      section,
-      fetchStatus: async () => ({ text: 'Open page', severity: 'subtle' })
-    };
-    if (section === 'projects') {
-      list.push(tile);
-    } else {
-      linksMeetings.push(tile);
-    }
-  });
-
-  // 2) Per-division Gantt tiles. Derived from the portfolio, not from tracker
-  //    entries: every division gets one, keyed on its id, whether or not anyone
-  //    configured a links entry for it. Routes to Projects for that division's
-  //    lead, Useful links otherwise — the same split sectionFor gives the
-  //    meeting tiles, but asked of the division directly.
-  const _pfDivisions = (STATE.portfolio && Array.isArray(STATE.portfolio.divisions))
-    ? STATE.portfolio.divisions : [];
-  _pfDivisions.forEach(d => {
-    if (!d || !d.id) return;
-    const url = ganttUrlForDivision(d.id);
-    if (!url) return;                      // planning app unconfigured
-    const led = leadsDivision(session, d.id);
-    const tile = {
-      id: `gantt__${d.id}`,
-      name: `${d.name || d.id} Gantt`,
-      description: led ? 'Project timelines and stage-gates' : 'Project timelines',
-      icon: 'chart-gantt',
-      url,
-      section: led ? 'projects' : 'links',
-      fetchStatus: async () => ({ text: 'Open chart', severity: 'subtle' })
-    };
-    if (led) {
-      list.push(tile);
-    } else {
-      linksGantts.push(tile);
-    }
-  });
-
-  // 3) Folder tiles for the Useful links section
-  if (linksGantts.length) {
-    list.push({
-      id: 'gantts-folder',
-      name: 'Gantts',
-      description: 'Gantts for divisions outside your own',
-      icon: 'chart-gantt',
-      section: 'links',
-      isFolder: true,
-      folder: {
-        title: 'Gantts',
-        intro: 'Project timelines for divisions outside your assigned work.',
-        sections: [{ id: 'all', tiles: linksGantts }]
-      },
-      fetchStatus: async () => ({
-        text: `${linksGantts.length} division${linksGantts.length === 1 ? '' : 's'}`,
-        severity: 'subtle'
-      })
-    });
-  }
-  if (linksMeetings.length) {
-    list.push({
-      id: 'meetings-folder',
-      name: 'Meetings',
-      description: 'Reference meeting pages across trackers',
-      icon: 'calendar-event',
-      section: 'links',
-      isFolder: true,
-      folder: {
-        title: 'Meetings',
-        intro: 'Confluence meeting pages for trackers outside your assigned work.',
-        sections: [{ id: 'all', tiles: linksMeetings }]
-      },
-      fetchStatus: async () => ({
-        text: `${linksMeetings.length} tracker${linksMeetings.length === 1 ? '' : 's'}`,
-        severity: 'subtle'
-      })
-    });
-  }
 
   // ───────────────────────────────────────────────────────────────────────────
   // 4-NEW) Objective tiles from the portfolio (the flip).
@@ -4165,55 +4111,6 @@ function formatOnShift(checkedInAt) {
   return `${h}h ${m}m on shift`;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Company-bin matching for stage-gate tiles.
-//
-// Tiles display data sourced from the company-wide Gantt (the tracker with
-// `companyLevel: true`), matched to the user's assignment by objective name.
-// Click behavior still uses the divisional bin's slug — the URL goes to the
-// divisional tracker, but the *content* of the tile reflects the company plan.
-//
-// Falls back to the divisional bin when no company match is found, so
-// nothing breaks during rollout while company-bin coverage is incomplete.
-// ─────────────────────────────────────────────────────────────────────────────
-function getCompanyTracker() {
-  const trackers = getConfiguredTrackers();
-  return trackers.find(t => t.companyLevel) || null;
-}
-function findCompanyMatch(name) {
-  if (!name) return null;
-  const company = getCompanyTracker();
-  if (!company) return null;
-  const snapshot = getSnapshot(company.id);
-  if (!snapshot || !snapshot.objectives) return null;
-  const target = String(name).toLowerCase().trim();
-  for (const id of Object.keys(snapshot.objectives)) {
-    const obj = snapshot.objectives[id];
-    if (obj && obj.name && obj.name.toLowerCase().trim() === target) {
-      return { tracker: company, id, obj };
-    }
-  }
-  return null;
-}
-
-// Resolve the richest snapshot entry for an objective: prefer the company-bin
-// twin (by name match) since only rd-gantt's snapshot carries grouping
-// attributes + OKR/KPI data; fall back to the objective's own divisional entry.
-// Returns the snapshot objective object, or null. Used to stamp grouping attrs
-// (division/productLine/productModel) and OKR/KPI data onto tiles.
-function getObjectiveData(trackerId, objId, name) {
-  const company = getCompanyTracker();
-  // Company match first (richest data), unless this tile IS the company bin.
-  if (company && company.id !== trackerId) {
-    const m = findCompanyMatch(name);
-    if (m && m.obj) return m.obj;
-  }
-  // Divisional (or company-bin self) fallback.
-  const snap = getSnapshot(trackerId);
-  const obj = snap && snap.objectives && snap.objectives[String(objId)];
-  return obj || null;
-}
-
 // Build the days line from a gates array. Returns a string like:
 //   "8 days past gate due"    — at least one gate is overdue (most urgent wins)
 //   "5 days ahead · 12 until next gate" — last passed gate was passed early
@@ -4299,27 +4196,9 @@ const STATUS_SEVERITIES = {
   complete: 'success'
 };
 
-// Render one dot row per workstream. A lone workstream renders exactly as before
-// (no label), so nothing changes for the common case; multiple workstreams get
-// the same A/B/C letters the planning app uses, with the set name on hover.
-function renderGateLanesHtml(lanes) {
-  if (!lanes || !lanes.length) return '';
-  const escAttr = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
-  const escText = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  return lanes.map(l => {
-    const row = renderGateBubblesHtml(l.gates);
-    if (!row) return '';
-    const lbl = l.label
-      ? `<span class="tile-gate-lane" title="${escAttr(l.name)}">${escText(l.label)}</span>`
-      : '';
-    return lbl ? `<div class="tile-gate-row">${lbl}${row}</div>` : row;
-  }).join('');
-}
-
-// Just the dot track — no header. Split out because renderObjectiveBody renders
-// one row PER WORKSTREAM under a header it writes itself; calling the full
-// renderGateBubblesHtml per lane printed a second "Gates x/y" header inside every
-// workstream, under the workstream's own.
+// The gate dot track. Emits no header of its own: renderObjectiveBody writes the
+// section line and one header PER WORKSTREAM, so a renderer that also wrote one
+// would print the same numbers twice inside every lane.
 function renderGateDotsHtml(gates) {
   if (!gates || !gates.length) return '';
   const escAttr = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
@@ -4355,6 +4234,9 @@ function renderGateDotsHtml(gates) {
 //                     The company tracker is always pulled in additionally for
 //                     overlay, but only emitted if it's in includeTrackers.
 //
+// Each item: { tracker, id, name, score, status, progress, daysLeft, delayDays,
+//              isComplete, isActive, parentName, gates, slug, division,
+//              productLine, productModel, ...labels, keyResults, kpis }.
 // Modal rows sourced from the portfolio. Returns the SAME item shape
 // gatherObjectivesFromSnapshots does — including `tracker` as an {id,name}
 // object — so the modal's build loop, search, dropdowns, select-all and every
@@ -4382,9 +4264,6 @@ function gatherObjectivesFromPortfolio() {
   });
   return out;
 }
-// Each item: { tracker, id, name, score, status, progress, daysLeft, delayDays,
-//              isComplete, isActive, parentName, gates, slug, division,
-//              productLine, productModel, ...labels, keyResults, kpis }.
 
 function escAttr(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
 function escText(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
@@ -4395,6 +4274,7 @@ function escText(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').r
 const TILE_SECTIONS = [
   { id: 'safety',     label: 'Safety' },
   { id: 'projects',   label: 'Projects' },
+  { id: 'meetings',   label: 'Meetings' },
   { id: 'leadership', label: 'Leadership' },
   { id: 'watching',   label: 'Watching' },
   { id: 'analysis',   label: 'Analysis' },
@@ -4407,17 +4287,14 @@ const TILE_SECTIONS = [
 // unlabeled grid before the labeled subsections (so future tiles won't be lost).
 const PROJECTS_SUBSECTIONS = [
   { id: 'objective',   label: 'Objectives',  match: id => id.startsWith('obj__objective__') || id.startsWith('stage-gate__') || id.startsWith('obj__stagegate__') || id.startsWith('obj__okr__') },
-  { id: 'kpi',         label: 'KPIs',        match: id => id.startsWith('obj__kpi__') },
-  { id: 'meetings',    label: 'Meetings',    match: id => id.startsWith('meeting__') },
-  { id: 'gantts',      label: 'Gantts',      match: id => id.startsWith('gantt__') }
+  { id: 'kpi',         label: 'KPIs',        match: id => id.startsWith('obj__kpi__') }
 ];
 
 // Sub-sections for objective tiles in the Watching section (and, in Stage 2,
 // Leadership). Same view-type grouping as Projects, minus the tracker-level
 // meetings/gantts (which never route to Watching).
 const OBJECTIVE_SUBSECTIONS = [
-  { id: 'stage-gates', label: 'Stage-gates', match: id => id.startsWith('stage-gate__') || id.startsWith('obj__stagegate__') },
-  { id: 'okr',         label: 'OKR',         match: id => id.startsWith('obj__okr__') },
+  { id: 'objective',   label: 'Objectives',  match: id => id.startsWith('obj__objective__') || id.startsWith('stage-gate__') || id.startsWith('obj__stagegate__') || id.startsWith('obj__okr__') },
   { id: 'kpi',         label: 'KPIs',        match: id => id.startsWith('obj__kpi__') }
 ];
 
@@ -4434,7 +4311,6 @@ const VIEW_TYPES = {
 // Legacy view keys → the merged one. Used by the migrations below; kept as data
 // so the mapping is stated once rather than re-guessed at each call site.
 const LEGACY_VIEW_MAP = { stagegate: 'objective', okr: 'objective' };
-
 // View types selectable in the picker. Stage 4 unlocks all three.
 const ACTIVE_VIEW_TYPES = ['objective', 'kpi'];
 
@@ -4612,6 +4488,9 @@ function kpiDirectionCue(direction) {
   return '↑'; // 'up' / unset
 }
 
+// Render the OKR-view tile body: one row per Key Result, each with a mini
+// progress bar + score number (color-coded by score), and a target/current
+// sub-line for KPI-type KRs. Shows all KRs (no truncation).
 // How many KPIs to show under a key result before collapsing to "+N more". A
 // display cap, not a data one — okrRowsForObjective returns them all.
 const KR_KPI_CAP = 2;
@@ -4704,6 +4583,7 @@ function renderObjectiveBody(view) {
           <span class="ov-krname" title="${escAttr(r.name)}">${escText(r.name)}</span>
           <span class="ov-krpct ${bandClass(r.band)}">${has ? Math.round(r.score) + '%' : '\u2014'}</span>
         </div>${body}`;
+
     }).join('');
     krBlock = `<div class="ov-sec"><div class="ov-seclbl">Key results</div>${rows}</div>`;
   } else {
@@ -5469,7 +5349,7 @@ async function addConfiguredTilesBatch(picks, viewType) {
   let added = 0, skipped = 0;
   picks.forEach(p => {
     if (!p || p.id == null) return;
-        const key = keyOf(p.tracker, p.id, vt);
+    const key = keyOf(p.tracker, p.id, vt);
     if (seen.has(key)) { skipped++; return; }
     seen.add(key);
     // Deliberately NO tracker field: there are no trackers, and writing a
@@ -5752,7 +5632,6 @@ async function fetchTileStatuses() {
         el.innerHTML = `<span class="dot"></span><span>${result.text}</span>`;
       }
       if (sev === 'warning' || sev === 'danger') urgentCount++;
-      
       // Optional: status tag in the tile head (stage-gate tiles only).
       if (result.badge !== undefined) {
         const badgeEl = document.querySelector(`[data-badge="${tool.id}"]`);
@@ -6052,6 +5931,7 @@ function openTrackerEditModal(existing, onDone) {
 function _leadCount(user) {
   return (user && Array.isArray(user.leadDivisions)) ? user.leadDivisions.length : 0;
 }
+
 async function renderUserList() {
   const list = document.getElementById('drawer-user-list');
   list.innerHTML = '<div class="tiny muted" style="padding: 10px 0;">Loading users…</div>';
@@ -6307,6 +6187,7 @@ function readOrgRoleField() {
     : [];
   return { orgRole, leadDivisions, leadUnits };
 }
+
 // Demote any existing CTO other than `exceptEmail` to IC. Mutates `record`.
 function enforceSingleCTO(record, exceptEmail) {
   const except = exceptEmail ? normaliseEmail(exceptEmail) : null;
@@ -6584,7 +6465,8 @@ async function boot() {
   bindBootstrapView();
   bindLoginView();
   bindDrawer();
-   // Have an active session? → straight to hub
+ 
+  // Have an active session? → straight to hub
   STATE.session = loadSession();
   if (STATE.session) {
     enterHub();
