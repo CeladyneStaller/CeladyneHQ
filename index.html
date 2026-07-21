@@ -1731,7 +1731,7 @@ const CONFIG_DEFAULTS = {
   // brokerToken is NOT baked in — an admin sets it once in the shared hub config
   // bin and every user picks it up from there (see refreshHubConfig).
   brokerUrl: 'https://web-production-b17a2.up.railway.app',
-  brokerToken: '',
+  brokerToken: 'vpjshbfgtplybz5sfbjfcomygtcunkn1',
   // Where objective tiles point. The execution app takes ?division=&objective=
   // &readonly as deep-link params, so a tile can land on the exact objective.
   // Biz (kind:'biz') divisions execute in the SALES app, not the execution app —
@@ -1740,7 +1740,7 @@ const CONFIG_DEFAULTS = {
   executionAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/execution_app.html',
   salesAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/sales_app.html',
   // Product design app — header icon target. TODO: replace with the real URL.
-  designAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/design_app.html',
+  designAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/product_designer.html',
   // Where per-division Gantt tiles point. The planning app renders a division's
   // Gantt from ?present&division=&tab=gantt&ganttquarter=1, so the tile is
   // derived from the division id — no per-division URL to store.
@@ -1798,7 +1798,7 @@ const TOOLS = [
     name: 'Celadyne Company Meeting',
     description: 'All-hands',
     icon: 'users-group',
-    url: 'https://example.com/celadyne-company-meeting', // TODO: replace with real meeting URL
+    url: 'https://celadyne.atlassian.net/wiki/spaces/CT/folder/2640478230', // TODO: replace with real meeting URL
     section: 'meetings',
     fetchStatus: async () => ({ text: 'Open', severity: 'subtle' })
   },
@@ -1807,7 +1807,7 @@ const TOOLS = [
     name: 'Fuel Cell Meeting',
     description: 'Division sync',
     icon: 'battery-charging',
-    url: 'https://example.com/fuel-cell-meeting', // TODO: replace with real meeting URL
+    url: 'https://celadyne.atlassian.net/wiki/spaces/CT/folder/3115646977', // TODO: replace with real meeting URL
     section: 'meetings',
     fetchStatus: async () => ({ text: 'Open', severity: 'subtle' })
   },
@@ -1816,7 +1816,7 @@ const TOOLS = [
     name: 'Electrolyzer Meeting',
     description: 'Division sync',
     icon: 'droplet',
-    url: 'https://example.com/electrolyzer-meeting', // TODO: replace with real meeting URL
+    url: 'https://celadyne.atlassian.net/wiki/spaces/CT/folder/3108569113', // TODO: replace with real meeting URL
     section: 'meetings',
     fetchStatus: async () => ({ text: 'Open', severity: 'subtle' })
   },
