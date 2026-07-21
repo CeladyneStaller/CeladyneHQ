@@ -4675,7 +4675,7 @@ function renderRollupStrip(wrap, session) {
     const kindLabel = r.kind === 'company' ? 'mean of divisions'
                     : r.kind === 'unit' ? 'unit rollup' : 'division rollup';
     card.innerHTML =
-      '<span class="rollup-label">' + esc(r.label) + '</span>' +
+      '<span class="rollup-label">' + escText(r.label) + '</span>' +
       '<span class="rollup-score ' + cls + '">' + (has ? Math.round(r.score) : '\u2014') + '</span>' +
       '<span class="rollup-kind">' + kindLabel + '</span>';
     strip.appendChild(card);
