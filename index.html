@@ -11,35 +11,41 @@
 <title>Celadyne Employee Hub</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.4.0/dist/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   :root {
-    --bg: #FAF9F5;
+    /* Unified Light — matches the suite's landing page (Space Grotesk / Inter /
+       IBM Plex Mono, teal accent, cool near-white ground, hairline lines). */
+    --bg: #F3F5F8;
     --surface: #FFFFFF;
-    --surface-alt: #F2F0E9;
-    --border: rgba(15,15,14,0.08);
-    --border-strong: rgba(15,15,14,0.16);
-    --text: #1A1A18;
-    --text-muted: #6B6B66;
-    --text-subtle: #9C9B92;
-    --accent: #0F766E;
-    --accent-hover: #0A5853;
-    --accent-bg: #E5F1EF;
-    --accent-text: #0A4F4A;
-    --warning: #92590C;
-    --warning-bg: #FBEFD3;
-    --success: #166534;
-    --success-bg: #DEF0E2;
-    --danger: #9F1818;
-    --danger-bg: #F9E2E2;
+    --surface-alt: #EEF1F5;
+    --border: #E2E6EC;
+    --border-strong: #CFD5DE;
+    --text: #1A2431;
+    --text-muted: #5C6B7D;
+    --text-subtle: #8B97A6;
+    --accent: #157A6B;
+    --accent-hover: #0E5A4D;
+    --accent-bg: #E4F0EE;
+    --accent-text: #0E5A4D;
+    --warning: #8A5A13;
+    --warning-bg: #FAEEDA;
+    --success: #3B6D11;
+    --success-bg: #EAF3DE;
+    --danger: #A32D2D;
+    --danger-bg: #FCEBEB;
     --radius: 8px;
     --radius-lg: 12px;
     --radius-pill: 999px;
     --indent-step: 16px;
-    --shadow-card: 0 1px 0 rgba(15,15,14,0.04);
-    --shadow-elev: 0 1px 2px rgba(15,15,14,0.04), 0 12px 32px rgba(15,15,14,0.08);
+    /* Type roles: display for names/numbers, sans for body, mono for data/labels. */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-disp: 'Space Grotesk', var(--font-sans);
+    --font-mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+    --shadow-card: 0 1px 0 rgba(26,36,49,0.03);
+    --shadow-elev: 0 1px 2px rgba(26,36,49,0.05), 0 12px 32px rgba(26,36,49,0.10);
   }
  
   * { box-sizing: border-box; }
@@ -47,14 +53,14 @@
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: var(--font-sans);
     font-size: 15px;
     line-height: 1.5;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  .mono { font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace; }
+  .mono { font-family: var(--font-mono); }
  
   /* Layout shells */
   .view { display: none; }
@@ -295,11 +301,12 @@
     margin-bottom: 0;
   }
   .tile-section-head {
-    font-size: 17px;
+    font-family: var(--font-mono);
+    font-size: 12px;
     font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text);
+    letter-spacing: 0.16em;
+    color: var(--accent);
     margin: 0 0 14px;
     padding: 0 4px;
     cursor: pointer;
@@ -424,8 +431,10 @@
     flex-shrink: 0;
   }
   .tile-name {
-    font-size: 15px;
-    font-weight: 500;
+    font-family: var(--font-disp);
+    font-size: 15.5px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     color: var(--text);
     flex: 1;
     min-width: 0;
@@ -436,9 +445,11 @@
   /* Status badge in stage-gate tile heads. Empty by default — populated by
      the runner once the company-bin snapshot resolves. */
   .tile-badge {
+    font-family: var(--font-mono);
     font-size: 10px;
-    font-weight: 700;
-    padding: 2px 7px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 3px 9px;
     border-radius: 10px;
     flex-shrink: 0;
     line-height: 1.4;
@@ -469,14 +480,14 @@
     border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
   }
   .rollup-card.rollup-company { border-color: var(--border-strong); }
-  .rollup-label { font-size: 10px; font-weight: 600; letter-spacing: .03em;
+  .rollup-label { font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: .06em;
                   text-transform: uppercase; color: var(--text-subtle); }
-  .rollup-score { font-size: 24px; font-weight: 700; line-height: 1.1;
+  .rollup-score { font-family: var(--font-disp); font-size: 26px; font-weight: 600; line-height: 1.05;
                   font-variant-numeric: tabular-nums; color: var(--text-subtle); }
   .rollup-score.ontrack { color: #3B6D11; }
   .rollup-score.watch   { color: #854F0B; }
   .rollup-score.atrisk  { color: #A32D2D; }
-  .rollup-kind { font-size: 9px; color: var(--text-subtle); font-weight: 500; }
+  .rollup-kind { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .02em; color: var(--text-subtle); font-weight: 400; }
   /* ---- merged objective tile body ---------------------------------------- */
   .tile-objective      { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 
@@ -493,18 +504,18 @@
      it. Alarm lives here rather than on its own row to keep the tile short. */
   .ov-schedcol         { margin-left: auto; flex: 0 0 auto; text-align: right; }
   .ov-sched            { font-size: 11px; color: var(--text-subtle); white-space: nowrap; }
-  .ov-statnum          { font-size: 18px; font-weight: 600; line-height: 1;
+  .ov-statnum          { font-family: var(--font-disp); font-size: 19px; font-weight: 600; line-height: 1;
                          font-variant-numeric: tabular-nums; color: var(--text-subtle); }
   .ov-statnum.ontrack  { color: #3B6D11; }
   .ov-statnum.watch    { color: #854F0B; }
   .ov-statnum.atrisk   { color: #A32D2D; }
-  .ov-statlbl          { font-size: 10px; color: var(--text-subtle); }
+  .ov-statlbl          { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--text-subtle); }
 
   /* section wrapper + heading. ov-behind sets NO font-size on purpose: it is used
      inside both the 9px section label and the 10px lane fraction, and pinning a
      size here would shrink it in the lane. */
   .ov-sec              { border-top: 0.5px solid var(--border); padding-top: 8px; }
-  .ov-seclbl           { font-size: 9px; color: var(--text-subtle); font-weight: 600;
+  .ov-seclbl           { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle); font-weight: 500; text-transform: uppercase;
                          letter-spacing: .03em; margin-bottom: 6px; }
   .ov-behind           { color: #A32D2D; font-weight: 600; }
 
@@ -517,7 +528,7 @@
   .ov-krdot.atrisk     { background: #C0453E; }
   .ov-krname           { font-size: 11px; font-weight: 600; flex: 1; min-width: 0;
                          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ov-krpct            { font-size: 11px; font-weight: 600; flex: 0 0 auto;
+  .ov-krpct            { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; flex: 0 0 auto;
                          font-variant-numeric: tabular-nums; color: var(--text-subtle); }
   .ov-krpct.ontrack    { color: #3B6D11; }
   .ov-krpct.watch      { color: #854F0B; }
