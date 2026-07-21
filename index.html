@@ -488,6 +488,15 @@
   .rollup-score.watch   { color: #854F0B; }
   .rollup-score.atrisk  { color: #A32D2D; }
   .rollup-kind { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .02em; color: var(--text-subtle); font-weight: 400; }
+  /* overall score large; active-quarter score smaller beneath, with a mono Q label */
+  .rollup-score-lg { font-size: 26px; }
+  .rollup-score-sm { font-family: var(--font-disp); font-size: 15px; font-weight: 600;
+                     font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+  .rollup-score-sm.ontrack { color: #3B6D11; } .rollup-score-sm.watch { color: #854F0B; } .rollup-score-sm.atrisk { color: #A32D2D; }
+  .rollup-line { display: flex; align-items: baseline; gap: 6px; }
+  .rollup-qline { margin-top: 2px; }
+  .rollup-qlbl { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .04em;
+                 text-transform: uppercase; color: var(--text-subtle); }
   /* ---- merged objective tile body ---------------------------------------- */
   .tile-objective      { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 
@@ -2351,24 +2360,60 @@ function myObjectives(session) {
 // Each entry is { id, label, score } with score 0..100 or null (no scorable
 // objectives yet -> renders as a grey "—"). Uses the RDCore rollup primitives so
 // the numbers match the planning app's overview exactly.
+// The active quarter as 'YYYYQN', derived from today (no stored value exists).
+// Used to show each rollup's current-quarter score alongside its all-time one.
+function activeQuarter() {
+  const iso = rdDayToIso(rdToday());              // 'YYYY-MM-DD'
+  const y = iso.slice(0, 4), m = +iso.slice(5, 7);
+  return y + 'Q' + (Math.floor((m - 1) / 3) + 1);
+}
+
+// Quarter-scoped score at any rollup altitude. rollupDivision has no quarter
+// param, but score('division', …, quarter) does — so go through the generic
+// score() for divisions and the quarter-aware rollups for unit/company.
+function rollupAt(kind, id, pf, em, quarter) {
+  const RD = window.RDCore;
+  if (kind === 'company')  return RD.rollupCompany(pf, em, quarter);
+  if (kind === 'unit')     return RD.rollupUnit(id, pf, em, quarter);
+  if (quarter != null && RD.score) return RD.score('division', id, pf, em, quarter);
+  return RD.rollupDivision(id, pf, em);
+}
+
+// Rollup tiles for the Leadership section. Each entry carries BOTH an all-time
+// `score` and an active-quarter `qScore`, rendered as overall + quarterly.
+//   ceo  -> company + one per unit (overall + quarter each)
+//   cto  -> one per division in its unit (overall + quarter each)
+//   lead -> one per led division, ACTIVE-QUARTER ONLY (score omitted). A lead
+//           tracks the current quarter's execution, not the all-time trajectory.
 function leadershipRollups(session) {
   const RD = window.RDCore;
   const pf = STATE.portfolio;
   if (!RD || !pf || !session) return [];
   const em = STATE.pfMap || {};
+  const q = activeQuarter();
   const out = [];
+  const card = (id, label, kind, divId, quarterOnly) => ({
+    id, label, kind,
+    score: quarterOnly ? null : rollupAt(kind, divId, pf, em, null),
+    qScore: rollupAt(kind, divId, pf, em, q),
+    quarter: q,
+    quarterOnly: !!quarterOnly
+  });
   if (session.orgRole === 'ceo') {
-    out.push({ id: 'roll__company', label: 'Company', score: RD.rollupCompany(pf, em), kind: 'company' });
+    out.push(card('roll__company', 'Company', 'company', null, false));
     const units = Array.isArray(pf.units) ? pf.units.slice() : [];
     units.sort((a, b) => (a.order || 0) - (b.order || 0));
-    units.forEach(u => {
-      if (u && u.id) out.push({ id: 'roll__unit__' + u.id, label: u.name || u.id, score: RD.rollupUnit(u.id, pf, em), kind: 'unit' });
-    });
+    units.forEach(u => { if (u && u.id) out.push(card('roll__unit__' + u.id, u.name || u.id, 'unit', u.id, false)); });
   } else if (session.orgRole === 'cto') {
-    // Division rollups for the CTO's unit(s), in portfolio order.
     const led = new Set(divisionsLed(session));
     (Array.isArray(pf.divisions) ? pf.divisions : []).forEach(d => {
-      if (d && d.id && led.has(d.id)) out.push({ id: 'roll__div__' + d.id, label: d.name || d.id, score: RD.rollupDivision(d.id, pf, em), kind: 'division' });
+      if (d && d.id && led.has(d.id)) out.push(card('roll__div__' + d.id, d.name || d.id, 'division', d.id, false));
+    });
+  } else if (session.orgRole === 'lead') {
+    // Leads get division rollups for what they lead — ACTIVE QUARTER ONLY.
+    const led = new Set(divisionsLed(session));
+    (Array.isArray(pf.divisions) ? pf.divisions : []).forEach(d => {
+      if (d && d.id && led.has(d.id)) out.push(card('roll__div__' + d.id, d.name || d.id, 'division', d.id, true));
     });
   }
   return out;
@@ -3880,6 +3925,11 @@ function buildToolList(session) {
       if (section === 'watching') return;      // watching is opt-in, via configured tiles
       const view = getObjectiveView(o.id);
       if (!view) return;
+      // Abandoned objectives don't auto-tile — in Projects OR Leadership. They're
+      // part of the rollup record (aggregates still count them), but a dropped
+      // objective shouldn't sit as a live tile in anyone's working sections.
+      // (Achieved stays: finished work is worth seeing. Only abandoned is hidden.)
+      if (view.isAbandoned) return;
       const k = key(o.id, 'objective');
       if (seen.has(k)) return;
       const tile = buildPortfolioObjectiveTile(view, 'objective', false);
@@ -4678,16 +4728,31 @@ function renderRollupStrip(wrap, session) {
   if (!rollups.length) return;
   const strip = document.createElement('div');
   strip.className = 'rollup-strip';
+  const scoreHtml = (val, big) => {
+    const has = val != null;
+    const cls = has ? bandClass(hubBand(val)) : 'noband';
+    return '<span class="rollup-score ' + (big ? 'rollup-score-lg ' : 'rollup-score-sm ') + cls + '">' +
+           (has ? Math.round(val) : '\u2014') + '</span>';
+  };
   rollups.forEach(r => {
     const card = document.createElement('div');
     card.className = 'rollup-card' + (r.kind === 'company' ? ' rollup-company' : '');
-    const has = r.score != null;
-    const cls = has ? bandClass(hubBand(r.score)) : 'noband';
     const kindLabel = r.kind === 'company' ? 'mean of divisions'
                     : r.kind === 'unit' ? 'unit rollup' : 'division rollup';
+    let scores;
+    if (r.quarterOnly) {
+      // Leads: active quarter only, labelled with the quarter so it is unambiguous.
+      scores = '<div class="rollup-line"><span class="rollup-qlbl">' + escText(r.quarter) + '</span>' +
+               scoreHtml(r.qScore, true) + '</div>';
+    } else {
+      // Overall (large) with the active-quarter score beneath it.
+      scores = scoreHtml(r.score, true) +
+               '<div class="rollup-line rollup-qline"><span class="rollup-qlbl">' + escText(r.quarter) + '</span>' +
+               scoreHtml(r.qScore, false) + '</div>';
+    }
     card.innerHTML =
       '<span class="rollup-label">' + escText(r.label) + '</span>' +
-      '<span class="rollup-score ' + cls + '">' + (has ? Math.round(r.score) : '\u2014') + '</span>' +
+      scores +
       '<span class="rollup-kind">' + kindLabel + '</span>';
     strip.appendChild(card);
   });
