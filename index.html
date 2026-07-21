@@ -2398,6 +2398,26 @@ function findExistingCTO(usersRecord, exceptEmail) {
   return (usersRecord.users || []).find(u => u.orgRole === 'cto' && normaliseEmail(u.email) !== except) || null;
 }
 
+// The current CEO, if any — the single-CEO counterpart to findExistingCTO.
+function findExistingCEO(usersRecord, exceptEmail) {
+  const except = exceptEmail ? normaliseEmail(exceptEmail) : null;
+  return (usersRecord.users || []).find(u => u.orgRole === 'ceo' && normaliseEmail(u.email) !== except) || null;
+}
+
+// Scope stored on a CEO record: all unit ids + all business division ids, per the
+// role definition. divisionsLed treats the CEO as company scope regardless of
+// these, and the Leadership rollups/tiles derive from the live portfolio — so
+// these fields are informational (they record intent and survive a future change
+// that stops special-casing the role). Recomputed at save from the live portfolio.
+function ceoScope() {
+  const pf = STATE.portfolio || {};
+  const units = Array.isArray(pf.units) ? pf.units.map(u => u.id).filter(Boolean) : [];
+  const bizDivs = (Array.isArray(pf.divisions) ? pf.divisions : [])
+    .filter(d => (window.RDCore && window.RDCore.divisionKind ? window.RDCore.divisionKind(d) : 'rd') === 'biz')
+    .map(d => d.id).filter(Boolean);
+  return { leadUnits: units, leadDivisions: bizDivs };
+}
+
 // A "tracker" is no longer a data source — it is a division's external links
 // (Confluence meeting page, Gantt, tracker UI). The objectives it used to hold
 // come from the broker now. `divisionId` ties an entry to the division it
@@ -5996,19 +6016,31 @@ function openFolderModal(tool) {
 //
 // `currentLeadDivisions` is the user's division list. The legacy pre-tick that
 // seeded this during the migration is gone with the resolver.
-function orgRoleFieldHtml(currentOrgRole, currentLeadDivisions) {
+function orgRoleFieldHtml(currentOrgRole, currentLeadDivisions, currentLeadUnits) {
   const role = currentOrgRole || 'ic';
   const divisions = (STATE.portfolio && Array.isArray(STATE.portfolio.divisions))
     ? STATE.portfolio.divisions : [];
-  const led = Array.isArray(currentLeadDivisions) ? currentLeadDivisions.filter(Boolean) : [];
-  const set = new Set(led);
+  const units = (STATE.portfolio && Array.isArray(STATE.portfolio.units))
+    ? STATE.portfolio.units.slice().sort((a, b) => (a.order || 0) - (b.order || 0)) : [];
+  const divSet = new Set(Array.isArray(currentLeadDivisions) ? currentLeadDivisions.filter(Boolean) : []);
+  const unitSet = new Set(Array.isArray(currentLeadUnits) ? currentLeadUnits.filter(Boolean) : []);
+  const esc = v => String(v == null ? '' : v).replace(/</g, '&lt;');
   const divisionCheckboxes = divisions.length
     ? divisions.map(d => `
         <label class="checkbox-row" style="margin-bottom: 6px;">
-          <input type="checkbox" name="org-leaddiv" value="${d.id}" ${set.has(d.id) ? 'checked' : ''}>
-          <span>${String(d.name || d.id).replace(/</g, '&lt;')}</span>
+          <input type="checkbox" name="org-leaddiv" value="${d.id}" ${divSet.has(d.id) ? 'checked' : ''}>
+          <span>${esc(d.name || d.id)}</span>
         </label>`).join('')
     : '<div class="obj-empty">No divisions loaded yet — wait for tiles to appear, then reopen.</div>';
+  // The CTO leads whole UNITS (their divisions expand from these). A lead picks
+  // divisions; a CTO picks units; the CEO leads the whole company (nothing to pick).
+  const unitCheckboxes = units.length
+    ? units.map(u => `
+        <label class="checkbox-row" style="margin-bottom: 6px;">
+          <input type="checkbox" name="org-leadunit" value="${u.id}" ${unitSet.has(u.id) ? 'checked' : ''}>
+          <span>${esc(u.name || u.id)}</span>
+        </label>`).join('')
+    : '<div class="obj-empty">No units loaded yet — wait for tiles to appear, then reopen.</div>';
   return `
     <label class="field">
       <span class="label-row">Org role</span>
@@ -6016,15 +6048,26 @@ function orgRoleFieldHtml(currentOrgRole, currentLeadDivisions) {
         <option value="ic"   ${role === 'ic'   ? 'selected' : ''}>Individual contributor</option>
         <option value="lead" ${role === 'lead' ? 'selected' : ''}>Lead</option>
         <option value="cto"  ${role === 'cto'  ? 'selected' : ''}>CTO</option>
+        <option value="ceo"  ${role === 'ceo'  ? 'selected' : ''}>CEO</option>
       </select>
-      <div class="obj-picker-meta">Independent of admin role. CTO automatically leads every division.</div>
+      <div class="obj-picker-meta">Independent of admin role. A Lead leads divisions; the CTO leads whole units; the CEO leads the entire company.</div>
     </label>
-    <div id="org-leadof-wrap" class="field" style="display: ${role === 'lead' ? 'block' : 'none'};">
+    <div id="org-leaddiv-wrap" class="field" style="display: ${role === 'lead' ? 'block' : 'none'};">
       <span class="label-row">Leads which divisions</span>
       <div style="border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 10px;">
         ${divisionCheckboxes}
       </div>
-      <div class="obj-picker-meta" id="org-leadof-help">A Lead with no divisions selected won&rsquo;t see any leadership tiles.</div>
+      <div class="obj-picker-meta">A Lead with no divisions selected won&rsquo;t see any leadership tiles.</div>
+    </div>
+    <div id="org-leadunit-wrap" class="field" style="display: ${role === 'cto' ? 'block' : 'none'};">
+      <span class="label-row">Leads which units</span>
+      <div style="border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 10px;">
+        ${unitCheckboxes}
+      </div>
+      <div class="obj-picker-meta">The CTO leads every division inside the selected unit(s).</div>
+    </div>
+    <div id="org-ceo-note" class="obj-picker-meta" style="display: ${role === 'ceo' ? 'block' : 'none'}; margin-bottom: 14px;">
+      The CEO oversees every unit and business division — no selection needed.
     </div>
     <div id="org-cto-warn" class="inline-error" style="display: none; margin-bottom: 14px;"></div>
   `;
@@ -6034,21 +6077,23 @@ function orgRoleFieldHtml(currentOrgRole, currentLeadDivisions) {
 // `excludeEmail` is the email being edited (so we don't warn about themselves).
 function bindOrgRoleField(excludeEmail) {
   const select = document.getElementById('org-role-select');
-  const wrap = document.getElementById('org-leadof-wrap');
+  const divWrap = document.getElementById('org-leaddiv-wrap');
+  const unitWrap = document.getElementById('org-leadunit-wrap');
+  const ceoNote = document.getElementById('org-ceo-note');
   const warn = document.getElementById('org-cto-warn');
   if (!select) return;
   function refresh() {
-    wrap.style.display = select.value === 'lead' ? 'block' : 'none';
-    if (select.value === 'cto') {
-      const existing = STATE.usersRecord
-        ? findExistingCTO(STATE.usersRecord, excludeEmail || null)
-        : null;
-      if (existing) {
-        warn.textContent = `Saving will demote the current CTO (${existing.email}) to IC.`;
-        warn.style.display = 'block';
-      } else {
-        warn.style.display = 'none';
-      }
+    const v = select.value;
+    if (divWrap)  divWrap.style.display  = v === 'lead' ? 'block' : 'none';
+    if (unitWrap) unitWrap.style.display = v === 'cto'  ? 'block' : 'none';
+    if (ceoNote)  ceoNote.style.display  = v === 'ceo'  ? 'block' : 'none';
+    // Warn when saving will demote the current holder of a single-holder role.
+    let existing = null;
+    if (v === 'cto') existing = STATE.usersRecord ? findExistingCTO(STATE.usersRecord, excludeEmail || null) : null;
+    else if (v === 'ceo') existing = STATE.usersRecord ? findExistingCEO(STATE.usersRecord, excludeEmail || null) : null;
+    if (existing) {
+      warn.textContent = `Saving will demote the current ${v.toUpperCase()} (${existing.email}) to IC.`;
+      warn.style.display = 'block';
     } else {
       warn.style.display = 'none';
     }
@@ -6057,13 +6102,17 @@ function bindOrgRoleField(excludeEmail) {
   refresh();
 }
 
-// Reads the form into { orgRole, leadDivisions }.
+// Reads the form into { orgRole, leadDivisions, leadUnits }. Divisions apply to a
+// lead; units to a CTO; the CEO carries neither from the form (company scope).
 function readOrgRoleField() {
   const orgRole = (document.getElementById('org-role-select') || {}).value || 'ic';
   const leadDivisions = orgRole === 'lead'
     ? Array.from(document.querySelectorAll('input[name="org-leaddiv"]:checked')).map(cb => cb.value)
     : [];
-  return { orgRole, leadDivisions };
+  const leadUnits = orgRole === 'cto'
+    ? Array.from(document.querySelectorAll('input[name="org-leadunit"]:checked')).map(cb => cb.value)
+    : [];
+  return { orgRole, leadDivisions, leadUnits };
 }
 // Demote any existing CTO other than `exceptEmail` to IC. Mutates `record`.
 function enforceSingleCTO(record, exceptEmail) {
@@ -6115,7 +6164,7 @@ function openAddUserModal() {
       <input type="checkbox" id="adduser-admin">
       <span>Grant admin role</span>
     </label>
-    ${orgRoleFieldHtml('ic', [])}
+    ${orgRoleFieldHtml('ic', [], [])}
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">Add user</button>
@@ -6127,7 +6176,7 @@ function openAddUserModal() {
     const email = document.getElementById('adduser-email').value;
     const pin = document.getElementById('adduser-pin').value;
     const isAdmin = document.getElementById('adduser-admin').checked;
-    const { orgRole, leadDivisions } = readOrgRoleField();
+    const { orgRole, leadDivisions, leadUnits } = readOrgRoleField();
     if (!normaliseEmail(email)) return showError('add-user-error', 'Enter a valid email.');
     if (!pin || pin.length < STATE.config.pinMinLength) {
       return showError('add-user-error', `PIN must be at least ${STATE.config.pinMinLength} digits.`);
@@ -6143,9 +6192,12 @@ function openAddUserModal() {
     try {
       const user = await createUserRecord(email, pin, isAdmin ? 'admin' : 'user');
       user.orgRole = orgRole;
-      user.leadDivisions = orgRole === 'lead' ? leadDivisions : [];
-      // Single-CTO enforcement: demote any prior CTO before adding this one.
-      const demoted = orgRole === 'cto' ? enforceSingleCTO(record, email) : [];
+      const _cs = orgRole === 'ceo' ? ceoScope() : null;
+      user.leadDivisions = orgRole === 'lead' ? leadDivisions : (_cs ? _cs.leadDivisions : []);
+      user.leadUnits = orgRole === 'cto' ? leadUnits : (_cs ? _cs.leadUnits : []);
+      // Single-holder enforcement: promoting to CTO or CEO demotes any prior one.
+      const demoted = orgRole === 'cto' ? enforceSingleCTO(record, email)
+                    : orgRole === 'ceo' ? enforceSingleCEO(record, email) : [];
       record.users.push(user);
       await jbSaveUsers(record);
       STATE.usersRecord = record;
@@ -6172,7 +6224,7 @@ function openEditUserModal(user) {
       <input type="checkbox" id="edituser-admin" ${user.role === 'admin' ? 'checked' : ''}>
       <span>Admin role</span>
     </label>
-    ${orgRoleFieldHtml(user.orgRole || 'ic', user.leadDivisions || [])}
+    ${orgRoleFieldHtml(user.orgRole || 'ic', user.leadDivisions || [], user.leadUnits || [])}
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">Save changes</button>
@@ -6182,7 +6234,7 @@ function openEditUserModal(user) {
   document.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
   document.querySelector('[data-act="save"]').addEventListener('click', async () => {
     const isAdmin = document.getElementById('edituser-admin').checked;
-    const { orgRole, leadDivisions } = readOrgRoleField();
+    const { orgRole, leadDivisions, leadUnits } = readOrgRoleField();
     const btn = document.querySelector('[data-act="save"]');
     btn.disabled = true;
     btn.textContent = 'Saving…';
@@ -6192,9 +6244,12 @@ function openEditUserModal(user) {
       if (!target) throw new Error('User no longer exists.');
       target.role = isAdmin ? 'admin' : 'user';
       target.orgRole = orgRole;
-      target.leadDivisions = orgRole === 'lead' ? leadDivisions : [];
-      // Single-CTO enforcement — only triggers if promoting THIS user to CTO.
-      const demoted = orgRole === 'cto' ? enforceSingleCTO(record, target.email) : [];
+      const _cs = orgRole === 'ceo' ? ceoScope() : null;
+      target.leadDivisions = orgRole === 'lead' ? leadDivisions : (_cs ? _cs.leadDivisions : []);
+      target.leadUnits = orgRole === 'cto' ? leadUnits : (_cs ? _cs.leadUnits : []);
+      // Single-holder enforcement — only when promoting THIS user to CTO or CEO.
+      const demoted = orgRole === 'cto' ? enforceSingleCTO(record, target.email)
+                    : orgRole === 'ceo' ? enforceSingleCEO(record, target.email) : [];
       await jbSaveUsers(record);
       STATE.usersRecord = record;
       // If the edited user is the current user, refresh the session so the
