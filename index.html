@@ -1700,7 +1700,11 @@ const CONFIG_DEFAULTS = {
   brokerToken: 'vpjshbfgtplybz5sfbjfcomygtcunkn1',
   // Where objective tiles point. The execution app takes ?division=&objective=
   // &readonly as deep-link params, so a tile can land on the exact objective.
+  // Biz (kind:'biz') divisions execute in the SALES app, not the execution app —
+  // their work lives in BIZ- docs, which the execution app doesn't read. Same
+  // deep-link params, different shell; objectiveUrl routes by divisionKind.
   executionAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/execution_app.html',
+  salesAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/sales_app.html',
   // Where per-division Gantt tiles point. The planning app renders a division's
   // Gantt from ?present&division=&tab=gantt&ganttquarter=1, so the tile is
   // derived from the division id — no per-division URL to store.
@@ -2833,7 +2837,17 @@ function projTag(view) {
 }
 
 function objectiveUrl(o, editable) {
-  const base = ((STATE.config && STATE.config.executionAppUrl) || '').trim();
+  // Biz objectives deep-link to the sales app (their BIZ- doc lives there); rd
+  // objectives to the execution app. Fall back to the execution app if the
+  // division can't be resolved or the sales URL isn't configured.
+  const RD = window.RDCore;
+  const div = (STATE.portfolio && Array.isArray(STATE.portfolio.divisions))
+    ? STATE.portfolio.divisions.find(d => d && d.id === (o && o.divisionId)) : null;
+  const isBiz = !!(RD && RD.divisionKind && div && RD.divisionKind(div) === 'biz');
+  const salesBase = ((STATE.config && STATE.config.salesAppUrl) || '').trim();
+  const base = ((isBiz && salesBase)
+    ? salesBase
+    : ((STATE.config && STATE.config.executionAppUrl) || '')).trim();
   if (!base || !o) return '';
   const sep = base.includes('?') ? '&' : '?';
   // The execution app reads ?token=, stores it in localStorage, and strips it
@@ -3658,6 +3672,8 @@ async function refreshHubConfig() {
       data.brokerToken !== STATE.config.brokerToken) brokerPatch.brokerToken = data.brokerToken;
   if (typeof data.executionAppUrl === 'string' &&
       data.executionAppUrl !== STATE.config.executionAppUrl) brokerPatch.executionAppUrl = data.executionAppUrl;
+  if (typeof data.salesAppUrl === 'string' &&
+      data.salesAppUrl !== STATE.config.salesAppUrl) brokerPatch.salesAppUrl = data.salesAppUrl;
   if (typeof data.planningAppUrl === 'string' &&
       data.planningAppUrl !== STATE.config.planningAppUrl) brokerPatch.planningAppUrl = data.planningAppUrl;
     if (Object.keys(brokerPatch).length) {
