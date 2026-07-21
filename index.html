@@ -2522,7 +2522,15 @@ async function loadPortfolio() {
   const execDocs = {}, specDocs = {};
   await Promise.all(divisions.map(async d => {
     if (!d || !d.id) return;
-    const docId = `EXEC-${d.id}`;
+    // R&D divisions execute in EXEC-<div> (+ SPEC-<div> for the designer spec);
+    // business divisions execute in BIZ-<div> — a SEPARATE namespace written by
+    // the Sales app, with NO exec or spec doc. Both land in execDocs under the
+    // bare division id, so objectiveScore and the rollups read them identically:
+    // a business objective scores off its KRs the same way, it just has no gates
+    // (so its projection tag reads "\u2014" until business tracking lands).
+    const kind = (window.RDCore && window.RDCore.divisionKind)
+      ? window.RDCore.divisionKind(d) : 'rd';
+    const docId = kind === 'biz' ? `BIZ-${d.id}` : `EXEC-${d.id}`;
     try {
       const res = await brokerGet(docId);
       if (res && res.doc) { execDocs[d.id] = res.doc; versions[docId] = res.version; }
@@ -2530,12 +2538,14 @@ async function loadPortfolio() {
       // One unreachable division must not blank the whole Hub.
       console.warn(`[rd] failed to load ${docId}:`, err);
     }
-    // SPEC-<div>: the product-designer doc. Needed because a KR's KPI can inherit
-    // its target from a product/model KPI defined HERE — effTarget/effValue walk
-    // the parent chain through the pool, and without these docs that walk dead-ends
-    // and the KPI silently reads "no target" rather than erroring. The apps resolve
-    // against fullEm() = execMap() + specMap() for exactly this reason.
+    // SPEC-<div>: the product-designer doc. R&D only — a business division has no
+    // designer spec. Needed because a KR's KPI can inherit its target from a
+    // product/model KPI defined HERE — effTarget/effValue walk the parent chain
+    // through the pool, and without these docs that walk dead-ends and the KPI
+    // silently reads "no target" rather than erroring. The apps resolve against
+    // fullEm() = execMap() + specMap() for exactly this reason.
     // A division with no spec doc is normal, not an error.
+    if (kind === 'biz') return;
     const specId = `SPEC-${d.id}`;
     try {
       const sres = await brokerGet(specId);
