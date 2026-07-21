@@ -920,6 +920,22 @@
   .gate-dot.overdue      { background: #FCEBEB; border-color: #A32D2D; color: #A32D2D; }
   .gate-dot.in-progress  { background: #E6F1FB; border-color: #0C447C; color: #0C447C; }
   .gate-dot.pending      { background: #f0f0ee; border-color: #ccc;    color: #555; }
+  /* milestone-KR step track: the gate-dot track sits indented under the KR row,
+     with a small mono "N/total steps" note. Reuses .tile-gates-track + .gate-dot. */
+  .ov-msteps { display: flex; align-items: center; gap: 10px; margin: 2px 0 8px 15px; }
+  .ov-mstepfoot { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle); letter-spacing: .02em; white-space: nowrap; }
+  /* Kanban board section: each board a header row (name + meta + collapsed column
+     summary track) with per-workstream tile rows beneath, flat with a lane tag. */
+  .ov-board { margin-top: 10px; padding-top: 10px; border-top: 0.5px solid var(--border); }
+  .ov-board:first-of-type { border-top: none; padding-top: 2px; margin-top: 4px; }
+  .ov-bhead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .ov-bname { font-family: var(--font-disp); font-size: 12.5px; font-weight: 600; }
+  .ov-bmeta { font-family: var(--font-mono); font-size: 9px; letter-spacing: .03em; color: var(--text-subtle); }
+  .ov-bhtrack { margin-left: auto; }
+  .ov-btile { display: flex; align-items: center; gap: 8px; margin: 4px 0 4px 12px; }
+  .ov-btname { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); min-width: 92px; }
+  .ov-btlane { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-subtle); min-width: 74px; }
+  .ov-bttrack { display: flex; align-items: center; }
   .gate-conn {
     flex: 1;
     height: 2px;
@@ -2865,6 +2881,36 @@ function rdDayToIso(d) {
 // setId matches no declared set still belongs to the objective, and walking sets
 // first drops it silently; the app collects those into an "Ungrouped" lane and
 // so does this.
+function boardsForObjective(objId) {
+  const RD = window.RDCore;
+  if (!RD || !STATE.portfolio) return [];
+  const o = findObjective(objId);
+  if (!o) return [];
+  const doc = STATE.execDocs[o.divisionId] || {};
+  const boards = (doc.boards || []).filter(b => b && b.objectiveId === objId);
+  if (!boards.length) return [];
+  const todayIso = rdDayToIso(rdToday());
+  const WORST = { green: 'passed', orange: 'passed-late', red: 'overdue', none: 'pending' };
+  return boards.map(b => {
+    const cols = b.columns || [];
+    const laneName = {};
+    (b.swimlanes || []).forEach(l => { laneName[l.id] = l.name || l.id; });
+    const columns = cols.map((c, k) => {
+      const sm = RD.boardGateSummary(b, k, todayIso);
+      return { name: c.name || c.id, passed: sm.passed, total: sm.total, state: WORST[sm.worst] || 'pending' };
+    });
+    const tiles = (b.tiles || []).map(t => ({
+      name: t.name || t.id,
+      lane: laneName[t.lane] || '',
+      states: cols.map((c, k) => {
+        const st = RD.gateTileState(b, t, k, todayIso);
+        return st === 'passed-ontime' ? 'passed' : st;
+      })
+    }));
+    return { id: b.id, name: b.name || b.id, columns, tiles };
+  });
+}
+
 function gateLanesForObjective(objId) {
   const RD = window.RDCore;
   if (!RD || !STATE.portfolio) return [];
@@ -2983,6 +3029,16 @@ function okrRowsForObjective(objId) {
       // and 'subkr' off kr.subKrs — neither wants KPIs, so "No KPIs yet" would
       // report a gap that does not exist. Default is 'kpi', where it is true.
       trackingType: kr.trackingType || 'kpi',
+      // Milestone KRs carry dated steps that render as a gate-dot track under the
+      // row (the % is already the weighted step completion, engine-side).
+      // milestoneGanttSteps returns only DATED steps, each done/overdue/pending;
+      // map 'done' -> 'passed' so the existing gate-dot classes apply.
+      milestoneSteps: (kr.trackingType === 'milestone' && RD.milestoneGanttSteps)
+        ? RD.milestoneGanttSteps(kr, rdDayToIso(rdToday())).map(st => ({
+            name: st.name,
+            state: st.status === 'done' ? 'passed' : st.status
+          }))
+        : null,
       kpis
     };
   });
@@ -3147,6 +3203,13 @@ function getObjectiveView(objId) {
   _gateLanes.forEach(l => {
     if (!String(l.id).startsWith('__ung__')) { _gPassed += l.passed; _gTotal += l.total; }
   });
+  // Kanban boards fold into the SAME pooled signal: each board column is a gate
+  // (boardGateSummary passed/total), pooled alongside the stage-gate sets. So a
+  // business objective tracked purely by boards now gets a real projection.
+  // gateHealth (the body stat) still reads only stage-gate sets, so it stays "\u2014"
+  // for a board-only objective \u2014 projection and body read different aggregations.
+  const _boards = boardsForObjective(o.id);
+  _boards.forEach(b => b.columns.forEach(c => { _gPassed += c.passed; _gTotal += c.total; }));
   const gatePooled = _gTotal > 0 ? (100 * _gPassed / _gTotal) : null;   // 0..100, or null
 
   return {
@@ -3203,6 +3266,7 @@ function getObjectiveView(objId) {
     catchupNeeded: !end && sched != null && sched > CATCHUP_SLIP_THRESHOLD,
     // Grouped by workstream. Flat gate lists interleave parallel sets.
     gateLanes: _gateLanes,
+    boards: _boards,               // kanban boards shaped for the tile (boardsForObjective)
     // Editable only for owners — see objectiveUrl.
     url: objectiveUrl(o, ownsObjective(STATE.session && STATE.session.email, o))
   };
@@ -4601,11 +4665,23 @@ function renderObjectiveBody(view) {
       // A KR with no KPIs says WHY, rather than reporting a gap that isn't one.
       // Only a 'kpi' KR is actually missing something.
       const empty = r.trackingType === 'percentage' ? 'Tracked by percentage'
+                  : r.trackingType === 'milestone'  ? 'Tracked by milestones'
                   : r.trackingType === 'subkr'      ? 'Tracked by sub-results'
                   : 'No KPIs yet';
-      const body = kpis.length
-        ? `<div class="ov-kpis">${kpiRows}</div>${more}`
-        : `<div class="ov-kpnone">${escText(empty)}</div>`;
+      // A milestone KR shows its dated steps as a gate-dot track beneath the row,
+      // plus a "N/total steps" count. The row's % stays the headline (the weighted
+      // step completion); the track carries the step detail.
+      let body;
+      if (r.trackingType === 'milestone' && r.milestoneSteps && r.milestoneSteps.length) {
+        const done = r.milestoneSteps.filter(st => st.state === 'passed').length;
+        const over = r.milestoneSteps.filter(st => st.state === 'overdue').length;
+        const foot = done + '/' + r.milestoneSteps.length + ' steps' + (over ? ' \u00b7 ' + over + ' overdue' : '');
+        body = `<div class="ov-msteps">${renderGateDotsHtml(r.milestoneSteps)}<span class="ov-mstepfoot">${escText(foot)}</span></div>`;
+      } else {
+        body = kpis.length
+          ? `<div class="ov-kpis">${kpiRows}</div>${more}`
+          : `<div class="ov-kpnone">${escText(empty)}</div>`;
+      }
       return `
         <div class="ov-kr">
           <span class="ov-krdot ${bandClass(r.band)}"></span>
@@ -4644,7 +4720,32 @@ function renderObjectiveBody(view) {
     gateBlock = `<div class="ov-sec">${head}${body}</div>`;
   }
 
-  return `<div class="tile-objective">${statRow}${krBlock}${gateBlock}</div>`;
+  // Kanban boards: a labelled section beneath the KR/gate blocks. Each board shows
+  // a collapsed header track (one summary dot per column, passed/total, worst
+  // colour) and, because the objective tile itself is expanded, the per-workstream
+  // (tile) rows \u2014 each a gate track across the columns, listed flat with a lane tag.
+  let boardBlock = '';
+  const boards = view.boards || [];
+  if (boards.length) {
+    const blocks = boards.map(b => {
+      const headDots = renderGateDotsHtml(b.columns.map(c => ({ state: c.state, name: c.name })));
+      const tileRows = b.tiles.map(t => {
+        const track = renderGateDotsHtml(t.states.map((st, i) => ({ state: st, name: b.columns[i] ? b.columns[i].name : '' })));
+        return `<div class="ov-btile">` +
+          `<span class="ov-btname" title="${escAttr(t.name)}">${escText(t.name)}</span>` +
+          `<span class="ov-btlane">${escText(t.lane)}</span>` +
+          `<div class="ov-bttrack">${track}</div></div>`;
+      }).join('');
+      return `<div class="ov-board">` +
+        `<div class="ov-bhead">` +
+          `<span class="ov-bname" title="${escAttr(b.name)}">${escText(b.name)}</span>` +
+          `<span class="ov-bmeta">KANBAN \u00b7 ${b.tiles.length} workstream${b.tiles.length === 1 ? '' : 's'}</span>` +
+          `<div class="ov-bhtrack">${headDots}</div></div>` +
+        tileRows + `</div>`;
+    }).join('');
+    boardBlock = `<div class="ov-sec"><div class="ov-seclbl">Kanban boards \u00b7 ${boards.length}</div>${blocks}</div>`;
+  }
+  return `<div class="tile-objective">${statRow}${krBlock}${gateBlock}${boardBlock}</div>`;
 }
 
 // Render the KPI-view tile body: all measurable KPIs, grouped by source (the KR
