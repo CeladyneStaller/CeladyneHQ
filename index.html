@@ -1888,15 +1888,15 @@ function getSafetyClient() {
 // the tile the same way a missing URL used to.
 
 const TOOLS = [
-  // ── Meetings section (static links; edit the URLs below) ──────────────────
-  // These three render as the "Meetings" section under Projects. Replace the
-  // placeholder URLs with the real meeting pages/links.
+  // ── Meetings section (static links) ───────────────────────────────────────
+  // These three render as the "Meetings" section under Projects. They point at
+  // the Confluence folders that hold each meeting's pages.
   {
     id: 'meeting-company',
     name: 'Celadyne Company Meeting',
     description: 'All-hands',
     icon: 'users-group',
-    url: 'https://example.com/celadyne-company-meeting', // TODO: replace with real meeting URL
+    url: 'https://celadyne.atlassian.net/wiki/spaces/CT/folder/2640478230',
     section: 'meetings',
     fetchStatus: async () => ({ text: 'Open', severity: 'subtle' })
   },
@@ -1905,7 +1905,7 @@ const TOOLS = [
     name: 'Fuel Cell Meeting',
     description: 'Division sync',
     icon: 'battery-charging',
-    url: 'https://example.com/fuel-cell-meeting', // TODO: replace with real meeting URL
+    url: 'https://celadyne.atlassian.net/wiki/spaces/CT/folder/3115646977',
     section: 'meetings',
     fetchStatus: async () => ({ text: 'Open', severity: 'subtle' })
   },
@@ -1914,7 +1914,7 @@ const TOOLS = [
     name: 'Electrolyzer Meeting',
     description: 'Division sync',
     icon: 'droplet',
-    url: 'https://example.com/electrolyzer-meeting', // TODO: replace with real meeting URL
+    url: 'https://celadyne.atlassian.net/wiki/spaces/CT/folder/3108569113',
     section: 'meetings',
     fetchStatus: async () => ({ text: 'Open', severity: 'subtle' })
   },
