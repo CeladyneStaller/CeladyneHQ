@@ -523,6 +523,64 @@
   .tile-badge.proj-orange { background: #FAEEDA; color: #854F0B; }
   .tile-badge.proj-red    { background: #FCEBEB; color: #A32D2D; }
 
+  /* ---- projection breakdown popover -------------------------------------- */
+  /* Opens on hover (desktop) or tap (touch — the tap handler also suppresses the
+     tile's own navigation, since the badge sits inside the tile's <a>). */
+  .proj-wrap { position: relative; display: inline-flex; }
+  .proj-wrap .tile-badge { cursor: help; }
+  .proj-pop {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 60;
+    min-width: 268px;
+    padding: 11px 13px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-elev);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-3px);
+    transition: opacity .13s, transform .13s, visibility .13s;
+    text-align: left;
+    cursor: default;
+  }
+  .proj-pop[hidden] { display: none; }
+  .proj-wrap:hover .proj-pop,
+  .proj-wrap:focus-within .proj-pop,
+  .proj-wrap.pinned .proj-pop { opacity: 1; visibility: visible; transform: translateY(0); }
+  .proj-pop-head {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 9px;
+  }
+  .proj-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; }
+  .proj-row-lbl { font-size: 12px; color: var(--text-muted); flex: 1; }
+  .proj-row-val {
+    font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+    color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .proj-row-val.good { color: var(--success); }
+  .proj-row-val.warn { color: var(--warning); }
+  .proj-row-val.bad  { color: var(--danger); }
+  .proj-lane { display: flex; gap: 8px; margin: 2px 0 2px 10px; }
+  .proj-lane-n { font-size: 10.5px; color: var(--text-subtle); flex: 1; }
+  .proj-lane-v {
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-subtle);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .proj-sep { height: 1px; background: var(--border); margin: 8px 0; }
+  .proj-row.is-result .proj-row-lbl { color: var(--text); font-weight: 500; }
+  .proj-row.is-result .proj-row-val { font-family: var(--font-disp); font-size: 15px; font-weight: 600; }
+  .proj-note {
+    font-family: var(--font-mono); font-size: 9px; line-height: 1.55;
+    color: var(--text-subtle); margin-top: 8px;
+  }
+  @media (max-width: 640px) {
+    /* Keep the popover inside the viewport on phones. */
+    .proj-pop { min-width: 0; width: min(80vw, 268px); }
+  }
+
   /* Leadership rollup strip — compact score cards above the objective tiles.
      A rollup is a summary number, not a link, so it is visually lighter than a
      tile: no icon, no body, just a label and a big banded score. */
@@ -1779,7 +1837,7 @@ const CONFIG_DEFAULTS = {
   // deep-link params, different shell; objectiveUrl routes by divisionKind.
   executionAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/execution_app.html',
   salesAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/sales_app.html',
-  // Product design app — header icon target. TODO: replace with the real URL.
+  // Product design app — header icon target.
   designAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/product_designer.html',
   // Where per-division Gantt tiles point. The planning app renders a division's
   // Gantt from ?present&division=&tab=gantt&ganttquarter=1, so the tile is
@@ -2898,24 +2956,80 @@ function initiativeLabel(id) { return _pfLabel(STATE.portfolio && STATE.portfoli
 // going there to look — handing them an editable surface over someone else's
 // work invites an accidental edit that the owner never sees happen.
 // ---- Projected OKR score ------------------------------------------------
-// Replaces the on-track/at-risk tag with a forecast of where the objective
-// lands. base = min(measured OKR, gate-implied) keeps it conservative; the
-// gate-vs-time feasibility ratio F decides how much of the remaining gap gets
-// closed. Two identities fall out of the shape and are relied on:
+// Forecasts where the objective lands. base = the CURRENT OKR score, so the
+// forecast can never fall below what has already been banked — you cannot
+// un-score points already earned, and the model has no regression term, so a
+// sub-current number was only ever an artifact of the old min(o, g) anchor
+// discarding the score whenever gates lagged. The gate-vs-time feasibility
+// ratio F decides how much of the REMAINING gap closes.
+// Two identities fall out of the shape and are relied on:
 //   g = 1  -> S = 100  (well-constructed gates complete => score complete)
 //   on-pace midpoint (g=t=0.5, o=0.5) -> S = 80  (fixes k)
-// k = 0.667 is not a free knob: those two anchors pin it.
+// k = 0.667 is not a free knob: those two anchors pin it. Both survive the
+// switch from min(o, g) to o, because at the midpoint anchor o == g.
+//
+// Because the forecast is floored at the current score, a low NUMBER can no
+// longer carry the warning — so the badge colours off PACE (F) instead. The
+// number says where it lands; the colour says whether it is on pace.
 const PROJ_K = 0.667;
 const PROJ_EARLY_T = 0.15;   // below this the pace ratio is too noisy to show
+// Pace thresholds for the badge colour. F = 1 means gate odds exactly match time
+// odds — dead on pace. Below half that, the gate work is badly behind the clock.
+const PROJ_PACE_OK = 1.0;
+const PROJ_PACE_WARN = 0.5;
 
-// g, o in [0,1]; t in [0,1]. Returns a 0..100 number.
+// Gate-vs-time feasibility ratio: the odds of gate completion over the odds of
+// time elapsed. F = 1 is exactly on pace. Infinity when every gate is passed;
+// null when no time has elapsed (nothing to compare against). g, t in [0,1].
+function projPace(g, t) {
+  if (!(t > 0)) return null;
+  if (g >= 1) return Infinity;
+  return (g * (1 - t)) / (t * (1 - g));
+}
+
+// g, o in [0,1]; t in [0,1]. Returns a 0..100 number, never below o * 100.
 function projScore(g, o, t) {
-  const base = Math.min(o, g) * 100;
+  const base = o * 100;             // floor: the score already banked
   if (t <= 0) return base;          // no time elapsed -> finish where you are
   if (g >= 1) return 100;           // all gates passed -> 100, for any base
-  const F = (g * (1 - t)) / (t * (1 - g));
-  const m = F / (F + PROJ_K);
+  const F = projPace(g, t);
+  const m = F / (F + PROJ_K);       // m in [0,1) -> S in [base, 100)
   return base + m * (100 - base);
+}
+
+// Builds the badge's breakdown popover. Shows the inputs in the order the maths
+// runs: gate progress (each workstream/board listed), elapsed time, pace, and the
+// starting point — which is the current score, so the forecast can never come out
+// lower. Returns '' when there is nothing to explain.
+function projPopHtml(bd) {
+  if (!bd) return '';
+  const pct = v => (v == null ? '\u2014' : Math.round(v) + '%');
+  const row = (lbl, val, cls) =>
+    '<div class="proj-row"><span class="proj-row-lbl">' + escText(lbl) +
+    '</span><span class="proj-row-val ' + (cls || '') + '">' + escText(val) + '</span></div>';
+  const sub = (name, passed, total) =>
+    '<div class="proj-lane"><span class="proj-lane-n">' + escText(name) +
+    '</span><span class="proj-lane-v">' + passed + '/' + total +
+    (total ? ' = ' + Math.round(100 * passed / total) + '%' : '') + '</span></div>';
+  let paceTxt, paceCls;
+  if (bd.pace === Infinity)           { paceTxt = 'all gates passed'; paceCls = 'good'; }
+  else if (bd.pace >= PROJ_PACE_OK)   { paceTxt = bd.pace.toFixed(2) + '\u00d7 \u00b7 on pace'; paceCls = 'good'; }
+  else if (bd.pace >= PROJ_PACE_WARN) { paceTxt = bd.pace.toFixed(2) + '\u00d7 \u00b7 behind'; paceCls = 'warn'; }
+  else                                { paceTxt = bd.pace.toFixed(2) + '\u00d7 \u00b7 badly behind'; paceCls = 'bad'; }
+  let html = '<div class="proj-pop-head">How this forecast is built</div>';
+  html += row('Gate progress', pct(bd.gatePooled));
+  (bd.lanes || []).forEach(l => { html += sub(l.name, l.passed, l.total); });
+  (bd.boards || []).forEach(b => { html += sub(b.name, b.passed, b.total); });
+  html += row('Plan elapsed', pct(bd.elapsed * 100));
+  html += row('Gate pace vs time', paceTxt, paceCls);
+  html += row('Starting point', pct(bd.score));
+  html += '<div class="proj-sep"></div>';
+  html += '<div class="proj-row is-result"><span class="proj-row-lbl">Forecast</span>' +
+          '<span class="proj-row-val">' + escText(bd.forecast) + '</span></div>';
+  html += '<div class="proj-note">Starting point is the current OKR score \u2014 the forecast ' +
+          'never drops below what is already banked. Gate pace decides how much of the rest ' +
+          'closes, and sets the colour.</div>';
+  return html;
 }
 
 // The tag object { label, key } for a view. Handles every state the projection
@@ -2935,9 +3049,12 @@ function projTag(view) {
   // Pooled gate completion drives the forecast (see getObjectiveView); the tile
   // body's Gate-health number stays the MIN. They read differently on purpose.
   const S = Math.round(projScore(view.gatePooled / 100, view.score / 100, view.elapsedFraction));
-  // Colour off the SHOWN (rounded) number so the tag never disagrees with itself.
-  const key = S >= 80 ? 'proj-green' : S >= 60 ? 'proj-orange' : 'proj-red';
-  return { label: S + '% proj.', key };
+  // Colour off PACE, not the forecast value. The forecast is floored at the
+  // current score, so a low number no longer signals trouble — the pace ratio
+  // does. `pace` rides along on the tag for the breakdown popover.
+  const F = projPace(view.gatePooled / 100, view.elapsedFraction);
+  const key = F >= PROJ_PACE_OK ? 'proj-green' : F >= PROJ_PACE_WARN ? 'proj-orange' : 'proj-red';
+  return { label: S + '% proj.', key, pace: F };
 }
 
 function objectiveUrl(o, editable) {
@@ -3923,6 +4040,24 @@ function buildToolList(session) {
     // scorable, no-dates — and returns { label, key } used verbatim as the
     // badge's text and CSS class.
     const badge = projTag(view);
+    // Data for the badge's breakdown popover. Only meaningful once a forecast
+    // actually ran (pace is non-null exactly then); every suppressed state
+    // (complete/abandoned/too-early/no-gates) leaves it null and renders nothing.
+    badge.breakdown = (badge.pace != null) ? {
+      score: view.score,
+      gatePooled: view.gatePooled,
+      elapsed: view.elapsedFraction,
+      pace: badge.pace,
+      forecast: badge.label,
+      lanes: (view.gateLanes || [])
+        .filter(l => !String(l.id).startsWith('__ung__'))
+        .map(l => ({ name: l.name, passed: l.passed, total: l.total })),
+      boards: (view.boards || []).map(b => ({
+        name: b.name,
+        passed: b.columns.reduce((a, c) => a + c.passed, 0),
+        total: b.columns.reduce((a, c) => a + c.total, 0)
+      }))
+    } : null;
     // severity is SEPARATE from the tag and still band-derived: it feeds the
     // header's urgent count, which should track real current risk, not the
     // forecast. A green projection on a currently at-risk objective should not
@@ -4856,7 +4991,7 @@ function renderTileEl(tool) {
     <div class="tile-head">
       <i class="ti ti-${tool.icon} tile-icon" aria-hidden="true"></i>
       <span class="tile-name">${tool.name}</span>
-      ${isObjective ? `<span class="tile-badge" data-badge="${tool.id}"></span>` : ''}
+      ${isObjective ? `<span class="proj-wrap"><span class="tile-badge" data-badge="${tool.id}"></span><span class="proj-pop" data-pop="${tool.id}" hidden></span></span>` : ''}
     </div>
     <p class="tile-desc"${isObjective ? ` data-meta="${tool.id}"` : ''}>${tool.description}</p>
     <div class="tile-status loading" data-status="${tool.id}">
@@ -5686,6 +5821,13 @@ async function fetchTileStatuses() {
             badgeEl.textContent = '';
             badgeEl.className = 'tile-badge';
           }
+          // Breakdown popover alongside the badge (empty html => stays hidden).
+          const popEl = document.querySelector(`[data-pop="${tool.id}"]`);
+          if (popEl) {
+            const popHtml = projPopHtml(result.badge && result.badge.breakdown);
+            popEl.innerHTML = popHtml;
+            popEl.hidden = !popHtml;
+          }
         }
       }
       // Optional: subtitle replacement (stage-gate tiles use "Bin · Parent").
@@ -5743,7 +5885,36 @@ function bindAppsMenu() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 }
 
+// Tap-to-open for the projection breakdown. The badge lives inside the tile's
+// <a>, so a tap would otherwise navigate to the objective — suppress that and
+// toggle the popover instead. Desktop still gets it on plain hover via CSS.
+function bindProjPop() {
+  document.addEventListener('click', (e) => {
+    const badge = e.target.closest('.proj-wrap .tile-badge');
+    const wrap = badge && badge.closest('.proj-wrap');
+    // A tap on the badge opens its popover instead of following the tile link.
+    if (wrap) {
+      const pop = wrap.querySelector('.proj-pop');
+      if (pop && !pop.hidden) {
+        e.preventDefault();
+        e.stopPropagation();
+        const wasOpen = wrap.classList.contains('pinned');
+        document.querySelectorAll('.proj-wrap.pinned').forEach(w => w.classList.remove('pinned'));
+        if (!wasOpen) wrap.classList.add('pinned');
+        return;
+      }
+    }
+    // Tapping inside an open popover shouldn't navigate either; anywhere else closes.
+    if (e.target.closest('.proj-pop')) { e.preventDefault(); e.stopPropagation(); return; }
+    document.querySelectorAll('.proj-wrap.pinned').forEach(w => w.classList.remove('pinned'));
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') document.querySelectorAll('.proj-wrap.pinned').forEach(w => w.classList.remove('pinned'));
+  });
+}
+
 function bindDrawer() {
+  bindProjPop();
   document.getElementById('header-settings-btn').addEventListener('click', openDrawer);
   document.getElementById('drawer-close').addEventListener('click', closeDrawer);
   document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
