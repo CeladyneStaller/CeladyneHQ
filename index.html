@@ -523,6 +523,21 @@
   .tile-badge.proj-orange { background: #FAEEDA; color: #854F0B; }
   .tile-badge.proj-red    { background: #FCEBEB; color: #A32D2D; }
 
+  /* Pace dot on the projection badge. The badge colour is the forecast value;
+     this dot is the gate-vs-time pace band, so a stalled objective reads as a
+     green badge with a red dot rather than a red badge saying "90% proj.". */
+  .badge-pace-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-left: 6px;
+    vertical-align: middle;
+    flex: none;
+  }
+  .badge-pace-dot.good { background: #3B6D11; }
+  .badge-pace-dot.warn { background: #854F0B; }
+  .badge-pace-dot.bad  { background: #A32D2D; }
+
   /* ---- projection breakdown popover -------------------------------------- */
   /* Opens on hover (desktop) or tap (touch — the tap handler also suppresses the
      tile's own navigation, since the badge sits inside the tile's <a>). */
@@ -2969,8 +2984,11 @@ function initiativeLabel(id) { return _pfLabel(STATE.portfolio && STATE.portfoli
 // switch from min(o, g) to o, because at the midpoint anchor o == g.
 //
 // Because the forecast is floored at the current score, a low NUMBER can no
-// longer carry the warning — so the badge colours off PACE (F) instead. The
-// number says where it lands; the colour says whether it is on pace.
+// longer carry the warning on its own. Rather than colour off pace — which
+// produces badges whose colour argues with their number, e.g. "90% proj." in
+// red — the badge COLOUR tracks the forecast value and the pace band rides on
+// a small dot beside it. A stalled objective therefore reads as a green badge
+// with a red dot: it lands high, but the gate work has stopped moving.
 const PROJ_K = 0.667;
 const PROJ_EARLY_T = 0.15;   // below this the pace ratio is too noisy to show
 // Pace thresholds for the badge colour. F = 1 means gate odds exactly match time
@@ -3028,7 +3046,7 @@ function projPopHtml(bd) {
           '<span class="proj-row-val">' + escText(bd.forecast) + '</span></div>';
   html += '<div class="proj-note">Starting point is the current OKR score \u2014 the forecast ' +
           'never drops below what is already banked. Gate pace decides how much of the rest ' +
-          'closes, and sets the colour.</div>';
+          'closes, and sets the dot beside the badge.</div>';
   return html;
 }
 
@@ -3049,12 +3067,14 @@ function projTag(view) {
   // Pooled gate completion drives the forecast (see getObjectiveView); the tile
   // body's Gate-health number stays the MIN. They read differently on purpose.
   const S = Math.round(projScore(view.gatePooled / 100, view.score / 100, view.elapsedFraction));
-  // Colour off PACE, not the forecast value. The forecast is floored at the
-  // current score, so a low number no longer signals trouble — the pace ratio
-  // does. `pace` rides along on the tag for the breakdown popover.
+  // Colour tracks the SHOWN number, so the badge never disagrees with itself.
+  // The pace band is carried separately by `paceKey`, rendered as a small dot on
+  // the badge — that keeps the stall signal visible without a red badge reading
+  // "90% proj.". `pace` rides along for the breakdown popover.
   const F = projPace(view.gatePooled / 100, view.elapsedFraction);
-  const key = F >= PROJ_PACE_OK ? 'proj-green' : F >= PROJ_PACE_WARN ? 'proj-orange' : 'proj-red';
-  return { label: S + '% proj.', key, pace: F };
+  const key = S >= 80 ? 'proj-green' : S >= 60 ? 'proj-orange' : 'proj-red';
+  const paceKey = F >= PROJ_PACE_OK ? 'good' : F >= PROJ_PACE_WARN ? 'warn' : 'bad';
+  return { label: S + '% proj.', key, pace: F, paceKey };
 }
 
 function objectiveUrl(o, editable) {
@@ -5817,6 +5837,14 @@ async function fetchTileStatuses() {
           if (result.badge && result.badge.label) {
             badgeEl.textContent = result.badge.label;
             badgeEl.className = 'tile-badge ' + (result.badge.key || '');
+            // Pace dot: badge colour is the forecast, this carries the gate pace.
+            if (result.badge.paceKey) {
+              const dot = document.createElement('span');
+              dot.className = 'badge-pace-dot ' + result.badge.paceKey;
+              dot.title = 'Gate pace: ' + (result.badge.paceKey === 'good' ? 'on pace'
+                        : result.badge.paceKey === 'warn' ? 'behind' : 'badly behind');
+              badgeEl.appendChild(dot);
+            }
           } else {
             badgeEl.textContent = '';
             badgeEl.className = 'tile-badge';
