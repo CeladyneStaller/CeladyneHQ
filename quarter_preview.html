@@ -1,0 +1,1657 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.4.0/dist/tabler-icons.min.css">
+<style>
+  :root {
+    /* Unified Light — matches the suite's landing page (Space Grotesk / Inter /
+       IBM Plex Mono, teal accent, cool near-white ground, hairline lines). */
+    --bg: #F3F5F8;
+    --surface: #FFFFFF;
+    --surface-alt: #EEF1F5;
+    --border: #E2E6EC;
+    --border-strong: #CFD5DE;
+    --text: #1A2431;
+    --text-muted: #5C6B7D;
+    --text-subtle: #8B97A6;
+    --accent: #157A6B;
+    --accent-hover: #0E5A4D;
+    --accent-bg: #E4F0EE;
+    --accent-text: #0E5A4D;
+    --warning: #8A5A13;
+    --warning-bg: #FAEEDA;
+    --success: #3B6D11;
+    --success-bg: #EAF3DE;
+    --danger: #A32D2D;
+    --danger-bg: #FCEBEB;
+    --radius: 8px;
+    --radius-lg: 12px;
+    --radius-pill: 999px;
+    --indent-step: 16px;
+    /* Type roles: display for names/numbers, sans for body, mono for data/labels. */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-disp: 'Space Grotesk', var(--font-sans);
+    --font-mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+    --shadow-card: 0 1px 0 rgba(26,36,49,0.03);
+    --shadow-elev: 0 1px 2px rgba(26,36,49,0.05), 0 12px 32px rgba(26,36,49,0.10);
+  }
+ 
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  .mono { font-family: var(--font-mono); }
+ 
+  /* Layout shells */
+  .view { display: none; }
+  .view.active { display: block; }
+  .center-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+  }
+  .auth-card {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2.25rem 2rem;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: var(--shadow-card);
+  }
+ 
+  /* Brand */
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius);
+    background: var(--accent-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .brand-mark img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .brand-mark .fallback {
+    color: var(--accent-text);
+    font-size: 18px;
+    line-height: 1;
+  }
+  .brand-name {
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+  }
+ 
+  /* Typography */
+  h1 { font-size: 24px; font-weight: 500; letter-spacing: -0.015em; margin: 0; }
+  h2 { font-size: 18px; font-weight: 500; letter-spacing: -0.01em; margin: 0; }
+  h3 { font-size: 15px; font-weight: 500; margin: 0; }
+  .muted { color: var(--text-muted); }
+  .subtle { color: var(--text-subtle); }
+  .small { font-size: 13px; }
+  .tiny { font-size: 12px; }
+ 
+  /* Form elements */
+  label.field {
+    display: block;
+    margin-bottom: 14px;
+  }
+  label.field > .label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  input[type="text"], input[type="email"], input[type="password"], input[type="number"], select {
+    width: 100%;
+    height: 38px;
+    padding: 0 12px;
+    background: var(--surface);
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus,
+  input[type="number"]:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+  }
+  input.pin {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 18px;
+    letter-spacing: 8px;
+    text-align: center;
+    padding-left: 8px;
+  }
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    margin: 0;
+  }
+ 
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 38px;
+    padding: 0 16px;
+    background: var(--surface);
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.05s;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--surface-alt); border-color: var(--border-strong); }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .btn-danger {
+    color: var(--danger);
+    border-color: rgba(159,24,24,0.25);
+  }
+  .btn-danger:hover { background: var(--danger-bg); }
+  .btn-ghost {
+    border-color: transparent;
+    background: transparent;
+  }
+  .btn-ghost:hover { background: var(--surface-alt); border-color: transparent; }
+  .btn-block { width: 100%; }
+  .btn-sm { height: 30px; padding: 0 10px; font-size: 12px; }
+  .btn-icon {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+  }
+  .btn-icon:hover { background: var(--surface-alt); border-color: transparent; }
+ 
+  /* Page header (hub) */
+  .page-header {
+    background: var(--bg);
+    border-bottom: 0.5px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  /* Companion-app icons in the header — a small cluster, divided from the
+     edit/settings controls by a hairline. Each is a plain icon button that
+     opens its app in a new tab. */
+  .header-apps {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding-right: 8px;
+    margin-right: 2px;
+    border-right: 1px solid var(--border);
+  }
+  .app-link {
+    color: var(--text-subtle);
+    text-decoration: none;
+  }
+  .app-link:hover {
+    color: var(--accent);
+    background: var(--accent-bg);
+  }
+  .app-link i { font-size: 18px; }
+  /* Desktop shows the icon row; the "Apps" dropdown button is hidden. */
+  .apps-menu { position: relative; display: none; }
+  .apps-menu-list {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 190px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-elev);
+    padding: 5px;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .apps-menu-list[hidden] { display: none; }
+  .apps-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 11px;
+    border-radius: 7px;
+    text-decoration: none;
+    color: var(--text);
+    font-size: 14px;
+  }
+  .apps-menu-item i { font-size: 18px; color: var(--text-subtle); }
+  .apps-menu-item:hover { background: var(--accent-bg); color: var(--accent); }
+  .apps-menu-item:hover i { color: var(--accent); }
+  @media (max-width: 600px) {
+    /* Phones: swap the cramped icon row for a single "Apps" button + dropdown. */
+    .header-apps { display: none; }
+    .apps-menu { display: block; }
+  }
+  .user-pill {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 12px 4px 4px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-alt);
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .role-tag {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--accent-text);
+    background: var(--accent-bg);
+    padding: 2px 6px;
+    border-radius: var(--radius);
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+  }
+ 
+  /* Hub body */
+  .hub-body {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 2rem 24px 4rem;
+  }
+  .greeting-row {
+    margin-bottom: 1.75rem;
+  }
+  .greeting-row .meta {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+ 
+  /* Tile sections */
+  .tile-section {
+    margin-bottom: 2rem;
+  }
+  .tile-section:last-child {
+    margin-bottom: 0;
+  }
+  .tile-section-head {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+    margin: 0 0 14px;
+    padding: 0 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    user-select: none;
+  }
+
+  /* Sub-sections within a tile section (e.g. Projects → Stage-gates / Meetings / Gantts) */
+  .tile-subsection {
+    margin-bottom: 1.25rem;
+    margin-left: var(--indent-step);
+  }
+  .tile-subsection:last-child {
+    margin-bottom: 0;
+  }
+  .tile-subsection-head {
+    font-size: 15px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-subtle);
+    margin: 0 0 10px;
+    padding: 0 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+  }
+
+  /* Collapsible chevron + state */
+  .tile-section-toggle {
+    display: inline-flex;
+    transition: transform 0.15s ease;
+    color: var(--text-subtle);
+    flex-shrink: 0;
+  }
+  .tile-section-head .tile-section-toggle { font-size: 18px; }
+  .tile-subsection-head .tile-section-toggle { font-size: 16px; }
+  /* Hide everything in a collapsed section/subsection except the head itself */
+  .tile-section.collapsed > *:not(.tile-section-head),
+  .tile-subsection.collapsed > *:not(.tile-subsection-head) {
+    display: none;
+  }
+  .tile-section.collapsed > .tile-section-head .tile-section-toggle,
+  .tile-subsection.collapsed > .tile-subsection-head .tile-section-toggle {
+    transform: rotate(-90deg);
+  }
+
+  /* Tile grid */
+  /* Base tile grid. Safety keeps the responsive auto-fit behavior (its sizing
+     is intentionally left alone). Objective and link tiles get fixed column
+     counts by type — see the scoped rules below. */
+  .tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+  }
+  /* Tile widths standardized by TILE TYPE, not section:
+       Objective tiles (stage-gates / OKR / KPI subsections) → 3 per row.
+       Link tiles (meetings / gantts subsections, and the flat links /
+       analysis / coding sections) → 4 per row.
+     This holds even when both types appear in one section (e.g. Projects),
+     because the rules target the subsection / section data-attributes.
+     minmax(0, 1fr) lets columns shrink below content width so the count stays
+     fixed. Mobile collapses both to a single column (below). */
+  .tile-subsection[data-subsection="stage-gates"] > .tile-grid,
+  .tile-subsection[data-subsection="okr"] > .tile-grid,
+  .tile-subsection[data-subsection="kpi"] > .tile-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .tile-subsection[data-subsection="meetings"] > .tile-grid,
+  .tile-subsection[data-subsection="gantts"] > .tile-grid,
+  .tile-section[data-section="links"] > .tile-grid,
+  .tile-section[data-section="analysis"] > .tile-grid,
+  .tile-section[data-section="coding"] > .tile-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  /* Mobile: collapse the fixed-count grids so tiles aren't cramped. Safety's
+     auto-fit grid already handles narrow widths on its own. */
+  @media (max-width: 640px) {
+    /* Every tile grid goes single-column on phones — section grids AND the
+       objective sub-section grids (Projects/Watching/Leadership all use the
+       'objective' and 'kpi' sub-sections). Matching every .tile-grid is simplest
+       and can't fall out of date when section/sub-section ids change. */
+    .tile-grid { grid-template-columns: 1fr !important; }
+    /* Rollup cards (Leadership) also stack rather than sitting in a wide row. */
+    .rollup-strip { flex-direction: column; }
+    .rollup-card { width: 100%; }
+  }
+  .tile {
+    display: block;
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px 20px 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+    cursor: pointer;
+    box-shadow: var(--shadow-card);
+  }
+  .tile:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+    box-shadow: 0 1px 0 rgba(15,15,14,0.04), 0 6px 16px rgba(15,15,14,0.06);
+  }
+  .tile-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .tile-icon {
+    font-size: 22px;
+    color: var(--text-muted);
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .tile-name {
+    font-family: var(--font-disp);
+    font-size: 15.5px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Status badge in stage-gate tile heads. Empty by default — populated by
+     the runner once the company-bin snapshot resolves. */
+  .tile-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 3px 9px;
+    border-radius: 10px;
+    flex-shrink: 0;
+    line-height: 1.4;
+  }
+  .tile-badge:empty { display: none; }
+  .tile-badge.ontrack  { background: #EAF3DE; color: #3B6D11; }
+  .tile-badge.watch    { background: #FAEEDA; color: #854F0B; }
+  .tile-badge.atrisk   { background: #FCEBEB; color: #A32D2D; }
+  .tile-badge.complete { background: #EAF3DE; color: #3B6D11; }  /* achieved = green */
+  /* no-band: RDCore scored this as null — nothing measurable, which is a real
+     state and not an error. Also the landing spot for any band name the Hub does
+     not recognise, so a future RDCore band renders neutral instead of unstyled. */
+  .tile-badge.noband   { background: var(--surface-alt); color: var(--text-subtle); }
+  /* Projected-score tag colours, on the 80/60 thresholds. Same swatches the body
+     scores use, so green/orange/red read identically across the tile. */
+  .tile-badge.proj-green  { background: #EAF3DE; color: #3B6D11; }
+  .tile-badge.proj-orange { background: #FAEEDA; color: #854F0B; }
+  .tile-badge.proj-red    { background: #FCEBEB; color: #A32D2D; }
+
+  /* Pace dot on the projection badge. The badge colour is the forecast value;
+     this dot is the gate-vs-time pace band, so a stalled objective reads as a
+     green badge with a red dot rather than a red badge saying "90% proj.". */
+  .badge-pace-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-left: 6px;
+    vertical-align: middle;
+    flex: none;
+  }
+  .badge-pace-dot.good { background: #3B6D11; }
+  .badge-pace-dot.warn { background: #854F0B; }
+  .badge-pace-dot.bad  { background: #A32D2D; }
+
+  /* Pinned-quarter notice. Shown to every user when an admin has pinned a quarter
+     other than the calendar one, so a short tile list is never a mystery. */
+  .quarter-banner {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 14px;
+    margin-bottom: 16px;
+    background: var(--accent-bg);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    color: var(--accent-text);
+    font-size: 13px;
+  }
+  .quarter-banner[hidden] { display: none; }
+  .quarter-banner i { font-size: 16px; flex: none; }
+  .quarter-banner b { font-family: var(--font-mono); font-weight: 500; }
+
+  /* ---- projection breakdown popover -------------------------------------- */
+  /* Opens on hover (desktop) or tap (touch — the tap handler also suppresses the
+     tile's own navigation, since the badge sits inside the tile's <a>). */
+  .proj-wrap { position: relative; display: inline-flex; }
+  .proj-wrap .tile-badge { cursor: help; }
+  .proj-pop {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 60;
+    min-width: 268px;
+    padding: 11px 13px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-elev);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-3px);
+    transition: opacity .13s, transform .13s, visibility .13s;
+    text-align: left;
+    cursor: default;
+  }
+  .proj-pop[hidden] { display: none; }
+  .proj-wrap:hover .proj-pop,
+  .proj-wrap:focus-within .proj-pop,
+  .proj-wrap.pinned .proj-pop { opacity: 1; visibility: visible; transform: translateY(0); }
+  .proj-pop-head {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 9px;
+  }
+  .proj-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; }
+  .proj-row-lbl { font-size: 12px; color: var(--text-muted); flex: 1; }
+  .proj-row-val {
+    font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+    color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .proj-row-val.good { color: var(--success); }
+  .proj-row-val.warn { color: var(--warning); }
+  .proj-row-val.bad  { color: var(--danger); }
+  .proj-lane { display: flex; gap: 8px; margin: 2px 0 2px 10px; }
+  .proj-lane-n { font-size: 10.5px; color: var(--text-subtle); flex: 1; }
+  .proj-lane-v {
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-subtle);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .proj-sep { height: 1px; background: var(--border); margin: 8px 0; }
+  .proj-row.is-result .proj-row-lbl { color: var(--text); font-weight: 500; }
+  .proj-row.is-result .proj-row-val { font-family: var(--font-disp); font-size: 15px; font-weight: 600; }
+  .proj-note {
+    font-family: var(--font-mono); font-size: 9px; line-height: 1.55;
+    color: var(--text-subtle); margin-top: 8px;
+  }
+  @media (max-width: 640px) {
+    /* Keep the popover inside the viewport on phones. */
+    .proj-pop { min-width: 0; width: min(80vw, 268px); }
+  }
+
+  /* Leadership rollup strip — compact score cards above the objective tiles.
+     A rollup is a summary number, not a link, so it is visually lighter than a
+     tile: no icon, no body, just a label and a big banded score. */
+  .rollup-strip { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 18px; }
+  .rollup-card {
+    display: flex; flex-direction: column; gap: 2px;
+    min-width: 128px; padding: 10px 14px;
+    background: var(--surface); border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+  }
+  .rollup-card.rollup-company { border-color: var(--border-strong); }
+  .rollup-label { font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: .06em;
+                  text-transform: uppercase; color: var(--text-subtle); }
+  .rollup-score { font-family: var(--font-disp); font-size: 26px; font-weight: 600; line-height: 1.05;
+                  font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+  .rollup-score.ontrack { color: #3B6D11; }
+  .rollup-score.watch   { color: #854F0B; }
+  .rollup-score.atrisk  { color: #A32D2D; }
+  .rollup-kind { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .02em; color: var(--text-subtle); font-weight: 400; }
+  /* overall score large; active-quarter score smaller beneath, with a mono Q label */
+  .rollup-score-lg { font-size: 26px; }
+  .rollup-score-sm { font-family: var(--font-disp); font-size: 15px; font-weight: 600;
+                     font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+  .rollup-score-sm.ontrack { color: #3B6D11; } .rollup-score-sm.watch { color: #854F0B; } .rollup-score-sm.atrisk { color: #A32D2D; }
+  .rollup-line { display: flex; align-items: baseline; gap: 6px; }
+  .rollup-qline { margin-top: 2px; }
+  .rollup-qlbl { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .04em;
+                 text-transform: uppercase; color: var(--text-subtle); }
+  /* ---- merged objective tile body ---------------------------------------- */
+  .tile-objective      { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+
+  /* the schedule alarm: glow on the tile, bold line in the body */
+  .tile-alarm          { border-color: #C0453E !important;
+                         box-shadow: 0 0 0 1px #C0453E, 0 0 12px rgba(192,69,62,.35); }
+  .ov-catchup          { font-size: 11px; font-weight: 700; color: #A32D2D;
+                         letter-spacing: .01em; white-space: nowrap; margin-top: 2px; }
+
+  /* the two named scores */
+  .ov-stats            { display: flex; align-items: baseline; gap: 16px; }
+  .ov-stat             { display: flex; align-items: baseline; gap: 4px; }
+  /* right-hand column, level with the two scores: schedule, and the alarm under
+     it. Alarm lives here rather than on its own row to keep the tile short. */
+  .ov-schedcol         { margin-left: auto; flex: 0 0 auto; text-align: right; }
+  .ov-sched            { font-size: 11px; color: var(--text-subtle); white-space: nowrap; }
+  .ov-statnum          { font-family: var(--font-disp); font-size: 19px; font-weight: 600; line-height: 1;
+                         font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+  .ov-statnum.ontrack  { color: #3B6D11; }
+  .ov-statnum.watch    { color: #854F0B; }
+  .ov-statnum.atrisk   { color: #A32D2D; }
+  .ov-statlbl          { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--text-subtle); }
+
+  /* section wrapper + heading. ov-behind sets NO font-size on purpose: it is used
+     inside both the 9px section label and the 10px lane fraction, and pinning a
+     size here would shrink it in the lane. */
+  .ov-sec              { border-top: 0.5px solid var(--border); padding-top: 8px; }
+  .ov-seclbl           { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle); font-weight: 500; text-transform: uppercase;
+                         letter-spacing: .03em; margin-bottom: 6px; }
+  .ov-behind           { color: #A32D2D; font-weight: 600; }
+
+  /* key result: dot | name | own score */
+  .ov-kr               { display: flex; align-items: center; gap: 6px; }
+  .ov-krdot            { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+                         background: var(--border); }
+  .ov-krdot.ontrack    { background: #4E9A2A; }
+  .ov-krdot.watch      { background: #C68A1E; }
+  .ov-krdot.atrisk     { background: #C0453E; }
+  .ov-krname           { font-size: 11px; font-weight: 600; flex: 1; min-width: 0;
+                         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ov-krpct            { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; flex: 0 0 auto;
+                         font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+  .ov-krpct.ontrack    { color: #3B6D11; }
+  .ov-krpct.watch      { color: #854F0B; }
+  .ov-krpct.atrisk     { color: #A32D2D; }
+
+  /* KPIs nested under a KR. minmax(0,1fr) on the name lets it ellipsise instead
+     of shoving the target/now columns off a 240px tile. */
+  .ov-kpis             { display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+                         gap: 2px 8px; font-size: 10px; margin: 3px 0 8px 13px; }
+  .ov-kpname           { color: var(--text-subtle); overflow: hidden;
+                         text-overflow: ellipsis; white-space: nowrap; }
+  .ov-kptgt            { color: var(--text-subtle); text-align: right;
+                         font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ov-kpcur            { text-align: right; font-variant-numeric: tabular-nums;
+                         white-space: nowrap; }
+  .ov-kpmore           { font-size: 9px; color: var(--text-subtle); margin: -4px 0 8px 13px; }
+  .ov-kpnone           { font-size: 10px; color: var(--text-subtle); margin: 3px 0 8px 13px; }
+
+  /* one section per workstream — only rendered when there is more than one */
+  .ov-lanehd           { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; }
+  /* the lane's flag badge reuses .tile-gates-behind so it matches the top line */
+  .ov-lanehd .tile-gates-behind { flex: 0 0 auto; }
+  .ov-lanename         { font-size: 10px; font-weight: 600; flex: 1; min-width: 0;
+                         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ov-lanefrac         { font-size: 10px; font-weight: 600; flex: 0 0 auto;
+                         font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+  .ov-lanefrac.ontrack { color: #3B6D11; }
+  .ov-lanefrac.watch   { color: #854F0B; }
+  .ov-lanefrac.atrisk  { color: #A32D2D; }
+  .ov-lane             { margin-bottom: 8px; }
+  .ov-lane:last-child  { margin-bottom: 0; }
+
+  /* ---- Edit mode ---- */
+  .edit-banner {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    background: var(--accent-bg);
+    border: 0.5px solid var(--accent);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--accent-text);
+  }
+  body.edit-mode .edit-banner { display: flex; }
+  #header-edit-btn.active {
+    background: var(--accent-bg);
+    color: var(--accent-text);
+  }
+  /* Per-tile remove control — only visible in edit mode, only on removable tiles. */
+  .tile-remove {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: none;
+    background: var(--danger);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    padding: 0;
+  }
+  body.edit-mode .tile.removable { position: relative; }
+  body.edit-mode .tile.removable .tile-remove { display: flex; }
+  body.edit-mode .tile.removable { outline: 1px dashed var(--border-strong); outline-offset: 2px; }
+  /* Add-tile button — a dashed placeholder tile shown in edit mode. */
+  .tile-add {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 90px;
+    border: 1.5px dashed var(--border-strong);
+    border-radius: var(--radius-lg);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    width: 100%;
+  }
+  .tile-add:hover { border-color: var(--accent); color: var(--accent-text); background: var(--accent-bg); }
+  body.edit-mode .tile-add { display: flex; }
+  /* Add-tile modal bits */
+  .addtile-section { margin-bottom: 16px; }
+  .addtile-label { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 8px; display: block; }
+  .addtile-viewtypes { display: flex; gap: 8px; flex-wrap: wrap; }
+  .addtile-vt {
+    flex: 1;
+    min-width: 100px;
+    padding: 10px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    text-align: center;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .addtile-vt.selected { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-text); }
+  .addtile-vt.disabled { opacity: 0.4; cursor: not-allowed; }
+  .addtile-search { width: 100%; margin-bottom: 8px; }
+  /* Division + product filter dropdowns. */
+  .addtile-filters {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .addtile-filters select {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    font-size: 12px;
+    padding: 0 26px 0 10px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+  }
+  /* Bar above the list: select-all button + selection count. */
+  .addtile-listbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .addtile-selectall {
+    font-size: 12px;
+    padding: 3px 10px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .addtile-selectall:hover { border-color: var(--accent); color: var(--accent-text); }
+  .addtile-selectall:disabled { opacity: 0.4; cursor: not-allowed; }
+  .addtile-selcount { font-size: 12px; color: var(--text-subtle); }
+  .addtile-list {
+    max-height: 280px;
+    overflow-y: auto;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+  }
+  .addtile-obj {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    padding: 9px 12px;
+    border: none;
+    border-bottom: 0.5px solid var(--border);
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .addtile-obj:last-child { border-bottom: none; }
+  .addtile-obj:hover { background: var(--surface-alt); }
+  .addtile-obj.selected { background: var(--accent-bg); color: var(--accent-text); }
+  .addtile-check { margin-top: 2px; flex-shrink: 0; cursor: pointer; }
+  .addtile-obj-text { flex: 1; }
+  .addtile-obj .meta { font-size: 11px; color: var(--text-subtle); display: block; margin-top: 2px; }
+  .addtile-toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
+
+  /* ---- Layered grouping ---- */
+  /* Grouping control (chip-chain) — shown only in edit mode. */
+  .grouping-control {
+    display: none;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+    padding: 8px 10px;
+    background: var(--surface-alt);
+    border-radius: var(--radius);
+  }
+  body.edit-mode .grouping-control { display: flex; }
+  .grouping-label { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-right: 2px; }
+  .grouping-chain { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .grouping-avail { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-left: 6px; }
+  .grouping-sep { color: var(--text-subtle); font-size: 12px; margin: 0 1px; }
+  .grouping-none { font-size: 12px; color: var(--text-subtle); font-style: italic; }
+  .grouping-chip {
+    font-size: 12px;
+    padding: 3px 9px;
+    border-radius: 12px;
+    border: 0.5px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    line-height: 1.6;
+  }
+  .grouping-chip.in-chain { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent); }
+  .grouping-chip.available { color: var(--text-muted); }
+  .grouping-chip.available:hover { border-color: var(--accent); color: var(--accent-text); }
+  .grouping-x { font-size: 13px; opacity: 0.7; }
+  /* Nested group wrappers + headers. Indent and de-emphasize with depth. */
+  .tile-group { margin-bottom: 8px; margin-left: var(--indent-step); }
+  .tile-group-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text);
+    padding: 6px 4px;
+    user-select: none;
+  }
+  /* Each nested group/subsection indents one step relative to its parent. The
+     DOM is genuinely nested (group→group→subsection), so a uniform margin-left
+     on each wrapper compounds into correct per-level indentation. Font size
+     still steps down by depth for hierarchy. */
+  .tile-group-d1 > .tile-group-head { font-size: 15px; color: var(--text-muted); }
+  .tile-group-d2 > .tile-group-head { font-size: 14px; color: var(--text-subtle); }
+  .tile-group-head .tile-section-toggle { transition: transform 0.15s; }
+  .tile-group.collapsed > .tile-group-head .tile-section-toggle { transform: rotate(-90deg); }
+  .tile-group.collapsed > *:not(.tile-group-head) { display: none; }
+  .tile-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.45;
+    margin: 0 0 14px;
+  }
+  .tile-status {
+    font-size: 12px;
+    color: var(--text-subtle);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 16px;
+  }
+  .tile-status.warning { color: var(--warning); }
+  .tile-status.success { color: var(--success); }
+  .tile-status.danger { color: var(--danger); }
+  .tile-status.loading { color: var(--text-subtle); font-style: italic; }
+  .tile-status .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+
+  /* Stage-gate bubbles (mirrors the active panel of the Gantt) */
+
+  /* ---- OKR view tile body ---- */
+  .tile-okr-empty {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0.5px solid var(--border);
+    font-size: 12px;
+    color: var(--text-subtle);
+    font-style: italic;
+  }
+  .okr-kr-score {
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .okr-kr-score.ontrack { color: #3B6D11; }
+  .okr-kr-score.watch   { color: #854F0B; }
+  .okr-kr-score.atrisk  { color: #A32D2D; }
+  .okr-kr-score.noband  { color: var(--text-subtle); }
+  .okr-kr-bar {
+    height: 5px;
+    background: var(--surface-alt);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .okr-kr-fill { height: 100%; border-radius: 3px; transition: width 0.2s; }
+  .okr-kr-fill.ontrack { background: #4E9A2A; }
+  .okr-kr-fill.watch   { background: #C68A1E; }
+  .okr-kr-fill.atrisk  { background: #C0453E; }
+  .okr-kr-fill.noband  { background: var(--border); }
+  .okr-kr-cue { opacity: 0.7; }
+
+  /* ---- KPI view tile body ---- */
+  .tile-kpi {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0.5px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .kpi-group-head {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-subtle);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .kpi-group-tag {
+    font-size: 9px;
+    background: var(--surface-alt);
+    color: var(--text-muted);
+    padding: 1px 5px;
+    border-radius: 6px;
+    letter-spacing: 0.03em;
+  }
+  .kpi-row { margin-bottom: 6px; }
+  .kpi-row:last-child { margin-bottom: 0; }
+  .kpi-row-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 3px;
+  }
+  .kpi-row-name {
+    font-size: 12px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .kpi-row-val {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .kpi-row-cue { opacity: 0.7; }
+  .kpi-row-bar {
+    height: 4px;
+    background: var(--surface-alt);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .kpi-row-fill { height: 100%; border-radius: 3px; transition: width 0.2s; }
+  .kpi-row-fill.ontrack { background: #4E9A2A; }
+  .kpi-row-fill.watch   { background: #C68A1E; }
+  .kpi-row-fill.atrisk  { background: #C0453E; }
+  .kpi-row-fill.noband  { background: var(--border); }
+  .tile-gates-behind {
+    color: #A32D2D;
+    background: #FCEBEB;
+    padding: 1px 6px;
+    border-radius: 8px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 10px;
+  }
+  .tile-gates-track {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .gate-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: 700;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  .gate-dot.passed       { background: #EAF3DE; border-color: #3B6D11; color: #3B6D11; }
+  .gate-dot.passed-late  { background: #FAEEDA; border-color: #854F0B; color: #854F0B; }
+  .gate-dot.overdue      { background: #FCEBEB; border-color: #A32D2D; color: #A32D2D; }
+  .gate-dot.in-progress  { background: #E6F1FB; border-color: #0C447C; color: #0C447C; }
+  .gate-dot.pending      { background: #f0f0ee; border-color: #ccc;    color: #555; }
+  /* milestone-KR step track: the gate-dot track sits indented under the KR row,
+     with a small mono "N/total steps" note. Reuses .tile-gates-track + .gate-dot. */
+  .ov-msteps { display: flex; align-items: center; gap: 10px; margin: 2px 0 8px 15px; }
+  .ov-mstepfoot { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle); letter-spacing: .02em; white-space: nowrap; }
+  /* Kanban board section: each board a header row (name + meta + collapsed column
+     summary track) with per-workstream tile rows beneath, flat with a lane tag. */
+  .ov-board { margin-top: 10px; padding-top: 10px; border-top: 0.5px solid var(--border); }
+  .ov-board:first-of-type { border-top: none; padding-top: 2px; margin-top: 4px; }
+  .ov-bhead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .ov-bname { font-family: var(--font-disp); font-size: 12.5px; font-weight: 600; }
+  .ov-bmeta { font-family: var(--font-mono); font-size: 9px; letter-spacing: .03em; color: var(--text-subtle); }
+  .ov-bhtrack { margin-left: auto; }
+  .ov-btile { display: flex; align-items: center; gap: 8px; margin: 4px 0 4px 12px; }
+  .ov-btname { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); min-width: 92px; }
+  .ov-btlane { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-subtle); min-width: 74px; }
+  .ov-bttrack { display: flex; align-items: center; }
+  .gate-conn {
+    flex: 1;
+    height: 2px;
+    min-width: 4px;
+    max-width: 16px;
+    background: var(--border);
+  }
+
+  /* Leadership panel — embedded in dashboard for Lead/CTO sessions */
+  .leadership-panel {
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .leadership-panel-loading {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-subtle);
+    font-size: 13px;
+  }
+  .leadership-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 8px 12px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--surface-alt);
+  }
+  .btn-leadership-filter {
+    background: var(--surface);
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    line-height: 1.4;
+  }
+  .btn-leadership-filter:hover { background: var(--surface-alt); }
+  .btn-leadership-filter.has-active {
+    border-color: var(--accent);
+    color: var(--accent-text);
+    background: var(--accent-bg);
+  }
+  .leadership-filters {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--surface-alt);
+    flex-wrap: wrap;
+  }
+  /* The HTML `hidden` attribute defaults to display:none via user-agent CSS,
+     but our `display: flex` rule above overrides it. Restore the hide. */
+  .leadership-filters[hidden] {
+    display: none;
+  }
+  .leadership-filters select {
+    height: 28px;
+    font-size: 12px;
+    padding: 0 24px 0 8px;
+  }
+  /* Stage 2 leadership filter bar (replaces the old panel toolbar). */
+  /* Filter controls live inside the Leadership section header, pushed to the
+     right edge. Reset the header's uppercase/letter-spacing for the button. */
+  .leadership-filter-bar {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  /* Filter button — opens the filter modal. Active state when a non-default
+     filter is applied (accent ring + tint). */
+  .leadership-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+  }
+  .leadership-filter-btn .ti { font-size: 14px; }
+  .leadership-filter-btn.has-active {
+    background: var(--accent-bg);
+    color: var(--accent-text);
+    border-color: var(--accent);
+  }
+  .leadership-filter-count {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-subtle);
+  }
+  /* Filter modal fields (status + tracker selects). */
+  .filter-modal-field { margin-bottom: 14px; }
+  .filter-modal-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .filter-modal-field select {
+    width: 100%;
+    height: 34px;
+    font-size: 13px;
+    padding: 0 28px 0 10px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+  }
+  /* View multiselect — checkbox chips in the leadership filter modal. */
+  .filter-modal-checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .filter-modal-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    padding: 6px 12px;
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    cursor: pointer;
+    user-select: none;
+  }
+  .filter-modal-check:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+    color: var(--accent-text);
+  }
+  .filter-modal-check input { cursor: pointer; margin: 0; }
+  .leadership-tracker-block {
+    padding: 12px 14px;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .leadership-tracker-block:last-child { border-bottom: none; }
+  .leadership-tracker-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .leadership-tracker-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .leadership-tracker-meta {
+    font-size: 11px;
+    color: var(--text-subtle);
+  }
+  .leadership-objgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+  }
+  .leadership-card {
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    background: var(--surface);
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    transition: border-color 120ms;
+  }
+  .leadership-card:hover {
+    border-color: var(--border-strong);
+  }
+  .leadership-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .leadership-card-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    line-height: 1.3;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .leadership-status-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 10px;
+    flex-shrink: 0;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .leadership-status-badge.ontrack  { background: #EAF3DE; color: #3B6D11; }
+  .leadership-status-badge.watch    { background: #FAEEDA; color: #854F0B; }
+  .leadership-status-badge.atrisk   { background: #FCEBEB; color: #A32D2D; }
+  .leadership-status-badge.complete { background: var(--surface-alt); color: var(--text-subtle); }
+  .leadership-card-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .leadership-card-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--surface-alt);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .leadership-card-bar-fill {
+    height: 100%;
+    background: var(--text-subtle);
+    border-radius: 2px;
+  }
+  .leadership-card-bar-fill.ontrack  { background: #3B6D11; }
+  .leadership-card-bar-fill.watch    { background: #BA7517; }
+  .leadership-card-bar-fill.atrisk   { background: #A32D2D; }
+  .leadership-card-bar-fill.complete { background: var(--text-subtle); }
+  .leadership-card-pct {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 32px;
+    text-align: right;
+  }
+  .leadership-card-meta {
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .leadership-card-stats {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .leadership-card-stats.ontrack  { color: var(--success); }
+  .leadership-card-stats.watch    { color: var(--warning); }
+  .leadership-card-stats.atrisk   { color: var(--danger); }
+  .leadership-card-stats.complete { color: var(--text-subtle); }
+  .leadership-card-gates {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0.5px solid var(--border);
+  }
+  .leadership-empty {
+    padding: 18px;
+    text-align: center;
+    color: var(--text-subtle);
+    font-size: 12px;
+  }
+ 
+  /* Drawer (settings) */
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15,15,14,0.4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    z-index: 50;
+  }
+  .drawer-backdrop.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: 460px;
+    background: var(--surface);
+    border-left: 0.5px solid var(--border);
+    box-shadow: var(--shadow-elev);
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+  }
+  .drawer.open { transform: translateX(0); }
+  .drawer-head {
+    padding: 18px 20px;
+    border-bottom: 0.5px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+  .drawer-section {
+    margin-bottom: 28px;
+  }
+  .drawer-section-head {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+ 
+  /* User list (admin) */
+  .user-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .user-row:last-child { border-bottom: none; }
+  .user-info { flex: 1; min-width: 0; }
+  .user-info .email {
+    font-size: 13px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .user-info .meta {
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin-top: 2px;
+  }
+  .user-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .user-row.disabled .email { text-decoration: line-through; color: var(--text-subtle); }
+ 
+  /* Modal */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15,15,14,0.45);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    z-index: 80;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: var(--shadow-elev);
+  }
+  .modal.modal-wide {
+    max-width: 640px;
+  }
+  .modal h3 { margin-bottom: 6px; }
+  .modal p.intro { font-size: 13px; color: var(--text-muted); margin: 0 0 1.25rem; }
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 1.25rem;
+  }
+
+  /* Folder modal sections */
+  .folder-section {
+    margin-bottom: 1.25rem;
+  }
+  .folder-section:last-of-type {
+    margin-bottom: 0.5rem;
+  }
+  .folder-section-head {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-subtle);
+    margin: 0 0 10px;
+    padding: 0 4px;
+  }
+  .folder-tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+  }
+  .folder-empty {
+    padding: 14px;
+    border: 0.5px dashed var(--border-strong);
+    border-radius: var(--radius);
+    color: var(--text-subtle);
+    font-size: 12px;
+    text-align: center;
+    background: var(--surface);
+  }
+ 
+  /* Toasts */
+  .toast-stack {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 100;
+    pointer-events: none;
+  }
+  .toast {
+    background: var(--text);
+    color: var(--bg);
+    padding: 10px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    box-shadow: var(--shadow-elev);
+    pointer-events: auto;
+    animation: toastIn 0.2s ease-out;
+    max-width: 360px;
+  }
+  .toast.error { background: var(--danger); }
+  .toast.success { background: var(--success); }
+  @keyframes toastIn {
+    from { transform: translateY(8px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+ 
+  /* Inline messages */
+  .inline-error {
+    background: var(--danger-bg);
+    color: var(--danger);
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    margin-bottom: 14px;
+  }
+  .inline-info {
+    background: var(--accent-bg);
+    color: var(--accent-text);
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    margin-bottom: 14px;
+  }
+
+  /* Objective picker */
+  .obj-picker {
+    border: 0.5px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden; /* contain rounded corners over the filter row */
+  }
+  .obj-picker-filters {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--surface-alt);
+  }
+  .obj-picker-filters select {
+    flex: 1;
+    height: 28px;
+    font-size: 12px;
+    padding: 0 24px 0 8px;
+    min-width: 0; /* let flex children shrink past content */
+  }
+  .obj-picker-body {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .obj-picker-footer {
+    padding: 6px 10px;
+    border-top: 0.5px solid var(--border);
+    background: var(--surface-alt);
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .obj-picker-footer button {
+    background: none;
+    border: none;
+    color: var(--text-info, var(--accent));
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 4px;
+  }
+  .obj-picker-footer button:hover { text-decoration: underline; }
+  .obj-picker .obj-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 0.5px solid var(--border);
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .obj-picker .obj-row:last-child { border-bottom: none; }
+  .obj-picker .obj-row:hover { background: var(--surface-alt); }
+  .obj-picker .obj-row input { margin: 0; flex-shrink: 0; }
+  .obj-picker .obj-empty {
+    padding: 12px;
+    font-size: 13px;
+    color: var(--text-subtle);
+    text-align: center;
+  }
+  .obj-picker-meta {
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin-top: 4px;
+  }
+ 
+  /* Footer note (login) */
+  .auth-footnote {
+    margin-top: 1.5rem;
+    font-size: 12px;
+    color: var(--text-subtle);
+    text-align: center;
+  }
+ 
+  /* Loading spinner */
+  .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid var(--text-subtle);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+ 
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0);
+    white-space: nowrap; border: 0;
+  }
+</style></head><body style="background:var(--bg)"><div style="max-width:820px;margin:0 auto;padding:32px 22px 60px">
+ <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-subtle);margin-bottom:14px">Admin-set active quarter</div>
+
+ <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-subtle);margin:22px 0 8px">What every user sees when a quarter is pinned</div>
+ <div class="quarter-banner"><i class="ti ti-calendar-stats"></i><span>Showing <b>2026Q2</b> objectives &mdash; set by an admin. The calendar quarter is 2026Q3.</span></div>
+ <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:14px">
+  <a class="tile"><div style="display:flex;align-items:center;gap:9px"><i class="ti ti-target" style="color:var(--accent)"></i><span class="tile-name" style="flex:1">Membrane durability</span><span class="tile-badge proj-green">82% proj.<span class="badge-pace-dot good"></span></span></div><div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-subtle);margin-top:8px">2026Q2</div></a>
+  <a class="tile"><div style="display:flex;align-items:center;gap:9px"><i class="ti ti-target" style="color:var(--accent)"></i><span class="tile-name" style="flex:1">Stack cost reduction</span><span class="tile-badge proj-orange">63% proj.<span class="badge-pace-dot bad"></span></span></div><div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-subtle);margin-top:8px">2026Q2</div></a>
+ </div>
+
+ <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-subtle);margin:34px 0 8px">Admin control (drawer &rarr; Hub configuration)</div>
+ <div style="max-width:320px;border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;background:var(--surface)">
+  <div class="drawer-section-head" style="margin-bottom:12px">Hub configuration</div>
+  <div class="tiny muted" style="margin-bottom:4px">Active quarter</div>
+  <div style="display:flex;gap:6px;margin-bottom:4px">
+   <select class="input" style="flex:1"><option>Follow the calendar (2026Q3)</option><option selected>2026Q2</option><option>2026Q1</option></select>
+   <button class="btn btn-sm">Set</button></div>
+  <div class="tiny muted" style="margin-bottom:12px">Pinned to 2026Q2 for all users.</div>
+  <button class="btn btn-block btn-sm" style="margin-bottom:8px">Manage division links</button>
+ </div>
+
+ <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted);line-height:1.9;margin-top:26px;background:var(--surface-alt);border-left:2px solid var(--accent);padding:12px 16px;border-radius:0 8px 8px 0">
+  The banner only appears when the pin <b>differs</b> from the calendar quarter.<br>
+  Objectives with no quarter set always show &mdash; they are never silently hidden.<br>
+  A malformed pin falls back to the calendar rather than blanking the Hub.</div>
+</div></body></html>

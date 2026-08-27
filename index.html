@@ -538,6 +538,24 @@
   .badge-pace-dot.warn { background: #854F0B; }
   .badge-pace-dot.bad  { background: #A32D2D; }
 
+  /* Pinned-quarter notice. Shown to every user when an admin has pinned a quarter
+     other than the calendar one, so a short tile list is never a mystery. */
+  .quarter-banner {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 14px;
+    margin-bottom: 16px;
+    background: var(--accent-bg);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    color: var(--accent-text);
+    font-size: 13px;
+  }
+  .quarter-banner[hidden] { display: none; }
+  .quarter-banner i { font-size: 16px; flex: none; }
+  .quarter-banner b { font-family: var(--font-mono); font-weight: 500; }
+
   /* ---- projection breakdown popover -------------------------------------- */
   /* Opens on hover (desktop) or tap (touch — the tap handler also suppresses the
      tile's own navigation, since the badge sits inside the tile's <a>). */
@@ -1748,6 +1766,7 @@
       <span>Edit mode — add tiles to watch objectives, or remove tiles you've added. Assigned-project tiles can't be removed.</span>
       <button class="btn btn-sm" id="edit-done-btn">Done</button>
     </div>
+    <div class="quarter-banner" id="quarter-banner" hidden></div>
     <div id="tile-sections"></div>
   </div>
 </div>
@@ -1801,6 +1820,12 @@
       <div class="tiny muted" style="margin-bottom: 12px;">
         Trackers: <span id="drawer-tracker-summary">&mdash;</span>
       </div>
+      <div class="tiny muted" style="margin-bottom: 4px;">Active quarter</div>
+      <div style="display:flex; gap:6px; margin-bottom: 4px;">
+        <select id="drawer-quarter-select" class="input" style="flex:1;"></select>
+        <button class="btn btn-sm" id="drawer-quarter-save">Set</button>
+      </div>
+      <div class="tiny muted" id="drawer-quarter-note" style="margin-bottom: 12px;">&mdash;</div>
       <button class="btn btn-block btn-sm" id="drawer-manage-trackers" style="margin-bottom: 8px;">Manage division links</button>
       <button class="btn btn-block btn-sm" id="drawer-reset-config">Reset device configuration</button>
     </div>
@@ -1852,6 +1877,9 @@ const CONFIG_DEFAULTS = {
   // deep-link params, different shell; objectiveUrl routes by divisionKind.
   executionAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/execution_app.html',
   salesAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/sales_app.html',
+  // Admin-pinned active quarter ('YYYYQN'), or '' to follow the calendar. Set in
+  // the drawer under Hub configuration; shared with every user via the hub bin.
+  activeQuarter: '',
   // Product design app — header icon target.
   designAppUrl: 'https://celadynestaller.github.io/rd-gantt-v2/product_designer.html',
   // Where per-division Gantt tiles point. The planning app renders a division's
@@ -2463,6 +2491,54 @@ async function adminSaveTrackers(trackers) {
     toast(`Saved locally; failed to share: ${err.message}`, 'error');
   }
 }
+// Admin save for the active quarter. Same optimistic-local-then-share shape as
+// adminSaveTrackers, but it MERGES into the existing bin payload rather than
+// replacing it: the bin also holds trackers and broker settings, and writing a
+// bare { activeQuarter } would wipe them for everyone.
+async function adminSaveActiveQuarter(quarter) {
+  const q = (quarter || '').trim();
+  if (q && !QUARTER_RE.test(q)) { toast('Quarter must look like 2026Q3', 'error'); return; }
+  saveConfig({ activeQuarter: q });
+  STATE.config.activeQuarter = q;
+  try {
+    const existing = (await jbFetchHubConfig()) || {};
+    await jbSaveHubConfig(Object.assign({}, existing, {
+      version: existing.version || 1,
+      activeQuarter: q,
+      updatedAt: new Date().toISOString(),
+      updatedBy: (STATE.session && STATE.session.email) || 'unknown'
+    }));
+    toast(q ? `Active quarter set to ${q} for all users` : 'Active quarter now follows the calendar', 'success');
+  } catch (err) {
+    toast(`Saved locally; failed to share: ${err.message}`, 'error');
+  }
+  renderQuarterBanner();
+  renderTiles();
+}
+
+// The quarters an admin can pick: every quarter present on an objective, plus the
+// calendar quarter, newest first. Driven by real data so the list can't drift.
+function selectableQuarters() {
+  const set = new Set();
+  ((STATE.portfolio && STATE.portfolio.objectives) || []).forEach(o => {
+    if (o && typeof o.quarter === 'string' && QUARTER_RE.test(o.quarter)) set.add(o.quarter);
+  });
+  set.add(calendarQuarter());
+  return Array.from(set).sort().reverse();
+}
+
+// Banner shown to EVERY user when the admin has pinned a non-calendar quarter, so
+// a short tile list is never a mystery.
+function renderQuarterBanner() {
+  const el = document.getElementById('quarter-banner');
+  if (!el) return;
+  if (!quarterIsPinned()) { el.hidden = true; el.textContent = ''; return; }
+  el.hidden = false;
+  el.innerHTML = '<i class="ti ti-calendar-stats" aria-hidden="true"></i>' +
+    '<span>Showing <b>' + escText(activeQuarter()) + '</b> objectives \u2014 set by an admin. ' +
+    'The calendar quarter is ' + escText(calendarQuarter()) + '.</span>';
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  IDENTITY — NEW STACK  (divisions + derived ownership)
 //
@@ -2547,12 +2623,37 @@ function myObjectives(session) {
 // Each entry is { id, label, score } with score 0..100 or null (no scorable
 // objectives yet -> renders as a grey "—"). Uses the RDCore rollup primitives so
 // the numbers match the planning app's overview exactly.
-// The active quarter as 'YYYYQN', derived from today (no stored value exists).
-// Used to show each rollup's current-quarter score alongside its all-time one.
-function activeQuarter() {
+// The quarter derived from today's date, as 'YYYYQN'.
+function calendarQuarter() {
   const iso = rdDayToIso(rdToday());              // 'YYYY-MM-DD'
   const y = iso.slice(0, 4), m = +iso.slice(5, 7);
   return y + 'Q' + (Math.floor((m - 1) / 3) + 1);
+}
+
+// The active quarter everything reads: an admin's pinned quarter if one is set in
+// the shared hub config, otherwise the calendar quarter. Admin-set so the whole
+// company reads the same quarter on the same day — a planning cycle does not turn
+// over at midnight on the calendar boundary.
+function activeQuarter() {
+  const pinned = STATE.config && STATE.config.activeQuarter;
+  return (typeof pinned === 'string' && QUARTER_RE.test(pinned)) ? pinned : calendarQuarter();
+}
+
+// Is this objective in the active quarter? Untagged objectives (no `quarter`
+// field) always pass — they are un-scoped work rather than another quarter's, and
+// hiding them would make untagged plans vanish with no way to tell why.
+function objectiveInActiveQuarter(o) {
+  const q = o && o.quarter;
+  if (!q || !QUARTER_RE.test(q)) return true;
+  return q === activeQuarter();
+}
+
+// True when the admin has pinned a quarter that is not the calendar one — the
+// banner and drawer both surface that, so nobody wonders why Q2 work is showing
+// while the calendar says Q3.
+function quarterIsPinned() {
+  const pinned = STATE.config && STATE.config.activeQuarter;
+  return !!(typeof pinned === 'string' && QUARTER_RE.test(pinned) && pinned !== calendarQuarter());
 }
 
 // Quarter-scoped score at any rollup altitude. rollupDivision has no quarter
@@ -2989,6 +3090,9 @@ function initiativeLabel(id) { return _pfLabel(STATE.portfolio && STATE.portfoli
 // red — the badge COLOUR tracks the forecast value and the pace band rides on
 // a small dot beside it. A stalled objective therefore reads as a green badge
 // with a red dot: it lands high, but the gate work has stopped moving.
+// 'YYYYQN' — the quarter format the planning app writes onto objectives.
+const QUARTER_RE = /^\d{4}Q[1-4]$/;
+
 const PROJ_K = 0.667;
 const PROJ_EARLY_T = 0.15;   // below this the pace ratio is too noisy to show
 // Pace thresholds for the badge colour. F = 1 means gate odds exactly match time
@@ -3896,6 +4000,12 @@ async function refreshHubConfig() {
       data.executionAppUrl !== STATE.config.executionAppUrl) brokerPatch.executionAppUrl = data.executionAppUrl;
   if (typeof data.salesAppUrl === 'string' &&
       data.salesAppUrl !== STATE.config.salesAppUrl) brokerPatch.salesAppUrl = data.salesAppUrl;
+  // Admin-pinned quarter. '' or absent means "follow the calendar" — both are
+  // accepted so an admin can clear the pin, and a malformed value is ignored
+  // rather than hiding every tile.
+  if (typeof data.activeQuarter === 'string' &&
+      (data.activeQuarter === '' || QUARTER_RE.test(data.activeQuarter)) &&
+      data.activeQuarter !== STATE.config.activeQuarter) brokerPatch.activeQuarter = data.activeQuarter;
   if (typeof data.planningAppUrl === 'string' &&
       data.planningAppUrl !== STATE.config.planningAppUrl) brokerPatch.planningAppUrl = data.planningAppUrl;
   if (Object.keys(brokerPatch).length) {
@@ -4154,6 +4264,11 @@ function buildToolList(session) {
       // objective shouldn't sit as a live tile in anyone's working sections.
       // (Achieved stays: finished work is worth seeing. Only abandoned is hidden.)
       if (view.isAbandoned) return;
+      // Quarter scope. Objectives outside the active quarter don't auto-tile, so
+      // everyone sees the same cycle's work. Objectives with NO quarter set are
+      // always kept — they are un-scoped work, not last quarter's, and dropping
+      // them would silently hide anything the planning app left untagged.
+      if (!objectiveInActiveQuarter(o)) return;
       const k = key(o.id, 'objective');
       if (seen.has(k)) return;
       const tile = buildPortfolioObjectiveTile(view, 'objective', false);
@@ -5069,6 +5184,7 @@ function buildCollapsibleHead(tag, className, label, key, wrapEl) {
 }
 
 function renderTiles() {
+  renderQuarterBanner();   // keep the pinned-quarter notice in sync with the tiles
   const root = document.getElementById('tile-sections');
   root.innerHTML = '';
   const tools = buildToolList(STATE.session);
@@ -5941,8 +6057,35 @@ function bindProjPop() {
   });
 }
 
+// Populates the admin quarter picker and wires its Set button. Admin-only UI —
+// the whole Hub-configuration section is already gated, this just fills it in.
+function bindQuarterPicker() {
+  const sel = document.getElementById('drawer-quarter-select');
+  const btn = document.getElementById('drawer-quarter-save');
+  if (!sel || !btn) return;
+  const fill = () => {
+    const cur = (STATE.config && STATE.config.activeQuarter) || '';
+    const opts = ['<option value="">Follow the calendar (' + escText(calendarQuarter()) + ')</option>']
+      .concat(selectableQuarters().map(q =>
+        '<option value="' + escAttr(q) + '"' + (q === cur ? ' selected' : '') + '>' + escText(q) + '</option>'));
+    sel.innerHTML = opts.join('');
+    const note = document.getElementById('drawer-quarter-note');
+    if (note) {
+      note.textContent = quarterIsPinned()
+        ? 'Pinned to ' + activeQuarter() + ' for all users.'
+        : 'Following the calendar (' + calendarQuarter() + ').';
+    }
+  };
+  fill();
+  btn.addEventListener('click', async () => {
+    await adminSaveActiveQuarter(sel.value);
+    fill();
+  });
+}
+
 function bindDrawer() {
   bindProjPop();
+  bindQuarterPicker();
   document.getElementById('header-settings-btn').addEventListener('click', openDrawer);
   document.getElementById('drawer-close').addEventListener('click', closeDrawer);
   document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
