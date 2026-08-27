@@ -4283,7 +4283,7 @@ function buildToolList(session) {
     // it is logged rather than silent, because "my tiles vanished" deserves an
     // explanation in the console at minimum.
     const configured = (session && session.configuredTiles) || [];
-    let stale = 0;
+    let stale = 0, outOfQuarter = 0;
     configured.forEach(ct => {
       if (!ct || ct.objectiveId == null) return;
       // Map legacy view types at READ time, not just in the record migration. A
@@ -4296,6 +4296,12 @@ function buildToolList(session) {
       if (seen.has(k)) return;
       const view = getObjectiveView(ct.objectiveId);
       if (!view) { stale++; return; }         // id belongs to the retired bins
+      // Quarter scope applies to configured tiles too, not just auto-tiles. A tile
+      // you added stays in your config — it just doesn't render while its objective
+      // sits outside the active quarter, and returns on its own when the quarter
+      // rolls over. (The view carries `quarter` already, so no second portfolio
+      // lookup is needed; untagged objectives pass, same as in the auto sweep.)
+      if (!objectiveInActiveQuarter(view)) { outOfQuarter++; return; }
       const tile = buildPortfolioObjectiveTile(view, viewType, true);
       if (!tile) return;
       seen.add(k);
@@ -4304,6 +4310,11 @@ function buildToolList(session) {
     if (stale) {
       console.info(`[rd] ${stale} configured tile(s) reference objective ids that do not exist in the ` +
                    `portfolio — these are pre-migration leftovers. Re-add them from "Add tiles".`);
+    }
+    if (outOfQuarter) {
+      console.info(`[rd] ${outOfQuarter} configured tile(s) hidden — their objectives are outside the ` +
+                   `active quarter (${activeQuarter()}). They are still saved and will return when ` +
+                   `that quarter is active.`);
     }
   }
 
