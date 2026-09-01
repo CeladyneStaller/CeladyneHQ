@@ -668,6 +668,7 @@
     color: var(--text); font-family: var(--font-sans); }
   /* Quarter / Custom mode toggle and its chips. In quarter mode the date inputs
      are removed rather than disabled — nothing should look editable that is not. */
+  .fb-home-chips { margin-bottom: 13px; }
   .fb-modeseg { display: flex; max-width: 220px; margin-bottom: 12px; }
   .fb-modeseg button { flex: 1; font-family: var(--font-mono); font-size: 9.5px;
     letter-spacing: .05em; text-transform: uppercase; padding: 7px 10px;
@@ -3204,6 +3205,21 @@ function fbPreview(row) {
   }
   return '(empty)';
 }
+// The quarter a submission belongs to, from LOCAL date parts so it always agrees
+// with the date shown on its own row — a submission displayed as "Sep 30" must
+// not sit under a Q4 chip because UTC had already rolled over.
+function fbQuarterOf(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  return d.getFullYear() + 'Q' + (Math.floor(d.getMonth() / 3) + 1);
+}
+
+// Which quarter the personal list is filtered to: 'all', or 'YYYYQN'.
+// 'all' is the default deliberately — this is your own short list, and defaulting
+// to a quarter could open on an empty list for someone who last submitted a while
+// ago, which is exactly the confusion the filtered-empty state exists to avoid.
+let _fbHomeQuarter = 'all';
+
 function fbValuesFrom(scope) {
   const get = k => {
     const el = document.querySelector(`${scope} [data-fb="${k}"]`);
@@ -3327,7 +3343,32 @@ async function openFeedbackHome() {
     document.querySelector('#modal-content [data-act="close"]').onclick = closeModal;
     return;
   }
-  const list = rows.length ? rows.map(r => `
+  // Chips come from the quarters YOU have actually submitted in, not the calendar.
+  // Offering a quarter with nothing in it is noise, and it makes the "nothing in
+  // that quarter" state almost unreachable rather than a trap.
+  const quarters = [];
+  rows.forEach(r => {
+    const q = fbQuarterOf(r.created_at);
+    if (q && quarters.indexOf(q) < 0) quarters.push(q);
+  });
+  quarters.sort().reverse();
+  // One quarter of history means the filter would only ever be decorative.
+  const showFilter = quarters.length > 1;
+  if (!showFilter) _fbHomeQuarter = 'all';
+  if (_fbHomeQuarter !== 'all' && quarters.indexOf(_fbHomeQuarter) < 0) _fbHomeQuarter = 'all';
+
+  const shown = _fbHomeQuarter === 'all'
+    ? rows
+    : rows.filter(r => fbQuarterOf(r.created_at) === _fbHomeQuarter);
+
+  const chipsHtml = showFilter ? `<div class="qchips fb-home-chips">
+      <button class="qchip${_fbHomeQuarter === 'all' ? ' on' : ''}" data-hq="all">All</button>
+      ${quarters.map(q =>
+        `<button class="qchip${q === _fbHomeQuarter ? ' on' : ''}" data-hq="${escAttr(q)}">${escText(q)}</button>`
+      ).join('')}
+    </div>` : '';
+
+  const list = shown.length ? shown.map(r => `
     <div class="sub-row">
       <div class="sub-body">
         <div class="sub-meta">
@@ -3339,20 +3380,28 @@ async function openFeedbackHome() {
       </div>
       <button class="btn-copy" data-copy="${escAttr(r.id)}"><i class="ti ti-copy"></i>Copy</button>
       <button class="btn btn-sm" data-open="${escAttr(r.id)}">Open</button>
-    </div>`).join('') : `
+    </div>`).join('') : (rows.length ? `
+    <div class="empty-state">
+      <i class="ti ti-filter-off" aria-hidden="true"></i>
+      <h4>Nothing in ${escText(_fbHomeQuarter)}</h4>
+      <p>You have submissions in other quarters — choose <b>All</b> to see everything.</p>
+    </div>` : `
     <div class="empty-state">
       <i class="ti ti-message-plus" aria-hidden="true"></i>
       <h4>You have not submitted any feedback yet</h4>
       <p>Feedback is grouped into Company, Meetings, OKR, and Safety &amp; Operations, and written
       as strengths, weaknesses, opportunities, and threats. Your name is not shown to reviewers.</p>
-    </div>`;
+    </div>`);
 
   openModal(`
     <div class="fb-head">
       <h3>Your feedback</h3>
-      ${rows.length ? '<button class="btn-copy" data-copy-all><i class="ti ti-copy"></i>Copy all</button>' : ''}
+      ${shown.length ? '<button class="btn-copy" data-copy-all><i class="ti ti-copy"></i>Copy all</button>' : ''}
     </div>
-    ${rows.length ? `<p class="intro">${rows.length} submission${rows.length === 1 ? '' : 's'}. Your name is not shown to reviewers.</p>` : ''}
+    ${chipsHtml}
+    ${shown.length ? `<p class="intro">${shown.length} submission${shown.length === 1 ? '' : 's'}${
+      _fbHomeQuarter === 'all' ? '' : ' in ' + escText(_fbHomeQuarter)
+    }. Your name is not shown to reviewers.</p>` : ''}
     <div class="modal-scroll">${list}</div>
     <div class="modal-actions">
       <button class="btn" data-act="close">Close</button>
@@ -3362,8 +3411,13 @@ async function openFeedbackHome() {
   const root = document.getElementById('modal-content');
   root.querySelector('[data-act="close"]').onclick = closeModal;
   root.querySelector('[data-act="new"]').onclick = () => openFeedbackForm(null);
+  // Chips re-open the modal with the new filter. Copy-all copies what is on
+  // screen, not the whole history — it should match what you can see.
+  root.querySelectorAll('[data-hq]').forEach(b => {
+    b.onclick = () => { _fbHomeQuarter = b.getAttribute('data-hq'); openFeedbackHome(); };
+  });
   const all = root.querySelector('[data-copy-all]');
-  if (all) all.onclick = () => fbCopy(rows.map(fbCopySubmission).join('\n\n'), all);
+  if (all) all.onclick = () => fbCopy(shown.map(fbCopySubmission).join('\n\n'), all);
   root.querySelectorAll('[data-open]').forEach(b => {
     b.onclick = () => openFeedbackForm(rows.find(r => r.id === b.getAttribute('data-open')));
   });
@@ -3432,6 +3486,9 @@ function openFeedbackForm(row) {
         toast('Feedback updated', 'success');
       } else {
         await fbSubmit(v);
+        // Drop any quarter filter, or a new submission made while an older
+        // quarter was selected would land outside the list you return to.
+        _fbHomeQuarter = 'all';
         toast('Feedback submitted', 'success');
       }
       await openFeedbackHome();
