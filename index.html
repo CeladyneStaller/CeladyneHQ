@@ -538,6 +538,14 @@
   .badge-pace-dot.warn { background: #854F0B; }
   .badge-pace-dot.bad  { background: #A32D2D; }
 
+  /* Safety & Operations renders as a fixed 2x2: check-in and incident on top,
+     time off and feedback beneath. Fixed rather than auto-fill so the pairing
+     stays put at any window width. The <=640px rule below collapses it to one
+     column on phones, and wins because it is !important. */
+  .tile-section[data-section="safety"] > .tile-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   /* ---- time off ---------------------------------------------------------- */
   .to-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
   .to-head h3 { margin: 0; flex: 1; }
@@ -2055,35 +2063,6 @@ const TOOLS = [
   // ── Meetings section (static links) ───────────────────────────────────────
   // These three render as the "Meetings" section under Projects. They point at
   // the Confluence folders that hold each meeting's pages.
-  // ── Feedback ──────────────────────────────────────────────────────────────
-  {
-    id: 'time-off',
-    name: 'Time off',
-    description: 'Book PTO and sick days',
-    icon: 'calendar-time',
-    action: () => openTimeOffHome(),
-    section: 'safety',
-    fetchStatus: async () => timeOffTileStatus()
-  },
-  {
-    id: 'feedback-swot',
-    name: 'Feedback',
-    description: 'SWOT feedback — your name is not shown',
-    icon: 'message-2',
-    action: () => openFeedbackHome(),
-    section: 'safety',
-    fetchStatus: async () => {
-      // Count only YOUR submissions — never total volume, which would leak how
-      // much (or how little) the team is using an unattributed channel.
-      try {
-        const rows = await fbMine();
-        if (rows == null) return { text: 'Open', severity: 'subtle' };
-        return rows.length
-          ? { text: `${rows.length} submitted`, severity: 'subtle' }
-          : { text: 'Share feedback', severity: 'subtle' };
-      } catch (e) { return { text: 'Open', severity: 'subtle' }; }
-    }
-  },
   {
     id: 'meeting-company',
     name: 'Celadyne Company Meeting',
@@ -2188,6 +2167,35 @@ const TOOLS = [
     section: 'safety',
     fetchStatus: async () => {
       return { text: 'Open report form', severity: 'subtle' };
+    }
+  },
+  // ── Feedback ──────────────────────────────────────────────────────────────
+  {
+    id: 'time-off',
+    name: 'Time off',
+    description: 'Book PTO and sick days',
+    icon: 'calendar-time',
+    action: () => openTimeOffHome(),
+    section: 'safety',
+    fetchStatus: async () => timeOffTileStatus()
+  },
+  {
+    id: 'feedback-swot',
+    name: 'Feedback',
+    description: 'SWOT feedback — your name is not shown',
+    icon: 'message-2',
+    action: () => openFeedbackHome(),
+    section: 'safety',
+    fetchStatus: async () => {
+      // Count only YOUR submissions — never total volume, which would leak how
+      // much (or how little) the team is using an unattributed channel.
+      try {
+        const rows = await fbMine();
+        if (rows == null) return { text: 'Open', severity: 'subtle' };
+        return rows.length
+          ? { text: `${rows.length} submitted`, severity: 'subtle' }
+          : { text: 'Share feedback', severity: 'subtle' };
+      } catch (e) { return { text: 'Open', severity: 'subtle' }; }
     }
   },
   {
