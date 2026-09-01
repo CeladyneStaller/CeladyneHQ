@@ -542,8 +542,19 @@
      time off and feedback beneath. Fixed rather than auto-fill so the pairing
      stays put at any window width. The <=640px rule below collapses it to one
      column on phones, and wins because it is !important. */
+  /* Safety & Operations: a 6-column track so the row shape can change with the
+     tile count. Everything spans 3 (two per row) by default; when a fifth tile
+     exists — the leadership-only Review tile — tiles 3 onwards span 2, giving
+     two on top and three beneath. :has() does the counting, so no JS is
+     involved; browsers without it simply keep the 2-per-row layout. */
   .tile-section[data-section="safety"] > .tile-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(6, 1fr);
+  }
+  .tile-section[data-section="safety"] > .tile-grid > * {
+    grid-column: span 3;
+  }
+  .tile-section[data-section="safety"] > .tile-grid:has(> :nth-child(5)) > :nth-child(n+3) {
+    grid-column: span 2;
   }
 
   /* ---- time off ---------------------------------------------------------- */
@@ -686,6 +697,8 @@
   @media (max-width: 640px) {
     .swot-grid { grid-template-columns: 1fr; }
     .daterow { flex-direction: column; gap: 0; }
+    /* spans would fight the single-column rule above */
+    .tile-section[data-section="safety"] > .tile-grid > * { grid-column: auto; }
   }
 
   /* Pinned-quarter notice. Shown to every user when an admin has pinned a quarter
@@ -2242,6 +2255,26 @@ const TOOLS = [
     }
   },
   {
+    // Leadership shortcut to the review modal. The modal still asks for the
+    // passphrase — this tile only saves a trip through the settings drawer, and
+    // surfaces that there is something new worth reading.
+    id: 'feedback-review',
+    name: 'Review feedback',
+    description: 'Read and pull team feedback',
+    icon: 'clipboard-text',
+    action: () => openFeedbackReview(),
+    section: 'safety',
+    requiresOrgRole: ['cto', 'lead'],
+    fetchStatus: async () => {
+      try {
+        const n = await fbRecentCount(30);
+        if (n == null) return { text: 'Open review', severity: 'subtle' };
+        if (!n) return { text: 'Nothing this month', severity: 'subtle' };
+        return { text: `${n} submission${n === 1 ? '' : 's'} this month`, severity: 'info' };
+      } catch (e) { return { text: 'Open review', severity: 'subtle' }; }
+    }
+  },
+  {
     id: 'analysis-portal',
     name: 'Analysis portal',
     description: 'Data analysis portal',
@@ -3112,6 +3145,12 @@ async function fbUpdate(id, v) {
 async function fbDelete(id) {
   return fbRpc('feedback_delete', { p_id: id, p_email: fbEmail() });
 }
+// Aggregate count for the leadership tile. Passphrase-free by design: the tile
+// renders at page load, before anyone has unlocked the review, so a gated count
+// could never show. Returns a bare integer — no content, no identities.
+async function fbRecentCount(days) {
+  return fbRpc('feedback_recent_count', { p_days: days || 30 });
+}
 async function fbList(pass, from, to, category) {
   return (await fbRpc('feedback_list', {
     p_passphrase: pass,
@@ -3167,19 +3206,17 @@ function fbCopySubmission(row) {
   });
   return lines.join('\n').trim();
 }
-function fbCopyQuadrant(field, rows, scopeLabel) {
-  const items = rows
-    .map(r => ({ txt: (r[field.key] || '').trim(), r }))
-    .filter(x => x.txt);
-  const head = `${field.label} — ${scopeLabel} (${items.length})`;
-  const body = items.map(x =>
-    `• ${x.txt}\n  — ${fbShortDate(x.r.created_at)}, ${x.r.category}`).join('\n');
-  return `${head}\n\n${body}`;
+// Just the quadrant name and the bullets. The date range and category are
+// already whatever the reader filtered to, and per-item attribution turns a
+// discussion page into a wall of metadata — so neither is carried across.
+function fbCopyQuadrant(field, rows) {
+  const items = rows.map(r => (r[field.key] || '').trim()).filter(Boolean);
+  return [field.label].concat(items.map(t => `• ${t}`)).join('\n');
 }
-function fbCopyAllQuadrants(rows, scopeLabel) {
+function fbCopyAllQuadrants(rows) {
   return SWOT_FIELDS
     .filter(f => rows.some(r => (r[f.key] || '').trim()))
-    .map(f => fbCopyQuadrant(f, rows, scopeLabel))
+    .map(f => fbCopyQuadrant(f, rows))
     .join('\n\n');
 }
 function fbScopeLabel(from, to, category) {
@@ -3534,10 +3571,10 @@ async function openFeedbackResults(filters) {
   });
   const all = root.querySelector('[data-copy-all]');
   all.onclick = () => fbCopy(
-    _fbView === 'quadrant' ? fbCopyAllQuadrants(rows, scope) : rows.map(fbCopySubmission).join('\n\n'), all);
+    _fbView === 'quadrant' ? fbCopyAllQuadrants(rows) : rows.map(fbCopySubmission).join('\n\n'), all);
   root.querySelectorAll('[data-copy-quad]').forEach(b => {
     const fld = SWOT_FIELDS.find(x => x.key === b.getAttribute('data-copy-quad'));
-    b.onclick = () => fbCopy(fbCopyQuadrant(fld, rows, scope), b);
+    b.onclick = () => fbCopy(fbCopyQuadrant(fld, rows), b);
   });
   root.querySelectorAll('[data-copy-sub]').forEach(b => {
     b.onclick = () => fbCopy(fbCopySubmission(rows.find(r => r.id === b.getAttribute('data-copy-sub'))), b);
