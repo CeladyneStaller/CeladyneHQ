@@ -591,6 +591,23 @@
   .fb-catrow label { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em;
     text-transform: uppercase; display: block; margin-bottom: 5px; }
   .fb-catrow select { width: 100%; }
+  .cat-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .cat-chip {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    padding: 7px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background .12s, border-color .12s, color .12s;
+  }
+  .cat-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .cat-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .cat-chip.on:hover { color: #fff; }
   .swot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .swot-f { display: flex; flex-direction: column; }
   .swot-f label { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em;
@@ -607,11 +624,16 @@
   .anon-note i { font-size: 15px; flex: none; margin-top: 1px; }
   .sub-row { display: flex; align-items: center; gap: 10px; padding: 11px 13px;
     border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 7px; }
-  .sub-date { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-subtle); min-width: 86px; }
+  /* The preview sits on its own line under the meta, so a long category badge and
+     two action buttons can never squeeze it to zero width. min-width:0 is what
+     lets the ellipsis work inside a flex child. */
+  .sub-body { flex: 1; min-width: 0; }
+  .sub-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+  .sub-date { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-subtle); }
   .sub-cat { font-family: var(--font-mono); font-size: 9px; letter-spacing: .05em;
     text-transform: uppercase; padding: 3px 8px; border-radius: var(--radius-pill);
     background: var(--surface-alt); color: var(--text-muted); white-space: nowrap; }
-  .sub-prev { flex: 1; font-size: 12.5px; color: var(--text-muted); overflow: hidden;
+  .sub-prev { font-size: 12.5px; color: var(--text-muted); overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
   .edited { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle); }
   .btn-copy { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono);
@@ -663,7 +685,7 @@
   .qitem .txt { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; }
   @media (max-width: 640px) {
     .swot-grid { grid-template-columns: 1fr; }
-    .sub-prev { display: none; }
+    .daterow { flex-direction: column; gap: 0; }
   }
 
   /* Pinned-quarter notice. Shown to every user when an admin has pinned a quarter
@@ -1580,7 +1602,28 @@
     width: 100%;
     max-width: 380px;
     box-shadow: var(--shadow-elev);
+    /* Never taller than the viewport. Without this, a long modal grows past the
+       screen and carries its own Close button off the bottom. The backdrop has
+       1rem of padding, hence 2rem. */
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
   }
+  /* Opt-in for modals with a long body: the card becomes a flex column and only
+     the .modal-scroll region scrolls, so the heading, filters and action row stay
+     pinned instead of scrolling out of reach. */
+  .modal.modal-scrollable {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .modal.modal-scrollable > .modal-scroll {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+    margin: 0 -24px;
+    padding: 2px 24px;
+  }
+  .modal.modal-scrollable > .modal-actions { flex: none; }
   .modal.modal-wide {
     max-width: 640px;
   }
@@ -2833,12 +2876,12 @@ async function toDelete(row) {
 // ---- screens --------------------------------------------------------------
 
 async function openTimeOffHome() {
-  openModal('<h3>Time off</h3><p class="intro">Loading\u2026</p>', { persistent: true });
+  openModal('<h3>Time off</h3><p class="intro">Loading\u2026</p>', { persistent: true, wide: true });
   let rows;
   try { rows = await toMine(); }
   catch (err) {
     openModal(`<h3>Time off</h3><p class="intro">Could not load: ${escText(err.message)}</p>
-      <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`, { persistent: true });
+      <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`, { persistent: true, wide: true });
     document.querySelector('#modal-content [data-act="close"]').onclick = closeModal;
     return;
   }
@@ -2848,7 +2891,7 @@ async function openTimeOffHome() {
         <h4>No safety profile for your email</h4>
         <p>Time off is shared with the safety check-in app, which does not have a person
         record matching your Hub email. Ask an admin to add you there.</p></div>
-      <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`, { persistent: true });
+      <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`, { persistent: true, wide: true });
     document.querySelector('#modal-content [data-act="close"]').onclick = closeModal;
     return;
   }
@@ -2882,9 +2925,9 @@ async function openTimeOffHome() {
   openModal(`
     <div class="to-head"><h3>Time off</h3>
       <button class="btn btn-primary btn-sm" data-act="new">Schedule</button></div>
-    ${body}
+    <div class="modal-scroll">${body}</div>
     <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`,
-    { persistent: true });
+    { persistent: true, wide: true, scroll: true });
 
   const root = document.getElementById('modal-content');
   root.querySelector('[data-act="close"]').onclick = closeModal;
@@ -2950,7 +2993,7 @@ function openTimeOffForm(existing) {
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">${isEdit ? 'Save changes' : 'Schedule'}</button>
-    </div>`, { persistent: true });
+    </div>`, { persistent: true, wide: true });
 
   const root = document.getElementById('modal-content');
   const seg = {};
@@ -3098,8 +3141,11 @@ function fbValuesFrom(scope) {
     const el = document.querySelector(`${scope} [data-fb="${k}"]`);
     return el ? el.value.trim() : '';
   };
+  // Category is a chip group, not an input — read the pressed chip.
+  const catEl = document.querySelector(`${scope} [data-fb="category"] .cat-chip.on`);
+  const category = catEl ? catEl.getAttribute('data-cat') : FEEDBACK_CATEGORIES[0];
   return {
-    category: get('category'), strengths: get('strengths'),
+    category, strengths: get('strengths'),
     weaknesses: get('weaknesses'), opportunities: get('opportunities'),
     threats: get('threats')
   };
@@ -3177,8 +3223,12 @@ async function fbCopy(text, btn) {
 
 function fbFormHtml(row) {
   const cat = (row && row.category) || FEEDBACK_CATEGORIES[0];
+  // Chips rather than a <select>: four fixed options should be visible, not
+  // hidden behind a click. Each chip sizes to its own label, so the long
+  // "Safety & Operations" never truncates and the row wraps on a phone.
   const opts = FEEDBACK_CATEGORIES.map(c =>
-    `<option value="${escAttr(c)}"${c === cat ? ' selected' : ''}>${escText(c)}</option>`).join('');
+    `<button type="button" class="cat-chip${c === cat ? ' on' : ''}" data-cat="${escAttr(c)}"` +
+    ` aria-pressed="${c === cat}">${escText(c)}</button>`).join('');
   const fields = SWOT_FIELDS.map(f => `
     <div class="swot-f">
       <label class="${f.cls}">${escText(f.label)}</label>
@@ -3193,8 +3243,8 @@ function fbFormHtml(row) {
       from any device you sign in on.</span>
     </div>
     <div class="fb-catrow">
-      <label>Category</label>
-      <select class="input" data-fb="category">${opts}</select>
+      <label id="fb-cat-label">Category</label>
+      <div class="cat-chips" data-fb="category" role="radiogroup" aria-labelledby="fb-cat-label">${opts}</div>
     </div>
     <div class="swot-grid">${fields}</div>`;
 }
@@ -3202,21 +3252,25 @@ function fbFormHtml(row) {
 // ---- screens --------------------------------------------------------------
 
 async function openFeedbackHome() {
-  openModal('<h3>Your feedback</h3><p class="intro">Loading…</p>', { persistent: true });
+  openModal('<h3>Your feedback</h3><p class="intro">Loading…</p>', { persistent: true, wide: true });
   let rows;
   try { rows = await fbMine(); }
   catch (err) {
     openModal(`<h3>Your feedback</h3><p class="intro">Could not load: ${escText(err.message)}</p>
-      <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`, { persistent: true });
+      <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`, { persistent: true, wide: true });
     document.querySelector('#modal-content [data-act="close"]').onclick = closeModal;
     return;
   }
   const list = rows.length ? rows.map(r => `
     <div class="sub-row">
-      <span class="sub-date">${escText(fbShortDate(r.created_at))}</span>
-      <span class="sub-cat">${escText(r.category)}</span>
-      <span class="sub-prev" title="${escAttr(fbPreview(r))}">${escText(fbPreview(r))}</span>
-      ${r.updated_at > r.created_at ? '<span class="edited">edited</span>' : ''}
+      <div class="sub-body">
+        <div class="sub-meta">
+          <span class="sub-date">${escText(fbShortDate(r.created_at))}</span>
+          <span class="sub-cat">${escText(r.category)}</span>
+          ${r.updated_at > r.created_at ? '<span class="edited">edited</span>' : ''}
+        </div>
+        <div class="sub-prev" title="${escAttr(fbPreview(r))}">${escText(fbPreview(r))}</div>
+      </div>
       <button class="btn-copy" data-copy="${escAttr(r.id)}"><i class="ti ti-copy"></i>Copy</button>
       <button class="btn btn-sm" data-open="${escAttr(r.id)}">Open</button>
     </div>`).join('') : `
@@ -3233,11 +3287,11 @@ async function openFeedbackHome() {
       ${rows.length ? '<button class="btn-copy" data-copy-all><i class="ti ti-copy"></i>Copy all</button>' : ''}
     </div>
     ${rows.length ? `<p class="intro">${rows.length} submission${rows.length === 1 ? '' : 's'}. Your name is not shown to reviewers.</p>` : ''}
-    ${list}
+    <div class="modal-scroll">${list}</div>
     <div class="modal-actions">
       <button class="btn" data-act="close">Close</button>
       <button class="btn btn-primary" data-act="new">New feedback</button>
-    </div>`, { persistent: true });
+    </div>`, { persistent: true, wide: true, scroll: true });
 
   const root = document.getElementById('modal-content');
   root.querySelector('[data-act="close"]').onclick = closeModal;
@@ -3267,9 +3321,20 @@ function openFeedbackForm(row) {
       <span style="flex:1"></span>
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">${editing ? 'Save changes' : 'Submit feedback'}</button>
-    </div>`, { persistent: true });
+    </div>`, { persistent: true, wide: true });
 
   const root = document.getElementById('modal-content');
+  // Chip group behaves as a single-select: exactly one pressed at a time.
+  root.querySelectorAll('.cat-chips .cat-chip').forEach(chip => {
+    chip.onclick = () => {
+      root.querySelectorAll('.cat-chips .cat-chip').forEach(c => {
+        c.classList.remove('on');
+        c.setAttribute('aria-pressed', 'false');
+      });
+      chip.classList.add('on');
+      chip.setAttribute('aria-pressed', 'true');
+    };
+  });
   const copy = root.querySelector('[data-copy-one]');
   if (copy) copy.onclick = () => fbCopy(fbCopySubmission(row), copy);
 
@@ -3350,7 +3415,7 @@ function openFeedbackPassPrompt() {
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="unlock">Unlock</button>
-    </div>`, { persistent: true });
+    </div>`, { persistent: true, wide: true });
   const root = document.getElementById('modal-content');
   const input = root.querySelector('#fb-pass');
   input.focus();
@@ -3404,10 +3469,10 @@ async function openFeedbackResults(filters) {
         <button data-view="quadrant" class="${_fbView === 'quadrant' ? 'on' : ''}">By quadrant</button>
       </div>
     </div>
-    ${inner}
+    <div class="modal-scroll">${inner}</div>
     <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`;
 
-  openModal(shell('<p class="intro">Loading…</p>', ''), { persistent: true, wide: true });
+  openModal(shell('<p class="intro">Loading…</p>', ''), { persistent: true, wide: true, scroll: true });
 
   let rows;
   try { rows = await fbList(_fbPass, f.from, f.to, f.category); }
@@ -3455,7 +3520,7 @@ async function openFeedbackResults(filters) {
     </div>`).join('');
   }
 
-  openModal(shell(inner, meta), { persistent: true, wide: true });
+  openModal(shell(inner, meta), { persistent: true, wide: true, scroll: true });
   const root = document.getElementById('modal-content');
   const read = () => ({
     from: root.querySelector('#fb-from').value,
@@ -7403,6 +7468,7 @@ function openModal(html, opts) {
   const el = document.getElementById('modal-content');
   el.innerHTML = html;
   el.classList.toggle('modal-wide', !!(opts && opts.wide));
+  el.classList.toggle('modal-scrollable', !!(opts && opts.scroll));
   _modalPersistent = !!(opts && opts.persistent);
   document.getElementById('modal-backdrop').classList.add('open');
 }
@@ -7412,6 +7478,7 @@ function closeModal() {
   const el = document.getElementById('modal-content');
   el.innerHTML = '';
   el.classList.remove('modal-wide');
+  el.classList.remove('modal-scrollable');
 }
 document.addEventListener('click', (e) => {
   if (e.target.id === 'modal-backdrop' && !_modalPersistent) closeModal();
