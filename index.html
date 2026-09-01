@@ -538,6 +538,43 @@
   .badge-pace-dot.warn { background: #854F0B; }
   .badge-pace-dot.bad  { background: #A32D2D; }
 
+  /* ---- time off ---------------------------------------------------------- */
+  .to-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .to-head h3 { margin: 0; flex: 1; }
+  .to-sec { font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-subtle); margin: 16px 0 7px; }
+  .to-row { display: flex; align-items: center; gap: 11px; padding: 11px 13px;
+    border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 7px; }
+  .to-row.active { border-color: var(--accent); background: var(--accent-bg); }
+  .to-row.past { opacity: .62; }
+  .to-ico { font-size: 16px; flex: none; }
+  .to-body { flex: 1; min-width: 0; }
+  .to-range { font-size: 13px; color: var(--text); font-weight: 500; }
+  .to-note { font-size: 11.5px; color: var(--text-subtle); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .to-badge { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .05em;
+    text-transform: uppercase; padding: 2px 7px; border-radius: var(--radius-pill);
+    background: var(--accent); color: #fff; flex: none; }
+  .to-hint { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-subtle);
+    line-height: 1.6; margin-bottom: 14px; }
+  .seg { display: flex; margin-bottom: 14px; }
+  .seg button { flex: 1; font-family: var(--font-mono); font-size: 10px; letter-spacing: .05em;
+    text-transform: uppercase; padding: 8px 10px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text-muted); cursor: pointer; }
+  .seg button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+  .seg button:last-child { border-radius: 0 var(--radius) var(--radius) 0; border-left: none; }
+  .seg button.on { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent); }
+  .fld { margin-bottom: 14px; }
+  .fld label { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em;
+    text-transform: uppercase; display: block; margin-bottom: 5px; }
+  .fld label .opt { text-transform: none; letter-spacing: 0; color: var(--text-subtle); }
+  .fld input, .fld textarea, .fld select { width: 100%; padding: 8px 10px; font-size: 13px;
+    font-family: var(--font-sans); border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--surface); color: var(--text); }
+  .daterow { display: flex; gap: 10px; }
+  .daterow .fld { flex: 1; }
+  [data-pane][hidden] { display: none; }
+
   /* ---- feedback (SWOT) --------------------------------------------------- */
   .fb-head { display: flex; align-items: center; gap: 10px; }
   .fb-head h3 { margin: 0; flex: 1; }
@@ -2020,12 +2057,21 @@ const TOOLS = [
   // the Confluence folders that hold each meeting's pages.
   // ── Feedback ──────────────────────────────────────────────────────────────
   {
+    id: 'time-off',
+    name: 'Time off',
+    description: 'Book PTO and sick days',
+    icon: 'calendar-time',
+    action: () => openTimeOffHome(),
+    section: 'safety',
+    fetchStatus: async () => timeOffTileStatus()
+  },
+  {
     id: 'feedback-swot',
-    name: 'Share feedback',
+    name: 'Feedback',
     description: 'SWOT feedback — your name is not shown',
     icon: 'message-2',
     action: () => openFeedbackHome(),
-    section: 'feedback',
+    section: 'safety',
     fetchStatus: async () => {
       // Count only YOUR submissions — never total volume, which would leak how
       // much (or how little) the team is using an unattributed channel.
@@ -2641,6 +2687,323 @@ function renderQuarterBanner() {
   el.innerHTML = '<i class="ti ti-calendar-stats" aria-hidden="true"></i>' +
     '<span>Showing <b>' + escText(activeQuarter()) + '</b> objectives \u2014 set by an admin. ' +
     'The calendar quarter is ' + escText(calendarQuarter()) + '.</span>';
+}
+
+// ============================================================
+//  TIME OFF (PTO / sick days) — Supabase, shared with the safety app
+// ============================================================
+//  Reads and writes the SAME `time_off` table the safety check-in PWA uses, in
+//  the same project. This is a second front door, not a migration:
+//    - the PWA keeps its own Time off screen and is unchanged;
+//    - `notify-pto` is a DATABASE trigger, so Slack posts and Outlook calendar
+//      events fire on the row change no matter which client wrote it;
+//    - the PWA still reads the table to warn you at check-in and to show who is
+//      out in TeamView.
+//  Rows written here must therefore be byte-identical in shape to the PWA's.
+//  The date helpers below are ported verbatim from the app's TimeOff.jsx for
+//  exactly that reason — a subtly different timezone conversion would produce
+//  rows that disagree about which day someone is off.
+
+const TIME_OFF_TZ = 'America/Chicago';
+
+// Build an ISO string at a given Central wall-clock hour on a given date.
+// The UTC-noon probe avoids crossing a DST boundary at midnight in an exotic
+// browser locale. (Verbatim from the safety app.)
+function centralISO(yyyymmdd, hour, minute) {
+  const [y, m, d] = yyyymmdd.split('-').map(Number);
+  const probe = new Date(Date.UTC(y, m - 1, d, 12));
+  const part = new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_OFF_TZ, timeZoneName: 'longOffset'
+  }).formatToParts(probe).find(p => p.type === 'timeZoneName');
+  const tz = (part ? part.value : 'GMT-06:00').replace('GMT', '');
+  const hh = String(hour).padStart(2, '0');
+  const mm = String(minute || 0).padStart(2, '0');
+  return `${yyyymmdd}T${hh}:${mm}:00${tz}`;
+}
+function dateOnlyCT(iso) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIME_OFF_TZ, year: 'numeric', month: '2-digit', day: 'numeric'
+  }).format(new Date(iso));
+}
+function hourInCT(iso) {
+  const h = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_OFF_TZ, hour: 'numeric', hour12: false
+  }).format(new Date(iso)));
+  return h === 24 ? 0 : h;
+}
+function todayCT() { return dateOnlyCT(new Date().toISOString()); }
+
+function toIsActiveNow(row) {
+  const now = Date.now();
+  return new Date(row.starts_at).getTime() <= now &&
+         new Date(row.ends_at).getTime() > now;
+}
+function toFmtDate(yyyymmdd) {
+  const [y, m, d] = yyyymmdd.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC'
+  }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+function toFormatRange(row) {
+  const a = dateOnlyCT(row.starts_at), b = dateOnlyCT(row.ends_at);
+  if (a === b) {
+    if (row.all_day) return toFmtDate(a);
+    return `${toFmtDate(a)} \u00b7 ${hourInCT(row.starts_at) < 12 ? 'AM' : 'PM'} half-day`;
+  }
+  return `${toFmtDate(a)} \u2192 ${toFmtDate(b)}`;
+}
+function toTypeEmoji(t) { return t === 'sick' ? '\u{1F912}' : '\u{1F4C5}'; }
+function toTypeLabel(t) { return t === 'sick' ? 'Sick' : 'PTO'; }
+
+// Resolve the signed-in Hub user to a safety-app person id. Same email → people
+// path the check-in tile already uses; cached because several call sites want it.
+let _toPersonCache = null;
+async function toPersonId() {
+  const email = String((STATE.session && STATE.session.email) || '').toLowerCase().trim();
+  if (!email) return null;
+  if (_toPersonCache && _toPersonCache.email === email) return _toPersonCache.id;
+  const client = getSafetyClient();
+  if (!client) return null;
+  const { data, error } = await client
+    .from('people').select('id').ilike('email', email).maybeSingle();
+  if (error) throw error;
+  const id = data ? data.id : null;
+  _toPersonCache = { email, id };
+  return id;
+}
+
+async function toMine() {
+  const client = getSafetyClient();
+  if (!client) throw new Error('Time-off backend unavailable');
+  const pid = await toPersonId();
+  if (!pid) return null;                    // no safety profile for this email
+  const { data, error } = await client
+    .from('time_off').select('*').eq('person_id', pid)
+    .order('starts_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// Same field mapping the PWA uses: full days are 9am–6pm Central, half days are
+// 9–12 or 12–6. Keeping these constants identical is what makes rows from the
+// two clients indistinguishable.
+function toPayload(v, personId) {
+  let starts_at, ends_at, all_day;
+  if (v.mode === 'full') {
+    starts_at = centralISO(v.startDate, 9, 0);
+    ends_at   = centralISO(v.endDate, 18, 0);
+    all_day   = true;
+  } else {
+    starts_at = centralISO(v.halfDate, v.halfPeriod === 'am' ? 9 : 12, 0);
+    ends_at   = centralISO(v.halfDate, v.halfPeriod === 'am' ? 12 : 18, 0);
+    all_day   = false;
+  }
+  return { person_id: personId, type: v.type, starts_at, ends_at, all_day,
+           note: (v.note || '').trim() || null };
+}
+
+async function toSave(v, existing) {
+  const client = getSafetyClient();
+  if (!client) throw new Error('Time-off backend unavailable');
+  const pid = await toPersonId();
+  if (!pid) throw new Error('No safety profile found for your email');
+  const payload = toPayload(v, pid);
+  const q = existing
+    ? client.from('time_off').update(payload).eq('id', existing.id)
+    : client.from('time_off').insert(payload);
+  const { error } = await q;
+  if (error) throw error;
+}
+
+async function toDelete(row) {
+  const client = getSafetyClient();
+  if (!client) throw new Error('Time-off backend unavailable');
+  const { error } = await client.from('time_off').delete().eq('id', row.id);
+  if (error) throw error;
+}
+
+// ---- screens --------------------------------------------------------------
+
+async function openTimeOffHome() {
+  openModal('<h3>Time off</h3><p class="intro">Loading\u2026</p>', { persistent: true });
+  let rows;
+  try { rows = await toMine(); }
+  catch (err) {
+    openModal(`<h3>Time off</h3><p class="intro">Could not load: ${escText(err.message)}</p>
+      <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`, { persistent: true });
+    document.querySelector('#modal-content [data-act="close"]').onclick = closeModal;
+    return;
+  }
+  if (rows === null) {
+    openModal(`<h3>Time off</h3>
+      <div class="empty-state"><i class="ti ti-user-question" aria-hidden="true"></i>
+        <h4>No safety profile for your email</h4>
+        <p>Time off is shared with the safety check-in app, which does not have a person
+        record matching your Hub email. Ask an admin to add you there.</p></div>
+      <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`, { persistent: true });
+    document.querySelector('#modal-content [data-act="close"]').onclick = closeModal;
+    return;
+  }
+
+  const now = Date.now();
+  const upcoming = rows.filter(r => new Date(r.ends_at).getTime() > now)
+                       .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+  const past = rows.filter(r => new Date(r.ends_at).getTime() <= now);
+
+  const rowHtml = (r, cls) => `
+    <div class="to-row ${cls}">
+      <span class="to-ico">${toTypeEmoji(r.type)}</span>
+      <div class="to-body">
+        <div class="to-range">${escText(toFormatRange(r))}</div>
+        ${r.note ? `<div class="to-note" title="${escAttr(r.note)}">${escText(r.note)}</div>` : ''}
+      </div>
+      ${toIsActiveNow(r) ? '<span class="to-badge">Now</span>' : ''}
+      ${cls === 'past' ? '' : `
+        <button class="btn btn-sm" data-edit="${escAttr(r.id)}">Edit</button>
+        <button class="btn btn-sm btn-danger" data-cancel="${escAttr(r.id)}">Cancel</button>`}
+    </div>`;
+
+  const body = (!rows.length)
+    ? `<div class="empty-state"><i class="ti ti-calendar-off" aria-hidden="true"></i>
+        <h4>No time off scheduled</h4>
+        <p>Scheduling a PTO or sick day posts it to Slack and puts it on the team
+        Outlook calendar.</p></div>`
+    : `${upcoming.length ? `<div class="to-sec">Upcoming</div>${upcoming.map(r => rowHtml(r, toIsActiveNow(r) ? 'active' : '')).join('')}` : ''}
+       ${past.length ? `<div class="to-sec">Past</div>${past.map(r => rowHtml(r, 'past')).join('')}` : ''}`;
+
+  openModal(`
+    <div class="to-head"><h3>Time off</h3>
+      <button class="btn btn-primary btn-sm" data-act="new">Schedule</button></div>
+    ${body}
+    <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`,
+    { persistent: true });
+
+  const root = document.getElementById('modal-content');
+  root.querySelector('[data-act="close"]').onclick = closeModal;
+  root.querySelector('[data-act="new"]').onclick = () => openTimeOffForm(null);
+  root.querySelectorAll('[data-edit]').forEach(b => {
+    b.onclick = () => openTimeOffForm(rows.find(r => r.id === b.getAttribute('data-edit')));
+  });
+  root.querySelectorAll('[data-cancel]').forEach(b => {
+    const row = rows.find(r => r.id === b.getAttribute('data-cancel'));
+    b.onclick = () => confirmModal({
+      title: `Cancel this ${toTypeLabel(row.type)}?`,
+      body: `${escText(toFormatRange(row))} will be removed, taken off the team calendar, and a
+             cancellation posted to Slack.`,
+      confirmText: 'Cancel it', danger: true,
+      onConfirm: async () => {
+        try { await toDelete(row); toast('Time off cancelled', 'success');
+              await openTimeOffHome(); renderTiles(); }
+        catch (err) { toast(err.message, 'error'); }
+      }
+    });
+  });
+}
+
+function openTimeOffForm(existing) {
+  const today = todayCT();
+  const isEdit = !!existing;
+  const type = isEdit ? existing.type : 'pto';
+  const mode = isEdit ? (existing.all_day ? 'full' : 'half') : 'full';
+  const sDate = (isEdit && existing.all_day) ? dateOnlyCT(existing.starts_at) : today;
+  const eDate = (isEdit && existing.all_day) ? dateOnlyCT(existing.ends_at) : today;
+  const hDate = (isEdit && !existing.all_day) ? dateOnlyCT(existing.starts_at) : today;
+  const hPer  = (isEdit && !existing.all_day && hourInCT(existing.starts_at) >= 12) ? 'pm' : 'am';
+
+  openModal(`
+    <h3>${isEdit ? 'Edit time off' : 'Schedule time off'}</h3>
+    <div class="seg" data-seg="type">
+      <button data-v="pto"${type === 'pto' ? ' class="on"' : ''}>\u{1F4C5}&nbsp; PTO</button>
+      <button data-v="sick"${type === 'sick' ? ' class="on"' : ''}>\u{1F912}&nbsp; Sick</button>
+    </div>
+    <div class="seg" data-seg="mode">
+      <button data-v="full"${mode === 'full' ? ' class="on"' : ''}>Full day(s)</button>
+      <button data-v="half"${mode === 'half' ? ' class="on"' : ''}>Half day</button>
+    </div>
+    <div data-pane="full" ${mode === 'full' ? '' : 'hidden'}>
+      <div class="daterow">
+        <div class="fld"><label>From</label><input type="date" data-to="startDate" value="${escAttr(sDate)}"></div>
+        <div class="fld"><label>To</label><input type="date" data-to="endDate" value="${escAttr(eDate)}"></div>
+      </div>
+    </div>
+    <div data-pane="half" ${mode === 'half' ? '' : 'hidden'}>
+      <div class="daterow">
+        <div class="fld"><label>Date</label><input type="date" data-to="halfDate" value="${escAttr(hDate)}"></div>
+        <div class="fld"><label>Which half</label>
+          <div class="seg" data-seg="halfPeriod" style="margin:0">
+            <button data-v="am"${hPer === 'am' ? ' class="on"' : ''}>Morning</button>
+            <button data-v="pm"${hPer === 'pm' ? ' class="on"' : ''}>Afternoon</button>
+          </div></div>
+      </div>
+    </div>
+    <div class="fld"><label>Note <span class="opt">(optional)</span></label>
+      <input type="text" data-to="note" placeholder="Visible to the team" value="${escAttr((existing && existing.note) || '')}"></div>
+    <div class="to-hint">Posts to Slack and adds an Outlook calendar event automatically.</div>
+    <div class="modal-actions">
+      <button class="btn" data-act="cancel">Cancel</button>
+      <button class="btn btn-primary" data-act="save">${isEdit ? 'Save changes' : 'Schedule'}</button>
+    </div>`, { persistent: true });
+
+  const root = document.getElementById('modal-content');
+  const seg = {};
+  root.querySelectorAll('[data-seg]').forEach(g => {
+    const name = g.getAttribute('data-seg');
+    seg[name] = g.querySelector('.on').getAttribute('data-v');
+    g.querySelectorAll('button').forEach(b => {
+      b.onclick = () => {
+        g.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+        seg[name] = b.getAttribute('data-v');
+        if (name === 'mode') {
+          root.querySelector('[data-pane="full"]').hidden = seg.mode !== 'full';
+          root.querySelector('[data-pane="half"]').hidden = seg.mode !== 'half';
+        }
+      };
+    });
+  });
+  const val = k => { const el = root.querySelector(`[data-to="${k}"]`); return el ? el.value : ''; };
+
+  root.querySelector('[data-act="cancel"]').onclick = () => openTimeOffHome();
+  root.querySelector('[data-act="save"]').onclick = async () => {
+    const v = {
+      type: seg.type, mode: seg.mode, halfPeriod: seg.halfPeriod || 'am',
+      startDate: val('startDate'), endDate: val('endDate'),
+      halfDate: val('halfDate'), note: val('note')
+    };
+    // Same validation the PWA applies, so one client cannot create a row the
+    // other would consider invalid.
+    if (v.mode === 'full') {
+      if (!v.startDate || !v.endDate) { toast('Pick a start and end date', 'error'); return; }
+      if (v.endDate < v.startDate) { toast('End date must be on or after the start date', 'error'); return; }
+    } else if (!v.halfDate) { toast('Pick a date', 'error'); return; }
+
+    const btn = root.querySelector('[data-act="save"]');
+    btn.disabled = true; btn.textContent = 'Saving\u2026';
+    try {
+      await toSave(v, existing);
+      toast(isEdit ? 'Time off updated' : 'Time off scheduled', 'success');
+      await openTimeOffHome();
+      renderTiles();
+    } catch (err) {
+      toast(err.message, 'error');
+      btn.disabled = false; btn.textContent = isEdit ? 'Save changes' : 'Schedule';
+    }
+  };
+}
+
+// Tile status: what matters at a glance is "am I off now / next", not a count.
+async function timeOffTileStatus() {
+  try {
+    const rows = await toMine();
+    if (rows === null) return { text: 'No safety profile', severity: 'subtle' };
+    const active = rows.find(toIsActiveNow);
+    if (active) return { text: `Out now \u00b7 ${toFormatRange(active)}`, severity: 'warning' };
+    const now = Date.now();
+    const next = rows.filter(r => new Date(r.starts_at).getTime() > now)
+                     .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at))[0];
+    if (next) return { text: `Next: ${toFormatRange(next)}`, severity: 'subtle' };
+    return { text: 'Nothing scheduled', severity: 'subtle' };
+  } catch (e) { return { text: 'Status unavailable', severity: 'subtle' }; }
 }
 
 // ============================================================
@@ -5182,10 +5545,9 @@ function escText(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').r
 // 'leadership' is a special section: it renders an embedded panel (per-tracker
 // objective cards) instead of tiles, and only appears for Lead/CTO sessions.
 const TILE_SECTIONS = [
-  { id: 'safety',     label: 'Safety' },
+  { id: 'safety',     label: 'Safety & Operations' },
   { id: 'projects',   label: 'Projects' },
   { id: 'meetings',   label: 'Meetings' },
-  { id: 'feedback',   label: 'Feedback' },
   { id: 'leadership', label: 'Leadership' },
   { id: 'watching',   label: 'Watching' },
   { id: 'analysis',   label: 'Analysis' },
