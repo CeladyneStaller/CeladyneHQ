@@ -538,6 +538,89 @@
   .badge-pace-dot.warn { background: #854F0B; }
   .badge-pace-dot.bad  { background: #A32D2D; }
 
+  /* ---- feedback (SWOT) --------------------------------------------------- */
+  .fb-head { display: flex; align-items: center; gap: 10px; }
+  .fb-head h3 { margin: 0; flex: 1; }
+  .fb-sub { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-subtle); margin-bottom: 12px; }
+  .fb-catrow { margin-bottom: 14px; }
+  .fb-catrow label { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em;
+    text-transform: uppercase; display: block; margin-bottom: 5px; }
+  .fb-catrow select { width: 100%; }
+  .swot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .swot-f { display: flex; flex-direction: column; }
+  .swot-f label { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em;
+    text-transform: uppercase; margin-bottom: 4px; }
+  .swot-hint { font-size: 10.5px; color: var(--text-subtle); margin-bottom: 6px; line-height: 1.4; }
+  .swot-f textarea { width: 100%; min-height: 74px; padding: 8px 10px; font-size: 13px;
+    font-family: var(--font-sans); border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--surface); color: var(--text); resize: vertical; }
+  .sw-s { color: #3B6D11; } .sw-w { color: #A32D2D; }
+  .sw-o { color: #0C447C; } .sw-t { color: #854F0B; }
+  .anon-note { display: flex; gap: 9px; align-items: flex-start; padding: 9px 12px;
+    margin-bottom: 16px; background: var(--accent-bg); border: 1px solid var(--accent);
+    border-radius: var(--radius); color: var(--accent-text); font-size: 12px; line-height: 1.5; }
+  .anon-note i { font-size: 15px; flex: none; margin-top: 1px; }
+  .sub-row { display: flex; align-items: center; gap: 10px; padding: 11px 13px;
+    border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 7px; }
+  .sub-date { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-subtle); min-width: 86px; }
+  .sub-cat { font-family: var(--font-mono); font-size: 9px; letter-spacing: .05em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: var(--radius-pill);
+    background: var(--surface-alt); color: var(--text-muted); white-space: nowrap; }
+  .sub-prev { flex: 1; font-size: 12.5px; color: var(--text-muted); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .edited { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle); }
+  .btn-copy { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono);
+    font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase; padding: 4px 9px;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+    color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+  .btn-copy:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .btn-copy i { font-size: 13px; }
+  .btn-copy.done { border-color: var(--success); color: var(--success); background: var(--success-bg); }
+  .empty-state { text-align: center; padding: 30px 20px; }
+  .empty-state i { font-size: 30px; color: var(--text-subtle); margin-bottom: 10px; display: block; }
+  .empty-state h4 { font-family: var(--font-disp); font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+  .empty-state p { font-size: 12.5px; color: var(--text-muted); line-height: 1.6;
+    max-width: 420px; margin: 0 auto 4px; }
+  .filter-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+  .filter-bar .fld { display: flex; flex-direction: column; gap: 3px; }
+  .filter-bar label { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-subtle); }
+  .filter-bar input, .filter-bar select { padding: 6px 9px; font-size: 12.5px;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+    color: var(--text); font-family: var(--font-sans); }
+  .res-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-subtle);
+    margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .viewtabs { display: flex; margin-left: auto; }
+  .viewtabs button { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .04em;
+    text-transform: uppercase; padding: 5px 11px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text-muted); cursor: pointer; }
+  .viewtabs button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+  .viewtabs button:last-child { border-radius: 0 var(--radius) var(--radius) 0; border-left: none; }
+  .viewtabs button.on { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent); }
+  .adm-card { border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 13px 15px; margin-bottom: 9px; }
+  .adm-head { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+  .adm-tok { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-subtle); margin-left: auto; }
+  .adm-q { margin-bottom: 8px; }
+  .adm-q .k { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em;
+    text-transform: uppercase; margin-bottom: 2px; }
+  .adm-q .v { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; }
+  .quad { border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; margin-bottom: 10px; }
+  .quad h5 { font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
+    text-transform: uppercase; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .quad h5 .n { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle);
+    background: var(--surface-alt); padding: 2px 7px; border-radius: var(--radius-pill); }
+  .qitem { display: flex; gap: 11px; padding: 7px 0; border-top: 1px solid var(--border); }
+  .qitem:first-of-type { border-top: none; }
+  .qitem .meta { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle);
+    min-width: 104px; line-height: 1.5; flex: none; }
+  .qitem .txt { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; }
+  @media (max-width: 640px) {
+    .swot-grid { grid-template-columns: 1fr; }
+    .sub-prev { display: none; }
+  }
+
   /* Pinned-quarter notice. Shown to every user when an admin has pinned a quarter
      other than the calendar one, so a short tile list is never a mystery. */
   .quarter-banner {
@@ -1826,6 +1909,7 @@
         <button class="btn btn-sm" id="drawer-quarter-save">Set</button>
       </div>
       <div class="tiny muted" id="drawer-quarter-note" style="margin-bottom: 12px;">&mdash;</div>
+      <button class="btn btn-block btn-sm" id="drawer-review-feedback" style="margin-bottom: 8px;">Review feedback</button>
       <button class="btn btn-block btn-sm" id="drawer-manage-trackers" style="margin-bottom: 8px;">Manage division links</button>
       <button class="btn btn-block btn-sm" id="drawer-reset-config">Reset device configuration</button>
     </div>
@@ -1934,6 +2018,26 @@ const TOOLS = [
   // ── Meetings section (static links) ───────────────────────────────────────
   // These three render as the "Meetings" section under Projects. They point at
   // the Confluence folders that hold each meeting's pages.
+  // ── Feedback ──────────────────────────────────────────────────────────────
+  {
+    id: 'feedback-swot',
+    name: 'Share feedback',
+    description: 'SWOT feedback — your name is not shown',
+    icon: 'message-2',
+    action: () => openFeedbackHome(),
+    section: 'feedback',
+    fetchStatus: async () => {
+      // Count only YOUR submissions — never total volume, which would leak how
+      // much (or how little) the team is using an unattributed channel.
+      try {
+        const rows = await fbMine();
+        if (rows == null) return { text: 'Open', severity: 'subtle' };
+        return rows.length
+          ? { text: `${rows.length} submitted`, severity: 'subtle' }
+          : { text: 'Share feedback', severity: 'subtle' };
+      } catch (e) { return { text: 'Open', severity: 'subtle' }; }
+    }
+  },
   {
     id: 'meeting-company',
     name: 'Celadyne Company Meeting',
@@ -2537,6 +2641,488 @@ function renderQuarterBanner() {
   el.innerHTML = '<i class="ti ti-calendar-stats" aria-hidden="true"></i>' +
     '<span>Showing <b>' + escText(activeQuarter()) + '</b> objectives \u2014 set by an admin. ' +
     'The calendar quarter is ' + escText(calendarQuarter()) + '.</span>';
+}
+
+// ============================================================
+//  FEEDBACK — SWOT, pseudonymous, Supabase-backed
+// ============================================================
+//  Shares the safety app's Supabase project. Every call goes through a
+//  SECURITY DEFINER RPC that filters internally — the table itself is
+//  unreachable with the anon key that ships in this page.
+//
+//  PSEUDONYMOUS, NOT ANONYMOUS. The row stores an encrypted identity, so an
+//  admin with the Vault key can resolve a submission to a person. The UI
+//  therefore claims only what is checkable: your name is not SHOWN. It never
+//  says "anonymous" unqualified, because over-promising is how a feedback
+//  channel loses trust the first time someone tests it.
+
+const FEEDBACK_CATEGORIES = ['Company', 'Meetings', 'OKR', 'Safety & Operations'];
+const SWOT_FIELDS = [
+  { key: 'strengths',     label: 'Strengths',     cls: 'sw-s', hint: 'What is working well? What should we keep doing?' },
+  { key: 'weaknesses',    label: 'Weaknesses',    cls: 'sw-w', hint: 'What is not working? Where are we struggling?' },
+  { key: 'opportunities', label: 'Opportunities', cls: 'sw-o', hint: 'What could we do better? What is untapped?' },
+  { key: 'threats',       label: 'Threats',       cls: 'sw-t', hint: 'What risks or blockers worry you?' }
+];
+
+function fbEmail() { return (STATE.session && STATE.session.email) || ''; }
+
+// Every RPC funnels through here so a missing client or a Postgres error
+// surfaces the same way rather than throwing raw at a dozen call sites.
+async function fbRpc(fn, args) {
+  const sb = getSafetyClient();
+  if (!sb) throw new Error('Feedback backend unavailable');
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) throw new Error(error.message || 'Request failed');
+  return data;
+}
+
+async function fbMine() {
+  const email = fbEmail();
+  if (!email) return [];
+  return (await fbRpc('feedback_mine', { p_email: email })) || [];
+}
+async function fbSubmit(v) {
+  return fbRpc('feedback_submit', {
+    p_email: fbEmail(), p_category: v.category,
+    p_strengths: v.strengths, p_weaknesses: v.weaknesses,
+    p_opportunities: v.opportunities, p_threats: v.threats
+  });
+}
+async function fbUpdate(id, v) {
+  return fbRpc('feedback_update', {
+    p_id: id, p_email: fbEmail(), p_category: v.category,
+    p_strengths: v.strengths, p_weaknesses: v.weaknesses,
+    p_opportunities: v.opportunities, p_threats: v.threats
+  });
+}
+async function fbDelete(id) {
+  return fbRpc('feedback_delete', { p_id: id, p_email: fbEmail() });
+}
+async function fbList(pass, from, to, category) {
+  return (await fbRpc('feedback_list', {
+    p_passphrase: pass,
+    p_from: from || null, p_to: to || null,
+    p_category: category || null
+  })) || [];
+}
+
+// ---- formatting -----------------------------------------------------------
+
+function fbShortDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+// Preview line for a list row: the first non-empty quadrant, so a submission is
+// recognisable without opening it.
+function fbPreview(row) {
+  for (const f of SWOT_FIELDS) {
+    const v = (row[f.key] || '').trim();
+    if (v) return v;
+  }
+  return '(empty)';
+}
+function fbValuesFrom(scope) {
+  const get = k => {
+    const el = document.querySelector(`${scope} [data-fb="${k}"]`);
+    return el ? el.value.trim() : '';
+  };
+  return {
+    category: get('category'), strengths: get('strengths'),
+    weaknesses: get('weaknesses'), opportunities: get('opportunities'),
+    threats: get('threats')
+  };
+}
+function fbHasContent(v) {
+  return !!(v.strengths || v.weaknesses || v.opportunities || v.threats);
+}
+
+// Clipboard text. Contributor labels are deliberately omitted: they earn their
+// place on screen, but pasted into a discussion page they become durable
+// pseudonymous identifiers in a document that outlives the context, and
+// correlating them over time is the deanonymisation route this design avoids.
+function fbCopySubmission(row) {
+  const lines = [`Feedback — ${row.category} — ${fbShortDate(row.created_at)}`, ''];
+  SWOT_FIELDS.forEach(f => {
+    const v = (row[f.key] || '').trim();
+    if (!v) return;
+    lines.push(f.label, `• ${v}`, '');
+  });
+  return lines.join('\n').trim();
+}
+function fbCopyQuadrant(field, rows, scopeLabel) {
+  const items = rows
+    .map(r => ({ txt: (r[field.key] || '').trim(), r }))
+    .filter(x => x.txt);
+  const head = `${field.label} — ${scopeLabel} (${items.length})`;
+  const body = items.map(x =>
+    `• ${x.txt}\n  — ${fbShortDate(x.r.created_at)}, ${x.r.category}`).join('\n');
+  return `${head}\n\n${body}`;
+}
+function fbCopyAllQuadrants(rows, scopeLabel) {
+  return SWOT_FIELDS
+    .filter(f => rows.some(r => (r[f.key] || '').trim()))
+    .map(f => fbCopyQuadrant(f, rows, scopeLabel))
+    .join('\n\n');
+}
+function fbScopeLabel(from, to, category) {
+  const cat = category || 'All categories';
+  const range = (from && to) ? `${fbShortDate(from)} – ${fbShortDate(to)}`
+              : from ? `from ${fbShortDate(from)}`
+              : to   ? `to ${fbShortDate(to)}` : 'all dates';
+  return `${cat} — ${range}`;
+}
+
+// Clipboard write with a visible confirmation on the button that triggered it.
+// execCommand fallback because the Hub is opened over http on some lab machines,
+// where navigator.clipboard is undefined.
+async function fbCopy(text, btn) {
+  let ok = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text); ok = true;
+    }
+  } catch (e) { ok = false; }
+  if (!ok) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e) { ok = false; }
+  }
+  if (btn) {
+    const prev = btn.innerHTML;
+    btn.innerHTML = ok ? '<i class="ti ti-check"></i>Copied' : '<i class="ti ti-x"></i>Failed';
+    btn.classList.toggle('done', ok);
+    setTimeout(() => { btn.innerHTML = prev; btn.classList.remove('done'); }, 1600);
+  }
+  if (!ok) toast('Could not copy to clipboard', 'error');
+}
+
+// ---- shared form ----------------------------------------------------------
+
+function fbFormHtml(row) {
+  const cat = (row && row.category) || FEEDBACK_CATEGORIES[0];
+  const opts = FEEDBACK_CATEGORIES.map(c =>
+    `<option value="${escAttr(c)}"${c === cat ? ' selected' : ''}>${escText(c)}</option>`).join('');
+  const fields = SWOT_FIELDS.map(f => `
+    <div class="swot-f">
+      <label class="${f.cls}">${escText(f.label)}</label>
+      <div class="swot-hint">${escText(f.hint)}</div>
+      <textarea data-fb="${f.key}" placeholder="Optional">${escText((row && row[f.key]) || '')}</textarea>
+    </div>`).join('');
+  return `
+    <div class="anon-note">
+      <i class="ti ti-lock" aria-hidden="true"></i>
+      <span><b>Your name is not shown with your feedback.</b> Submissions are stored under an
+      encrypted identifier; reviewers see only a short label. You can edit or delete this later
+      from any device you sign in on.</span>
+    </div>
+    <div class="fb-catrow">
+      <label>Category</label>
+      <select class="input" data-fb="category">${opts}</select>
+    </div>
+    <div class="swot-grid">${fields}</div>`;
+}
+
+// ---- screens --------------------------------------------------------------
+
+async function openFeedbackHome() {
+  openModal('<h3>Your feedback</h3><p class="intro">Loading…</p>', { persistent: true });
+  let rows;
+  try { rows = await fbMine(); }
+  catch (err) {
+    openModal(`<h3>Your feedback</h3><p class="intro">Could not load: ${escText(err.message)}</p>
+      <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`, { persistent: true });
+    document.querySelector('#modal-content [data-act="close"]').onclick = closeModal;
+    return;
+  }
+  const list = rows.length ? rows.map(r => `
+    <div class="sub-row">
+      <span class="sub-date">${escText(fbShortDate(r.created_at))}</span>
+      <span class="sub-cat">${escText(r.category)}</span>
+      <span class="sub-prev" title="${escAttr(fbPreview(r))}">${escText(fbPreview(r))}</span>
+      ${r.updated_at > r.created_at ? '<span class="edited">edited</span>' : ''}
+      <button class="btn-copy" data-copy="${escAttr(r.id)}"><i class="ti ti-copy"></i>Copy</button>
+      <button class="btn btn-sm" data-open="${escAttr(r.id)}">Open</button>
+    </div>`).join('') : `
+    <div class="empty-state">
+      <i class="ti ti-message-plus" aria-hidden="true"></i>
+      <h4>You have not submitted any feedback yet</h4>
+      <p>Feedback is grouped into Company, Meetings, OKR, and Safety &amp; Operations, and written
+      as strengths, weaknesses, opportunities, and threats. Your name is not shown to reviewers.</p>
+    </div>`;
+
+  openModal(`
+    <div class="fb-head">
+      <h3>Your feedback</h3>
+      ${rows.length ? '<button class="btn-copy" data-copy-all><i class="ti ti-copy"></i>Copy all</button>' : ''}
+    </div>
+    ${rows.length ? `<p class="intro">${rows.length} submission${rows.length === 1 ? '' : 's'}. Your name is not shown to reviewers.</p>` : ''}
+    ${list}
+    <div class="modal-actions">
+      <button class="btn" data-act="close">Close</button>
+      <button class="btn btn-primary" data-act="new">New feedback</button>
+    </div>`, { persistent: true });
+
+  const root = document.getElementById('modal-content');
+  root.querySelector('[data-act="close"]').onclick = closeModal;
+  root.querySelector('[data-act="new"]').onclick = () => openFeedbackForm(null);
+  const all = root.querySelector('[data-copy-all]');
+  if (all) all.onclick = () => fbCopy(rows.map(fbCopySubmission).join('\n\n'), all);
+  root.querySelectorAll('[data-open]').forEach(b => {
+    b.onclick = () => openFeedbackForm(rows.find(r => r.id === b.getAttribute('data-open')));
+  });
+  root.querySelectorAll('[data-copy]').forEach(b => {
+    b.onclick = () => fbCopy(fbCopySubmission(rows.find(r => r.id === b.getAttribute('data-copy'))), b);
+  });
+}
+
+function openFeedbackForm(row) {
+  const editing = !!row;
+  openModal(`
+    <div class="fb-head">
+      <h3>${editing ? 'Edit feedback' : 'Share feedback'}</h3>
+      ${editing ? '<button class="btn-copy" data-copy-one><i class="ti ti-copy"></i>Copy</button>' : ''}
+    </div>
+    ${editing ? `<div class="fb-sub">Submitted ${escText(fbShortDate(row.created_at))}${
+      row.updated_at > row.created_at ? ' · edited ' + escText(fbShortDate(row.updated_at)) : ''}</div>` : ''}
+    ${fbFormHtml(row)}
+    <div class="modal-actions">
+      ${editing ? '<button class="btn btn-danger btn-sm" data-act="delete">Delete</button>' : ''}
+      <span style="flex:1"></span>
+      <button class="btn" data-act="cancel">Cancel</button>
+      <button class="btn btn-primary" data-act="save">${editing ? 'Save changes' : 'Submit feedback'}</button>
+    </div>`, { persistent: true });
+
+  const root = document.getElementById('modal-content');
+  const copy = root.querySelector('[data-copy-one]');
+  if (copy) copy.onclick = () => fbCopy(fbCopySubmission(row), copy);
+
+  // Confirm only when something has actually been typed — a confirm on an
+  // untouched form trains people to dismiss it.
+  root.querySelector('[data-act="cancel"]').onclick = () => {
+    const v = fbValuesFrom('#modal-content');
+    const dirty = editing
+      ? SWOT_FIELDS.some(f => (v[f.key] || '') !== ((row[f.key] || '').trim())) || v.category !== row.category
+      : fbHasContent(v);
+    if (!dirty) { openFeedbackHome(); return; }
+    confirmModal({
+      title: editing ? 'Discard changes?' : 'Discard this feedback?',
+      body: 'What you have written will not be saved.',
+      confirmText: 'Discard', danger: true,
+      onConfirm: () => openFeedbackHome()
+    });
+  };
+
+  root.querySelector('[data-act="save"]').onclick = async () => {
+    const v = fbValuesFrom('#modal-content');
+    if (!fbHasContent(v)) { toast('Fill in at least one of the four boxes', 'error'); return; }
+    const btn = root.querySelector('[data-act="save"]');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      if (editing) {
+        const ok = await fbUpdate(row.id, v);
+        if (!ok) throw new Error('That submission could not be updated');
+        toast('Feedback updated', 'success');
+      } else {
+        await fbSubmit(v);
+        toast('Feedback submitted', 'success');
+      }
+      await openFeedbackHome();
+      renderTiles();
+    } catch (err) {
+      toast(err.message, 'error');
+      btn.disabled = false; btn.textContent = editing ? 'Save changes' : 'Submit feedback';
+    }
+  };
+
+  const del = root.querySelector('[data-act="delete"]');
+  if (del) del.onclick = () => confirmModal({
+    title: 'Delete this feedback?',
+    body: 'This removes it permanently. Because submissions are not attributed, it cannot be ' +
+          'restored — not by you and not by an admin.',
+    confirmText: 'Delete', danger: true,
+    onConfirm: async () => {
+      try {
+        const ok = await fbDelete(row.id);
+        if (!ok) throw new Error('That submission could not be deleted');
+        toast('Feedback deleted', 'success');
+        await openFeedbackHome();
+        renderTiles();
+      } catch (err) { toast(err.message, 'error'); }
+    }
+  });
+}
+
+// ---- admin review ---------------------------------------------------------
+
+// Held for this session only, never persisted: writing it to localStorage would
+// put the review passphrase somewhere a shared lab machine keeps it.
+let _fbPass = null;
+
+function openFeedbackReview() {
+  if (!_fbPass) { openFeedbackPassPrompt(); return; }
+  openFeedbackResults();
+}
+
+function openFeedbackPassPrompt() {
+  openModal(`
+    <h3>Review feedback</h3>
+    <p class="intro">Feedback is not attributed, so reading it needs the review passphrase.
+    It is not stored in this page.</p>
+    <input class="input" type="password" id="fb-pass" placeholder="Review passphrase" style="width:100%">
+    <div class="fb-sub" style="margin-top:6px">Remembered for this session only.</div>
+    <div class="modal-actions">
+      <button class="btn" data-act="cancel">Cancel</button>
+      <button class="btn btn-primary" data-act="unlock">Unlock</button>
+    </div>`, { persistent: true });
+  const root = document.getElementById('modal-content');
+  const input = root.querySelector('#fb-pass');
+  input.focus();
+  const go = async () => {
+    const pass = input.value;
+    if (!pass) return;
+    const btn = root.querySelector('[data-act="unlock"]');
+    btn.disabled = true; btn.textContent = 'Checking…';
+    try {
+      await fbList(pass, null, null, null);   // cheapest possible validity check
+      _fbPass = pass;
+      openFeedbackResults();
+    } catch (err) {
+      toast('Passphrase not accepted', 'error');
+      btn.disabled = false; btn.textContent = 'Unlock';
+    }
+  };
+  root.querySelector('[data-act="unlock"]').onclick = go;
+  root.querySelector('[data-act="cancel"]').onclick = closeModal;
+  input.onkeydown = (e) => { if (e.key === 'Enter') go(); };
+}
+
+function fbDefaultRange() {
+  const to = new Date();
+  const from = new Date(to.getTime() - 90 * 86400000);
+  const iso = d => d.toISOString().slice(0, 10);
+  return { from: iso(from), to: iso(to) };
+}
+
+let _fbView = 'quadrant';
+
+async function openFeedbackResults(filters) {
+  const f = filters || Object.assign(fbDefaultRange(), { category: '' });
+  const catOpts = ['<option value="">All categories</option>'].concat(
+    FEEDBACK_CATEGORIES.map(c =>
+      `<option value="${escAttr(c)}"${c === f.category ? ' selected' : ''}>${escText(c)}</option>`)).join('');
+
+  const shell = (inner, meta) => `
+    <h3>Feedback review</h3>
+    <div class="filter-bar">
+      <div class="fld"><label>From</label><input type="date" id="fb-from" value="${escAttr(f.from)}"></div>
+      <div class="fld"><label>To</label><input type="date" id="fb-to" value="${escAttr(f.to)}"></div>
+      <div class="fld"><label>Category</label><select id="fb-cat">${catOpts}</select></div>
+      <button class="btn btn-sm btn-primary" data-act="apply">Apply</button>
+      <button class="btn-copy" data-copy-all><i class="ti ti-copy"></i>Copy all</button>
+      <button class="btn btn-sm" data-act="csv">Export CSV</button>
+    </div>
+    <div class="res-meta">${meta}
+      <div class="viewtabs">
+        <button data-view="submission" class="${_fbView === 'submission' ? 'on' : ''}">By submission</button>
+        <button data-view="quadrant" class="${_fbView === 'quadrant' ? 'on' : ''}">By quadrant</button>
+      </div>
+    </div>
+    ${inner}
+    <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`;
+
+  openModal(shell('<p class="intro">Loading…</p>', ''), { persistent: true, wide: true });
+
+  let rows;
+  try { rows = await fbList(_fbPass, f.from, f.to, f.category); }
+  catch (err) {
+    _fbPass = null;
+    toast('Review session ended: ' + err.message, 'error');
+    openFeedbackPassPrompt();
+    return;
+  }
+
+  const scope = fbScopeLabel(f.from, f.to, f.category);
+  const contributors = new Set(rows.map(r => r.contributor)).size;
+  const meta = `<span>${rows.length} submission${rows.length === 1 ? '' : 's'} · ` +
+               `${contributors} contributor${contributors === 1 ? '' : 's'} · ${escText(scope)}</span>`;
+
+  let inner;
+  if (!rows.length) {
+    inner = `<div class="empty-state"><i class="ti ti-filter-off" aria-hidden="true"></i>
+      <h4>No feedback in this range</h4>
+      <p>Nothing matches ${escText(scope)}. Try widening the dates or choosing all categories.</p></div>`;
+  } else if (_fbView === 'quadrant') {
+    inner = SWOT_FIELDS.map(fld => {
+      const items = rows.filter(r => (r[fld.key] || '').trim());
+      if (!items.length) return '';
+      return `<div class="quad">
+        <h5 class="${fld.cls}">${escText(fld.label)} <span class="n">${items.length}</span>
+          <span style="margin-left:auto"><button class="btn-copy" data-copy-quad="${fld.key}"><i class="ti ti-copy"></i>Copy</button></span>
+        </h5>
+        ${items.map(r => `<div class="qitem">
+          <div class="meta">${escText(fbShortDate(r.created_at))}<br>${escText(r.category)}</div>
+          <div class="txt">${escText((r[fld.key] || '').trim())}</div></div>`).join('')}
+      </div>`;
+    }).join('');
+  } else {
+    inner = rows.map(r => `<div class="adm-card">
+      <div class="adm-head">
+        <span class="sub-cat">${escText(r.category)}</span>
+        <span class="sub-date">${escText(fbShortDate(r.created_at))}</span>
+        <span class="adm-tok">${escText(r.contributor)}${r.edited ? ' · edited' : ''}</span>
+        <button class="btn-copy" data-copy-sub="${escAttr(r.id)}"><i class="ti ti-copy"></i>Copy</button>
+      </div>
+      ${SWOT_FIELDS.map(fld => (r[fld.key] || '').trim()
+        ? `<div class="adm-q"><div class="k ${fld.cls}">${escText(fld.label)}</div>
+           <div class="v">${escText((r[fld.key] || '').trim())}</div></div>` : '').join('')}
+    </div>`).join('');
+  }
+
+  openModal(shell(inner, meta), { persistent: true, wide: true });
+  const root = document.getElementById('modal-content');
+  const read = () => ({
+    from: root.querySelector('#fb-from').value,
+    to: root.querySelector('#fb-to').value,
+    category: root.querySelector('#fb-cat').value
+  });
+  root.querySelector('[data-act="close"]').onclick = closeModal;
+  root.querySelector('[data-act="apply"]').onclick = () => openFeedbackResults(read());
+  root.querySelectorAll('[data-view]').forEach(b => {
+    b.onclick = () => { _fbView = b.getAttribute('data-view'); openFeedbackResults(read()); };
+  });
+  const all = root.querySelector('[data-copy-all]');
+  all.onclick = () => fbCopy(
+    _fbView === 'quadrant' ? fbCopyAllQuadrants(rows, scope) : rows.map(fbCopySubmission).join('\n\n'), all);
+  root.querySelectorAll('[data-copy-quad]').forEach(b => {
+    const fld = SWOT_FIELDS.find(x => x.key === b.getAttribute('data-copy-quad'));
+    b.onclick = () => fbCopy(fbCopyQuadrant(fld, rows, scope), b);
+  });
+  root.querySelectorAll('[data-copy-sub]').forEach(b => {
+    b.onclick = () => fbCopy(fbCopySubmission(rows.find(r => r.id === b.getAttribute('data-copy-sub'))), b);
+  });
+  root.querySelector('[data-act="csv"]').onclick = () => fbExportCsv(rows, scope);
+}
+
+function fbExportCsv(rows, scope) {
+  const esc = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const head = ['Date', 'Category', 'Contributor', 'Edited', 'Strengths', 'Weaknesses', 'Opportunities', 'Threats'];
+  const body = rows.map(r => [
+    new Date(r.created_at).toISOString().slice(0, 10), r.category, r.contributor,
+    r.edited ? 'yes' : 'no', r.strengths, r.weaknesses, r.opportunities, r.threats
+  ].map(esc).join(','));
+  const csv = [head.map(esc).join(',')].concat(body).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `feedback-${scope.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -4599,6 +5185,7 @@ const TILE_SECTIONS = [
   { id: 'safety',     label: 'Safety' },
   { id: 'projects',   label: 'Projects' },
   { id: 'meetings',   label: 'Meetings' },
+  { id: 'feedback',   label: 'Feedback' },
   { id: 'leadership', label: 'Leadership' },
   { id: 'watching',   label: 'Watching' },
   { id: 'analysis',   label: 'Analysis' },
@@ -5088,6 +5675,13 @@ function renderTileEl(tool) {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       openFolderModal(tool);
+    });
+  } else if (typeof tool.action === 'function') {
+    // In-page tile (feedback): opens a modal instead of navigating away.
+    a.href = '#';
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      tool.action();
     });
   } else {
     a.href = typeof tool.url === 'function' ? tool.url(STATE.session) : tool.url;
@@ -6097,6 +6691,8 @@ function bindQuarterPicker() {
 function bindDrawer() {
   bindProjPop();
   bindQuarterPicker();
+  const fbBtn = document.getElementById('drawer-review-feedback');
+  if (fbBtn) fbBtn.addEventListener('click', () => { closeDrawer(); openFeedbackReview(); });
   document.getElementById('header-settings-btn').addEventListener('click', openDrawer);
   document.getElementById('drawer-close').addEventListener('click', closeDrawer);
   document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
@@ -6430,20 +7026,25 @@ async function handleUserAction(action, email) {
 // ============================================================
 //  MODALS
 // ============================================================
+// `persistent: true` blocks click-off close. Used by the feedback forms, where a
+// stray click on the backdrop would otherwise discard a half-written SWOT.
+let _modalPersistent = false;
 function openModal(html, opts) {
   const el = document.getElementById('modal-content');
   el.innerHTML = html;
   el.classList.toggle('modal-wide', !!(opts && opts.wide));
+  _modalPersistent = !!(opts && opts.persistent);
   document.getElementById('modal-backdrop').classList.add('open');
 }
 function closeModal() {
+  _modalPersistent = false;
   document.getElementById('modal-backdrop').classList.remove('open');
   const el = document.getElementById('modal-content');
   el.innerHTML = '';
   el.classList.remove('modal-wide');
 }
 document.addEventListener('click', (e) => {
-  if (e.target.id === 'modal-backdrop') closeModal();
+  if (e.target.id === 'modal-backdrop' && !_modalPersistent) closeModal();
 });
  
 function confirmModal({ title, body, confirmText, danger, onConfirm }) {
