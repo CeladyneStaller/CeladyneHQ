@@ -2523,6 +2523,10 @@ function saveSession(session) {
 function clearSession() {
   lsDel(LS_SESSION_KEY);
   STATE.session = null;
+  // The review passphrase is not part of the session record, so it has to be
+  // dropped explicitly — otherwise it would outlive the sign-out that was
+  // supposed to clear this device.
+  if (typeof fbClearPass === 'function') fbClearPass();
 }
  
 // ============================================================
@@ -3433,12 +3437,36 @@ function openFeedbackForm(row) {
 
 // ---- admin review ---------------------------------------------------------
 
-// Held for this session only, never persisted: writing it to localStorage would
-// put the review passphrase somewhere a shared lab machine keeps it.
+// The review passphrase, cached in localStorage so it survives both a refresh
+// and a browser restart.
+//
+// It is stored in PLAINTEXT and persists until something clears it. On a shared
+// machine that means the next person to open the Hub has review access, so the
+// three exits matter: signing out clears it, the Lock button in the review modal
+// clears it, and a passphrase the server rejects is discarded rather than
+// retried. Uses the same ls* helpers as the rest of the file, so a storage
+// failure (private mode, quota) degrades to memory-only instead of throwing.
+const FB_PASS_KEY = 'hub_fb_review_pass_v1';
 let _fbPass = null;
 
+function fbLoadPass() {
+  if (_fbPass) return _fbPass;
+  const v = lsGet(FB_PASS_KEY);
+  _fbPass = (typeof v === 'string' && v) ? v : null;
+  return _fbPass;
+}
+function fbStorePass(pass) {
+  _fbPass = pass || null;
+  if (pass) lsSet(FB_PASS_KEY, pass);
+  else lsDel(FB_PASS_KEY);
+  // Drop the copy the earlier sessionStorage version left behind — it is a
+  // plaintext secret sitting in storage nothing reads any more.
+  try { sessionStorage.removeItem(FB_PASS_KEY); } catch (e) { /* nothing to clean */ }
+}
+function fbClearPass() { fbStorePass(null); }
+
 function openFeedbackReview() {
-  if (!_fbPass) { openFeedbackPassPrompt(); return; }
+  if (!fbLoadPass()) { openFeedbackPassPrompt(); return; }
   openFeedbackResults();
 }
 
@@ -3463,7 +3491,7 @@ function openFeedbackPassPrompt() {
     btn.disabled = true; btn.textContent = 'Checking…';
     try {
       await fbList(pass, null, null, null);   // cheapest possible validity check
-      _fbPass = pass;
+      fbStorePass(pass);
       openFeedbackResults();
     } catch (err) {
       toast('Passphrase not accepted', 'error');
@@ -3507,14 +3535,20 @@ async function openFeedbackResults(filters) {
       </div>
     </div>
     <div class="modal-scroll">${inner}</div>
-    <div class="modal-actions"><button class="btn" data-act="close">Close</button></div>`;
+    <div class="modal-actions">
+      <button class="btn btn-sm" data-act="lock" title="Forget the review passphrase on this device">Lock</button>
+      <span style="flex:1"></span>
+      <button class="btn" data-act="close">Close</button>
+    </div>`;
 
   openModal(shell('<p class="intro">Loading…</p>', ''), { persistent: true, wide: true, scroll: true });
 
   let rows;
-  try { rows = await fbList(_fbPass, f.from, f.to, f.category); }
+  try { rows = await fbList(fbLoadPass(), f.from, f.to, f.category); }
   catch (err) {
-    _fbPass = null;
+    // A cached passphrase that no longer works (rotated, or the config changed)
+    // must be discarded, or every refresh would retry it and fail the same way.
+    fbClearPass();
     toast('Review session ended: ' + err.message, 'error');
     openFeedbackPassPrompt();
     return;
@@ -3565,6 +3599,10 @@ async function openFeedbackResults(filters) {
     category: root.querySelector('#fb-cat').value
   });
   root.querySelector('[data-act="close"]').onclick = closeModal;
+  // Explicit way to drop the cached passphrase without closing the browser —
+  // needed now that it survives a refresh.
+  const lock = root.querySelector('[data-act="lock"]');
+  if (lock) lock.onclick = () => { fbClearPass(); toast('Review locked', 'success'); closeModal(); };
   root.querySelector('[data-act="apply"]').onclick = () => openFeedbackResults(read());
   root.querySelectorAll('[data-view]').forEach(b => {
     b.onclick = () => { _fbView = b.getAttribute('data-view'); openFeedbackResults(read()); };
