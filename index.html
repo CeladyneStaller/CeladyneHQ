@@ -666,6 +666,31 @@
   .filter-bar input, .filter-bar select { padding: 6px 9px; font-size: 12.5px;
     border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
     color: var(--text); font-family: var(--font-sans); }
+  /* Quarter / Custom mode toggle and its chips. In quarter mode the date inputs
+     are removed rather than disabled — nothing should look editable that is not. */
+  .fb-modeseg { display: flex; max-width: 220px; margin-bottom: 12px; }
+  .fb-modeseg button { flex: 1; font-family: var(--font-mono); font-size: 9.5px;
+    letter-spacing: .05em; text-transform: uppercase; padding: 7px 10px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+    cursor: pointer; }
+  .fb-modeseg button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+  .fb-modeseg button:last-child { border-radius: 0 var(--radius) var(--radius) 0; border-left: none; }
+  .fb-modeseg button.on { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent); }
+  .fb-qlabel { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-subtle); margin-bottom: 7px; }
+  .qchips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .qchip { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em;
+    padding: 7px 14px; border: 1px solid var(--border); border-radius: var(--radius-pill);
+    background: var(--surface); color: var(--text-muted); cursor: pointer;
+    transition: background .12s, border-color .12s, color .12s; }
+  .qchip:hover { border-color: var(--accent); color: var(--accent); }
+  .qchip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .qchip.on:hover { color: #fff; }
+  .fb-bar-tight { margin-top: 13px; }
+  .fb-rngline { display: flex; align-items: center; gap: 7px; font-family: var(--font-mono);
+    font-size: 10px; color: var(--text-subtle); margin: 9px 0 4px; }
+  .fb-rngline i { font-size: 13px; }
+
   .res-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-subtle);
     margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .viewtabs { display: flex; margin-left: auto; }
@@ -3503,31 +3528,70 @@ function openFeedbackPassPrompt() {
   input.onkeydown = (e) => { if (e.key === 'Enter') go(); };
 }
 
-function fbDefaultRange() {
-  const to = new Date();
-  const from = new Date(to.getTime() - 90 * 86400000);
-  const iso = d => d.toISOString().slice(0, 10);
-  return { from: iso(from), to: iso(to) };
+// The last four quarters, newest first, ending with the current one. Future
+// quarters are never offered — there is nothing submitted in them to review.
+function fbLastQuarters(n) {
+  const cur = calendarQuarter();                    // 'YYYYQN'
+  let y = +cur.slice(0, 4), q = +cur.slice(5);
+  const out = [];
+  for (let i = 0; i < (n || 4); i++) {
+    out.push(y + 'Q' + q);
+    q -= 1;
+    if (q === 0) { q = 4; y -= 1; }
+  }
+  return out;
+}
+
+// 'YYYYQN' -> inclusive ISO date range. Day 0 of the month AFTER the quarter's
+// last month is that month's final day, which handles 30/31-day ends and leap
+// years without a table.
+function fbQuarterRange(qs) {
+  const y = +qs.slice(0, 4), q = +qs.slice(5);
+  const sm = (q - 1) * 3 + 1, em = sm + 2;
+  const pad = v => String(v).padStart(2, '0');
+  const last = new Date(Date.UTC(y, em, 0)).getUTCDate();
+  return { from: `${y}-${pad(sm)}-01`, to: `${y}-${pad(em)}-${pad(last)}` };
+}
+
+// The review opens on the current quarter — "read this quarter's feedback"
+// should be a zero-click path.
+function fbDefaultFilters() {
+  const q = calendarQuarter();
+  const r = fbQuarterRange(q);
+  return { mode: 'quarter', quarter: q, from: r.from, to: r.to, category: '' };
 }
 
 let _fbView = 'quadrant';
 
 async function openFeedbackResults(filters) {
-  const f = filters || Object.assign(fbDefaultRange(), { category: '' });
+  const f = filters || fbDefaultFilters();
+  const quarterMode = f.mode !== 'custom';
   const catOpts = ['<option value="">All categories</option>'].concat(
     FEEDBACK_CATEGORIES.map(c =>
       `<option value="${escAttr(c)}"${c === f.category ? ' selected' : ''}>${escText(c)}</option>`)).join('');
 
   const shell = (inner, meta) => `
     <h3>Feedback review</h3>
-    <div class="filter-bar">
-      <div class="fld"><label>From</label><input type="date" id="fb-from" value="${escAttr(f.from)}"></div>
-      <div class="fld"><label>To</label><input type="date" id="fb-to" value="${escAttr(f.to)}"></div>
+    <div class="fb-modeseg">
+      <button data-mode="quarter" class="${quarterMode ? 'on' : ''}">Quarter</button>
+      <button data-mode="custom" class="${quarterMode ? '' : 'on'}">Custom</button>
+    </div>
+    ${quarterMode ? `
+      <div class="fb-qlabel">Quarter</div>
+      <div class="qchips">${fbLastQuarters(4).map(q =>
+        `<button class="qchip${q === f.quarter ? ' on' : ''}" data-q="${escAttr(q)}">${escText(q)}</button>`
+      ).join('')}</div>` : ''}
+    <div class="filter-bar${quarterMode ? ' fb-bar-tight' : ''}">
+      ${quarterMode ? '' : `
+        <div class="fld"><label>From</label><input type="date" id="fb-from" value="${escAttr(f.from)}"></div>
+        <div class="fld"><label>To</label><input type="date" id="fb-to" value="${escAttr(f.to)}"></div>`}
       <div class="fld"><label>Category</label><select id="fb-cat">${catOpts}</select></div>
       <button class="btn btn-sm btn-primary" data-act="apply">Apply</button>
       <button class="btn-copy" data-copy-all><i class="ti ti-copy"></i>Copy all</button>
       <button class="btn btn-sm" data-act="csv">Export CSV</button>
     </div>
+    ${quarterMode ? `<div class="fb-rngline"><i class="ti ti-calendar" aria-hidden="true"></i>` +
+      `${escText(fbShortDate(f.from))} \u2013 ${escText(fbShortDate(f.to))}</div>` : ''}
     <div class="res-meta">${meta}
       <div class="viewtabs">
         <button data-view="submission" class="${_fbView === 'submission' ? 'on' : ''}">By submission</button>
@@ -3554,7 +3618,11 @@ async function openFeedbackResults(filters) {
     return;
   }
 
-  const scope = fbScopeLabel(f.from, f.to, f.category);
+  // In quarter mode the scope reads as the quarter itself — shorter in the meta
+  // line and far better as a CSV filename than a pair of dates.
+  const scope = quarterMode
+    ? `${f.category || 'All categories'} — ${f.quarter}`
+    : fbScopeLabel(f.from, f.to, f.category);
   const contributors = new Set(rows.map(r => r.contributor)).size;
   const meta = `<span>${rows.length} submission${rows.length === 1 ? '' : 's'} · ` +
                `${contributors} contributor${contributors === 1 ? '' : 's'} · ${escText(scope)}</span>`;
@@ -3593,11 +3661,52 @@ async function openFeedbackResults(filters) {
 
   openModal(shell(inner, meta), { persistent: true, wide: true, scroll: true });
   const root = document.getElementById('modal-content');
-  const read = () => ({
-    from: root.querySelector('#fb-from').value,
-    to: root.querySelector('#fb-to').value,
-    category: root.querySelector('#fb-cat').value
+  // Reading the filter depends on the mode: in quarter mode the dates come from
+  // the selected chip, in custom mode from the two inputs.
+  const read = () => {
+    const category = root.querySelector('#fb-cat').value;
+    if (quarterMode) {
+      const q = f.quarter || calendarQuarter();
+      return Object.assign({ mode: 'quarter', quarter: q, category }, fbQuarterRange(q));
+    }
+    return {
+      mode: 'custom',
+      quarter: f.quarter,                       // remembered for switching back
+      from: root.querySelector('#fb-from').value,
+      to: root.querySelector('#fb-to').value,
+      category
+    };
+  };
+
+  // Mode switch. Going quarter -> custom carries the dates you were looking at
+  // into the inputs rather than blanking them, so "this quarter but two weeks
+  // earlier" is an edit rather than typing both dates from scratch.
+  root.querySelectorAll('[data-mode]').forEach(b => {
+    b.onclick = () => {
+      const mode = b.getAttribute('data-mode');
+      if ((mode === 'quarter') === quarterMode) return;   // already there
+      const cur = read();
+      if (mode === 'custom') {
+        openFeedbackResults(Object.assign({}, cur, { mode: 'custom' }));
+      } else {
+        const q = f.quarter || calendarQuarter();
+        openFeedbackResults(Object.assign({ mode: 'quarter', quarter: q, category: cur.category },
+                                          fbQuarterRange(q)));
+      }
+    };
   });
+
+  // A chip applies straight away — one tap to any recent quarter. Category is
+  // carried across so choosing a quarter never silently resets it.
+  root.querySelectorAll('[data-q]').forEach(b => {
+    b.onclick = () => {
+      const q = b.getAttribute('data-q');
+      openFeedbackResults(Object.assign(
+        { mode: 'quarter', quarter: q, category: root.querySelector('#fb-cat').value },
+        fbQuarterRange(q)));
+    };
+  });
+
   root.querySelector('[data-act="close"]').onclick = closeModal;
   // Explicit way to drop the cached passphrase without closing the browser —
   // needed now that it survives a refresh.
