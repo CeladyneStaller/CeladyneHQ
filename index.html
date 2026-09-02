@@ -3680,9 +3680,7 @@ async function openFeedbackResults(filters) {
   const scope = quarterMode
     ? `${f.category || 'All categories'} — ${f.quarter}`
     : fbScopeLabel(f.from, f.to, f.category);
-  const contributors = new Set(rows.map(r => r.contributor)).size;
-  const meta = `<span>${rows.length} submission${rows.length === 1 ? '' : 's'} · ` +
-               `${contributors} contributor${contributors === 1 ? '' : 's'} · ${escText(scope)}</span>`;
+  const meta = `<span>${rows.length} submission${rows.length === 1 ? '' : 's'} · ${escText(scope)}</span>`;
 
   let inner;
   if (!rows.length) {
