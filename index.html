@@ -3065,12 +3065,24 @@ function openTimeOffForm(existing) {
     seg[name] = g.querySelector('.on').getAttribute('data-v');
     g.querySelectorAll('button').forEach(b => {
       b.onclick = () => {
+        const prev = seg[name];
         g.querySelectorAll('button').forEach(x => x.classList.remove('on'));
         b.classList.add('on');
         seg[name] = b.getAttribute('data-v');
         if (name === 'mode') {
           root.querySelector('[data-pane="full"]').hidden = seg.mode !== 'full';
           root.querySelector('[data-pane="half"]').hidden = seg.mode !== 'half';
+        }
+        // A sick day is essentially always today. Switching to Sick snaps the
+        // dates back rather than leaving behind whatever future range was there
+        // for PTO. Only fires on an actual change TO sick, so re-clicking Sick
+        // while editing last week's entry does not overwrite its real dates.
+        if (name === 'type' && seg.type === 'sick' && prev !== 'sick') {
+          const t = todayCT();
+          ['startDate', 'endDate', 'halfDate'].forEach(k => {
+            const el = root.querySelector(`[data-to="${k}"]`);
+            if (el) el.value = t;
+          });
         }
       };
     });
