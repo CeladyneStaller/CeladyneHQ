@@ -557,6 +557,35 @@
     grid-column: span 2;
   }
 
+  /* ---- board workstream visibility --------------------------------------- */
+  .ov-bctl { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono);
+    font-size: 9px; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px;
+    border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface);
+    color: var(--text-subtle); cursor: pointer; white-space: nowrap; }
+  .ov-bctl:hover { border-color: var(--accent); color: var(--accent); }
+  .ov-bctl.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .ov-bctl i { font-size: 12px; }
+  .ov-bmore { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono);
+    font-size: 9.5px; color: var(--text-subtle); padding: 6px 0 1px; cursor: pointer; }
+  .ov-bmore:hover { color: var(--accent); }
+  .ov-bmore i { font-size: 12px; }
+  /* Complete work reads as history: dimmed, under a divider, not competing with
+     live rows for attention. */
+  .ov-bdone { margin-top: 4px; padding-top: 5px; border-top: 0.5px dashed var(--border); opacity: .55; }
+  .wsrow { display: flex; align-items: center; gap: 9px; padding: 6px 2px; cursor: pointer; }
+  .wsrow:hover { background: var(--surface-alt); }
+  .wsrow input { margin: 0; flex: none; }
+  .wsrow .nm { flex: 1; font-size: 12.5px; color: var(--text); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .wstag { font-family: var(--font-mono); font-size: 8px; letter-spacing: .05em;
+    text-transform: uppercase; padding: 1px 6px; border-radius: var(--radius-pill);
+    background: var(--surface-alt); color: var(--text-subtle); white-space: nowrap; }
+  .wstag.done { color: #3B6D11; }
+  .ws-note { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-subtle);
+    line-height: 1.6; margin-top: 12px; }
+  .ws-count { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-subtle);
+    align-self: center; }
+
   /* ---- time off ---------------------------------------------------------- */
   .to-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
   .to-head h3 { margin: 0; flex: 1; }
@@ -2651,6 +2680,17 @@ async function jbFetchUsers() {
     // viewType ∈ 'stagegate' | 'okr' | 'kpi' (only 'stagegate' active in Stage 1).
     // `name` is the snapshot-at-add-time display fallback (like assignedObjectives).
     // Normalised defensively: drop malformed entries, coerce id to string.
+    // Per-board workstream visibility. Shape: { <boardId>: { hidden: [tileId] } }.
+    // Only EXCEPTIONS are stored — a board nobody has touched holds nothing, and a
+    // workstream added later is visible by default rather than invisible until
+    // someone notices it is missing.
+    if (!u.boardPrefs || typeof u.boardPrefs !== 'object' || Array.isArray(u.boardPrefs)) u.boardPrefs = {};
+    Object.keys(u.boardPrefs).forEach(k => {
+      const p = u.boardPrefs[k];
+      if (!p || typeof p !== 'object' || !Array.isArray(p.hidden)) { delete u.boardPrefs[k]; return; }
+      p.hidden = p.hidden.filter(x => typeof x === 'string' && x);
+      if (!p.hidden.length) delete u.boardPrefs[k];      // empty == default; do not store
+    });
     u.configuredTiles = Array.isArray(u.configuredTiles)
       ? u.configuredTiles.map(t => {
           // `tracker` is LEGACY and must not be required. The new stack has no
@@ -2801,6 +2841,116 @@ function renderQuarterBanner() {
   el.innerHTML = '<i class="ti ti-calendar-stats" aria-hidden="true"></i>' +
     '<span>Showing <b>' + escText(activeQuarter()) + '</b> objectives \u2014 set by an admin. ' +
     'The calendar quarter is ' + escText(calendarQuarter()) + '.</span>';
+}
+
+// ---- board workstream visibility -------------------------------------------
+// Which complete-groups are expanded. View state only: in memory, so every load
+// starts folded. That is the point of auto-folding — persisting "expanded" would
+// quietly undo it.
+const _boardDoneOpen = new Set();
+
+// Hidden workstream ids for a board. boardPrefs stores ONLY exceptions, so an
+// untouched board resolves to an empty set and a workstream added to the board
+// later is visible by default.
+function boardHiddenSet(boardId) {
+  const prefs = (STATE.session && STATE.session.boardPrefs) || {};
+  const p = prefs[boardId];
+  return new Set((p && Array.isArray(p.hidden)) ? p.hidden : []);
+}
+
+// Persist the hidden list for one board. Mirrors saveConfiguredTiles: update the
+// session first so the UI responds immediately, then write the user record.
+async function saveBoardHidden(boardId, hiddenIds) {
+  const prefs = Object.assign({}, (STATE.session && STATE.session.boardPrefs) || {});
+  if (hiddenIds && hiddenIds.length) prefs[boardId] = { hidden: hiddenIds.slice() };
+  else delete prefs[boardId];            // empty == default; never store an empty record
+  STATE.session.boardPrefs = prefs;
+  saveSession(STATE.session);
+  renderTiles();
+  try {
+    const record = STATE.usersRecord || await jbFetchUsers();
+    const me = findUser(record, STATE.session.email);
+    if (me) {
+      me.boardPrefs = JSON.parse(JSON.stringify(prefs));
+      await jbSaveUsers(record);
+      STATE.usersRecord = record;
+    }
+  } catch (err) {
+    console.warn('Failed to persist board prefs:', err);
+    toast('Saved on this device; sync failed. Will retry on next change.', 'error');
+  }
+}
+
+// Find a board by id across the objectives currently rendered.
+function findBoardById(boardId) {
+  const objs = (STATE.portfolio && STATE.portfolio.objectives) || [];
+  for (const o of objs) {
+    const bs = boardsForObjective(o.id);
+    const hit = bs.find(b => b.id === boardId);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function openWorkstreamPicker(boardId) {
+  const b = findBoardById(boardId);
+  if (!b) { toast('That board is no longer available', 'error'); return; }
+  let hidden = boardHiddenSet(boardId);
+
+  const draw = () => {
+    const allShown = hidden.size === 0;
+    const rows = b.tiles.map(t => `
+      <label class="wsrow">
+        <input type="checkbox" data-ws="${escAttr(t.id)}"${hidden.has(t.id) ? '' : ' checked'}>
+        <span class="nm" title="${escAttr(t.name)}">${escText(t.name)}</span>
+        <span class="wstag${t.complete ? ' done' : ''}">${t.complete ? 'complete' : 'live'}</span>
+      </label>`).join('');
+    openModal(`
+      <h3>Workstreams</h3>
+      <div class="fb-sub">${escText(b.name)}</div>
+      <div class="modal-scroll">${rows}</div>
+      <div class="ws-note">Complete workstreams always fold into their own group — ticking one keeps it
+      in that group rather than beside live work. This is only your view; it never changes the forecast.</div>
+      <div class="modal-actions">
+        <button class="btn btn-sm" data-act="toggleall">${allShown ? 'Hide all' : 'Show all'}</button>
+        <span style="flex:1"></span>
+        <span class="ws-count">${b.tiles.length - hidden.size} of ${b.tiles.length} shown</span>
+        <button class="btn" data-act="close">Done</button>
+      </div>`, { persistent: true, wide: true, scroll: true });
+
+    const root = document.getElementById('modal-content');
+    root.querySelectorAll('[data-ws]').forEach(cb => {
+      cb.onchange = () => {
+        const id = cb.getAttribute('data-ws');
+        if (cb.checked) hidden.delete(id); else hidden.add(id);
+        saveBoardHidden(boardId, [...hidden]);
+        draw();                        // redraw so the count and the button stay truthful
+      };
+    });
+    root.querySelector('[data-act="toggleall"]').onclick = () => {
+      hidden = allShown ? new Set(b.tiles.map(t => t.id)) : new Set();
+      saveBoardHidden(boardId, [...hidden]);
+      draw();
+    };
+    root.querySelector('[data-act="close"]').onclick = closeModal;
+  };
+  draw();
+}
+
+// Delegated, because tiles are re-rendered wholesale and per-node handlers would
+// be lost on every refresh.
+function bindBoardControls() {
+  document.addEventListener('click', (e) => {
+    const pick = e.target.closest && e.target.closest('[data-bpick]');
+    if (pick) { e.preventDefault(); e.stopPropagation(); openWorkstreamPicker(pick.getAttribute('data-bpick')); return; }
+    const fold = e.target.closest && e.target.closest('[data-bfold]');
+    if (fold) {
+      e.preventDefault(); e.stopPropagation();
+      const id = fold.getAttribute('data-bfold');
+      if (_boardDoneOpen.has(id)) _boardDoneOpen.delete(id); else _boardDoneOpen.add(id);
+      renderTiles();
+    }
+  }, true);                            // capture: the tile is an <a>, so beat navigation
 }
 
 // ============================================================
@@ -4532,15 +4682,23 @@ function boardsForObjective(objId) {
       const sm = RD.boardGateSummary(b, k, todayIso);
       return { name: c.name || c.id, passed: sm.passed, total: sm.total, state: WORST[sm.worst] || 'pending' };
     });
-    const tiles = (b.tiles || []).map(t => ({
-      name: t.name || t.id,
-      lane: laneName[t.lane] || '',
-      states: cols.map((c, k) => {
-        const st = RD.gateTileState(b, t, k, todayIso);
-        return st === 'passed-ontime' ? 'passed' : st;
-      })
-    }));
-    return { id: b.id, name: b.name || b.id, columns, tiles };
+    const tiles = (b.tiles || []).map(t => {
+        const states = cols.map((c, k) => {
+          const st = RD.gateTileState(b, t, k, todayIso);
+          return st === 'passed-ontime' ? 'passed' : st;
+        });
+        return {
+          // Needed to address a workstream in boardPrefs. Falls back to the name,
+          // because without a stable id hiding one workstream would hide them all.
+          id: t.id || t.name,
+          name: t.name || t.id,
+          lane: laneName[t.lane] || '',
+          states,
+          // Complete means EVERY column passed. One sign-off short is still live.
+          complete: states.length > 0 && states.every(x => x === 'passed')
+        };
+      });
+      return { id: b.id, name: b.name || b.id, columns, tiles };
   });
 }
 
@@ -5025,6 +5183,8 @@ function makeSession(user, days) {
     leadDivisions: Array.isArray(user.leadDivisions) ? user.leadDivisions.slice() : [],
     leadUnits: Array.isArray(user.leadUnits) ? user.leadUnits.slice() : [],
     configuredTiles: Array.isArray(user.configuredTiles) ? user.configuredTiles.slice() : [],
+    boardPrefs: (user.boardPrefs && typeof user.boardPrefs === 'object' && !Array.isArray(user.boardPrefs))
+      ? JSON.parse(JSON.stringify(user.boardPrefs)) : {},
     groupingConfig: (user.groupingConfig && typeof user.groupingConfig === 'object')
       ? { projects: (user.groupingConfig.projects || []).slice(), leadership: (user.groupingConfig.leadership || []).slice() }
       : { projects: [], leadership: [] },
@@ -6222,19 +6382,46 @@ function renderObjectiveBody(view) {
   if (boards.length) {
     const blocks = boards.map(b => {
       const headDots = renderGateDotsHtml(b.columns.map(c => ({ state: c.state, name: c.name })));
-      const tileRows = b.tiles.map(t => {
+      // Two independent facts decide where a workstream appears:
+      //   completion -> which GROUP it is in (live list, or the folded complete group)
+      //   your tick  -> whether it is PRESENT at all
+      // They never interact, so there is no precedence rule to explain.
+      const hidden = boardHiddenSet(b.id);
+      const visible = b.tiles.filter(t => !hidden.has(t.id));
+      const liveT = visible.filter(t => !t.complete);
+      const doneT = visible.filter(t => t.complete);
+      const row = t => {
         const track = renderGateDotsHtml(t.states.map((st, i) => ({ state: st, name: b.columns[i] ? b.columns[i].name : '' })));
         return `<div class="ov-btile">` +
           `<span class="ov-btname" title="${escAttr(t.name)}">${escText(t.name)}</span>` +
           `<span class="ov-btlane">${escText(t.lane)}</span>` +
           `<div class="ov-bttrack">${track}</div></div>`;
-      }).join('');
+      };
+      const isOpen = _boardDoneOpen.has(b.id);
+      // Counts only VISIBLE complete work — advertising hidden rows here would
+      // promise something that expanding cannot deliver.
+      const foldLine = doneT.length
+        ? `<div class="ov-bmore" data-bfold="${escAttr(b.id)}">` +
+          `<i class="ti ti-chevron-${isOpen ? 'down' : 'right'}" aria-hidden="true"></i>` +
+          `${doneT.length} complete</div>` +
+          (isOpen ? `<div class="ov-bdone">${doneT.map(row).join('')}</div>` : '')
+        : '';
+      const shown = visible.length, total = b.tiles.length;
+      // The badge lights the moment anything is hidden, so a filtered board never
+      // passes for a short one.
+      const ctl = `<button class="ov-bctl${shown < total ? ' on' : ''}" data-bpick="${escAttr(b.id)}"` +
+        ` title="Choose which workstreams to show">` +
+        `<i class="ti ti-adjustments-horizontal" aria-hidden="true"></i>` +
+        `${shown < total ? `${shown} of ${total}` : 'Workstreams'}</button>`;
+      const emptyLine = (!liveT.length && !doneT.length)
+        ? `<div class="ov-bmore" data-bpick="${escAttr(b.id)}">all ${total} hidden</div>` : '';
       return `<div class="ov-board">` +
         `<div class="ov-bhead">` +
           `<span class="ov-bname" title="${escAttr(b.name)}">${escText(b.name)}</span>` +
-          `<span class="ov-bmeta">KANBAN \u00b7 ${b.tiles.length} workstream${b.tiles.length === 1 ? '' : 's'}</span>` +
+          `<span class="ov-bmeta">KANBAN \u00b7 ${total} workstream${total === 1 ? '' : 's'}</span>` +
+          ctl +
           `<div class="ov-bhtrack">${headDots}</div></div>` +
-        tileRows + `</div>`;
+        liveT.map(row).join('') + foldLine + emptyLine + `</div>`;
     }).join('');
     boardBlock = `<div class="ov-sec"><div class="ov-seclbl">Kanban boards \u00b7 ${boards.length}</div>${blocks}</div>`;
   }
@@ -7377,6 +7564,7 @@ function bindQuarterPicker() {
 function bindDrawer() {
   bindProjPop();
   bindQuarterPicker();
+  bindBoardControls();
   const fbBtn = document.getElementById('drawer-review-feedback');
   if (fbBtn) fbBtn.addEventListener('click', () => { closeDrawer(); openFeedbackReview(); });
   document.getElementById('header-settings-btn').addEventListener('click', openDrawer);
