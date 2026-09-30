@@ -4678,12 +4678,37 @@ function boardsForObjective(objId) {
     const cols = b.columns || [];
     const laneName = {};
     (b.swimlanes || []).forEach(l => { laneName[l.id] = l.name || l.id; });
+    // Column summaries drive BOTH the collapsed header track and gatePooled, which
+    // feeds the projection — so the terminal-column correction belongs here too,
+    // not only on the workstream rows. boardGateSummary counts a column cleared
+    // only once a tile moves PAST it, so a tile parked in the final column is
+    // missing from that column's count despite having finished.
+    const lastIdx = cols.length - 1;
+    const bTiles = (b.tiles || []);
+    const finalCol = bTiles.filter(t => lastIdx >= 0 && cols.findIndex(c => c.id === t.col) === lastIdx).length;
     const columns = cols.map((c, k) => {
       const sm = RD.boardGateSummary(b, k, todayIso);
-      return { name: c.name || c.id, passed: sm.passed, total: sm.total, state: WORST[sm.worst] || 'pending' };
+      // Tiles in the final column are already counted for every EARLIER column by
+      // the engine; only the final column itself misses them.
+      const passed = (k === lastIdx) ? sm.passed + finalCol : sm.passed;
+      const state = (k === lastIdx && sm.total > 0 && passed >= sm.total)
+        ? 'passed' : (WORST[sm.worst] || 'pending');
+      return { name: c.name || c.id, passed, total: sm.total, state };
     });
     const tiles = (b.tiles || []).map(t => {
+        // The engine's gateTileState treats a column as cleared only when the
+        // tile has moved PAST it (curIdx > colIndex). That is right for a
+        // stage-gate spine, where the last gate is a review still to pass, but
+        // wrong for a kanban board: the final column is a terminal state — "Done"
+        // — and a tile sitting in it has finished, not stalled one short.
+        //
+        // Left uncorrected, a fully finished 3-column board reads 4/6 = 67% and
+        // can never reach 100%, which quietly depresses the projection of every
+        // board-tracked objective.
+        const curIdx = cols.findIndex(c => c.id === t.col);
+        const inFinalColumn = lastIdx >= 0 && curIdx === lastIdx;
         const states = cols.map((c, k) => {
+          if (inFinalColumn) return 'passed';          // terminal column: all cleared
           const st = RD.gateTileState(b, t, k, todayIso);
           return st === 'passed-ontime' ? 'passed' : st;
         });
@@ -4694,7 +4719,8 @@ function boardsForObjective(objId) {
           name: t.name || t.id,
           lane: laneName[t.lane] || '',
           states,
-          // Complete means EVERY column passed. One sign-off short is still live.
+          // Complete means EVERY column passed — which now includes reaching the
+          // final column, the ordinary way kanban work finishes.
           complete: states.length > 0 && states.every(x => x === 'passed')
         };
       });
