@@ -557,6 +557,25 @@
     grid-column: span 2;
   }
 
+  /* Kanban glance summary: one vertical bar per column, each the whole board
+     split by status at that column. column-reverse so the first segment in the
+     markup renders at the BOTTOM — cleared work builds up from the floor. */
+  .ov-vt { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; }
+  .ov-vcol { display: flex; flex-direction: column-reverse; width: 9px; height: 26px;
+    border-radius: 2px; overflow: hidden; background: #f0f0ee; flex: none; }
+  .ov-vcol span { display: block; width: 100%; }
+  .vs-passed { background: #3B6D11; }
+  .vs-late   { background: #854F0B; }
+  .vs-over   { background: #A32D2D; }
+  .vs-prog   { background: #0C447C; }
+  .vs-pend   { background: #ddd; }
+  .ov-vnum { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle);
+    margin-left: 6px; white-space: nowrap; align-self: center; }
+  /* A board with many columns would otherwise push the name out of the header. */
+  @media (max-width: 640px) {
+    .ov-vcol { width: 7px; height: 22px; }
+  }
+
   /* ---- board workstream visibility --------------------------------------- */
   .ov-bctl { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono);
     font-size: 9px; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px;
@@ -2843,6 +2862,38 @@ function renderQuarterBanner() {
     'The calendar quarter is ' + escText(calendarQuarter()) + '.</span>';
 }
 
+// Stacked bottom-up so cleared work builds from the floor, problems sit just
+// above it, and not-yet-reached is the grey remainder on top. Order matters: a
+// red segment buried under grey would be easy to miss.
+const BOARD_BAR_ORDER = [
+  ['passed', 'vs-passed'], ['late', 'vs-late'], ['over', 'vs-over'],
+  ['prog', 'vs-prog'], ['pend', 'vs-pend']
+];
+
+function renderBoardBars(b) {
+  const total = (b.tiles || []).length;
+  if (!total || !(b.columns || []).length) return '';
+  const bars = b.columns.map(c => {
+    const segs = BOARD_BAR_ORDER.map(([k, cls]) => {
+      const n = (c.counts && c.counts[k]) || 0;
+      if (!n) return '';
+      return `<span class="${cls}" style="height:${(100 * n / total).toFixed(2)}%"></span>`;
+    }).join('');
+    // The tooltip carries the exact breakdown, so the bar never has to.
+    const parts = BOARD_BAR_ORDER
+      .filter(([k]) => (c.counts && c.counts[k]))
+      .map(([k]) => `${c.counts[k]} ${BOARD_BAR_LABEL[k]}`).join(', ');
+    return `<div class="ov-vcol" title="${escAttr(c.name + (parts ? ' — ' + parts : ''))}">${segs}</div>`;
+  }).join('');
+  // Cleared counts the FINAL column: how many workstreams have finished the board.
+  const last = b.columns[b.columns.length - 1];
+  const done = last ? last.passed : 0;
+  return `<div class="ov-vt">${bars}` +
+         `<span class="ov-vnum">${done}/${total}</span></div>`;
+}
+const BOARD_BAR_LABEL = { passed: 'cleared', late: 'cleared late', over: 'overdue',
+                          prog: 'here now', pend: 'not reached' };
+
 // ---- board workstream visibility -------------------------------------------
 // Which complete-groups are expanded. View state only: in memory, so every load
 // starts folded. That is the point of auto-folding — persisting "expanded" would
@@ -4678,71 +4729,59 @@ function boardsForObjective(objId) {
     const cols = b.columns || [];
     const laneName = {};
     (b.swimlanes || []).forEach(l => { laneName[l.id] = l.name || l.id; });
-    // Column summaries drive BOTH the collapsed header track and gatePooled, which
-    // feeds the projection — so the terminal-column correction belongs here too,
-    // not only on the workstream rows. boardGateSummary counts a column cleared
-    // only once a tile moves PAST it, so a tile parked in the final column is
-    // missing from that column's count despite having finished.
     const lastIdx = cols.length - 1;
-    const bTiles = (b.tiles || []);
-    const finalCol = bTiles.filter(t => lastIdx >= 0 && cols.findIndex(c => c.id === t.col) === lastIdx).length;
-    const columns = cols.map((c, k) => {
-      const sm = RD.boardGateSummary(b, k, todayIso);
-      // Tiles in the final column are already counted for every EARLIER column by
-      // the engine; only the final column itself misses them.
-      const passed = (k === lastIdx) ? sm.passed + finalCol : sm.passed;
-      let state = (k === lastIdx && sm.total > 0 && passed >= sm.total)
-        ? 'passed' : (WORST[sm.worst] || 'pending');
-      // Same reasoning on the collapsed track: a column with tiles currently in
-      // it is in progress. Only upgrade from 'pending' — never mask an overdue.
-      if (state === 'pending' && bTiles.some(t => cols.findIndex(x => x.id === t.col) === k)) {
-        state = 'in-progress';
-      }
-      return { name: c.name || c.id, passed, total: sm.total, state };
-    });
+    // Tiles first: the column summaries are now derived FROM the per-tile states,
+    // so the terminal-column and in-progress corrections apply in one place
+    // instead of being repeated (and able to drift) in two.
     const tiles = (b.tiles || []).map(t => {
-        // The engine's gateTileState treats a column as cleared only when the
-        // tile has moved PAST it (curIdx > colIndex). That is right for a
-        // stage-gate spine, where the last gate is a review still to pass, but
-        // wrong for a kanban board: the final column is a terminal state — "Done"
-        // — and a tile sitting in it has finished, not stalled one short.
-        //
-        // Left uncorrected, a fully finished 3-column board reads 4/6 = 67% and
-        // can never reach 100%, which quietly depresses the projection of every
-        // board-tracked objective.
-        const curIdx = cols.findIndex(c => c.id === t.col);
-        const inFinalColumn = lastIdx >= 0 && curIdx === lastIdx;
-        const states = cols.map((c, k) => {
-          const st = RD.gateTileState(b, t, k, todayIso);
-          // Terminal column: everything behind it is cleared. Late clears stay
-          // LATE though — flattening them to plain 'passed' would erase the fact
-          // that the work slipped, which is the whole point of the amber dot.
-          if (inFinalColumn) return st === 'passed-late' ? 'passed-late' : 'passed';
-          if (st === 'passed-ontime') return 'passed';
-          // The column the tile is SITTING IN is work in progress, not work not
-          // started. Without this it renders identically to every future column,
-          // so the dots never show where the tile actually is. Overdue wins —
-          // being late matters more than being current.
-          if (k === curIdx && st === 'pending') return 'in-progress';
-          return st;
-        });
-        return {
-          // Needed to address a workstream in boardPrefs. Falls back to the name,
-          // because without a stable id hiding one workstream would hide them all.
-          id: t.id || t.name,
-          name: t.name || t.id,
-          lane: laneName[t.lane] || '',
-          states,
-          // Complete means the work is finished, which for a kanban tile means it
-          // has reached the terminal column. Deliberately NOT "every dot is green":
-          // a tile that finished but cleared gates late carries amber dots, and it
-          // is still finished. Keeping the all-passed fallback covers board shapes
-          // where the current column cannot be resolved.
-          complete: inFinalColumn ||
-            (states.length > 0 && states.every(x => x === 'passed'))
-        };
+      const curIdx = cols.findIndex(c => c.id === t.col);
+      const inFinalColumn = lastIdx >= 0 && curIdx === lastIdx;
+      const states = cols.map((c, k) => {
+        const st = RD.gateTileState(b, t, k, todayIso);
+        // Terminal column: everything behind it is cleared. Late clears stay LATE
+        // though — flattening them would erase that the work slipped.
+        if (inFinalColumn) return st === 'passed-late' ? 'passed-late' : 'passed';
+        if (st === 'passed-ontime') return 'passed';
+        // The column a tile is SITTING IN is work in progress, not work not
+        // started. Overdue wins — being late matters more than being current.
+        if (k === curIdx && st === 'pending') return 'in-progress';
+        return st;
       });
-      return { id: b.id, name: b.name || b.id, columns, tiles };
+      return {
+        // Needed to address a workstream in boardPrefs. Falls back to the name,
+        // because without a stable id hiding one would hide them all.
+        id: t.id || t.name,
+        name: t.name || t.id,
+        lane: laneName[t.lane] || '',
+        states,
+        // Finished means it reached the terminal column. Deliberately not "every
+        // dot is green": a tile that finished late carries amber and is still done.
+        complete: inFinalColumn || (states.length > 0 && states.every(x => x === 'passed'))
+      };
+    });
+
+    // One entry per column, counting every workstream by its status AT that
+    // column. `passed` and `total` keep their existing meaning because
+    // gatePooled and the projection popover read them — changing those would
+    // silently move every board-tracked forecast.
+    const columns = cols.map((c, k) => {
+      const counts = { passed: 0, late: 0, over: 0, prog: 0, pend: 0 };
+      tiles.forEach(t => {
+        const st = t.states[k];
+        if (st === 'passed') counts.passed++;
+        else if (st === 'passed-late') counts.late++;
+        else if (st === 'overdue') counts.over++;
+        else if (st === 'in-progress') counts.prog++;
+        else counts.pend++;
+      });
+      return {
+        name: c.name || c.id,
+        counts,
+        passed: counts.passed + counts.late,   // cleared, on time or not
+        total: tiles.length
+      };
+    });
+    return { id: b.id, name: b.name || b.id, columns, tiles };
   });
 }
 
@@ -6425,7 +6464,13 @@ function renderObjectiveBody(view) {
   const boards = view.boards || [];
   if (boards.length) {
     const blocks = boards.map(b => {
-      const headDots = renderGateDotsHtml(b.columns.map(c => ({ state: c.state, name: c.name })));
+      // Glance summary: one vertical bar per column, each bar the WHOLE board split
+      // by status at that column. Equal heights because every column measures the
+      // same population — that is what makes the staircase readable.
+      //
+      // Counts every workstream regardless of the picker: this is board health,
+      // not your filtered view, so a hidden-but-overdue workstream still reddens it.
+      const headDots = renderBoardBars(b);
       // Two independent facts decide where a workstream appears:
       //   completion -> which GROUP it is in (live list, or the folded complete group)
       //   your tick  -> whether it is PRESENT at all
