@@ -591,6 +591,18 @@
   /* Complete work reads as history: dimmed, under a divider, not competing with
      live rows for attention. */
   .ov-bdone { margin-top: 4px; padding-top: 5px; border-top: 0.5px dashed var(--border); opacity: .55; }
+  .wsgroup { margin-bottom: 10px; }
+  .wsgroup:last-child { margin-bottom: 0; }
+  /* The lane header is a row of the same shape as its tiles, distinguished by
+     weight and a rule rather than indentation — so the checkboxes stay aligned
+     and the tri-state box reads as governing the ones below it. */
+  .wslane { display: flex; align-items: center; gap: 9px; padding: 7px 2px 5px;
+    border-bottom: 1px solid var(--border); margin-bottom: 2px; cursor: pointer; }
+  .wslane .nm { flex: 1; font-family: var(--font-mono); font-size: 9.5px;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+  .wslane input { margin: 0; flex: none; }
+  .wslane-n { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle); }
+  .wsgroup .wsrow { padding-left: 22px; }
   .wsrow { display: flex; align-items: center; gap: 9px; padding: 6px 2px; cursor: pointer; }
   .wsrow:hover { background: var(--surface-alt); }
   .wsrow input { margin: 0; flex: none; }
@@ -2948,18 +2960,50 @@ function openWorkstreamPicker(boardId) {
   if (!b) { toast('That board is no longer available', 'error'); return; }
   let hidden = boardHiddenSet(boardId);
 
+  // Group in board order. A tile whose lane no longer exists still has to appear
+  // somewhere, or it becomes unhideable — so anything unmatched falls into a
+  // trailing group rather than being dropped.
+  const groupTiles = () => {
+    const groups = [];
+    const seen = new Set();
+    (b.lanes || []).forEach(l => {
+      const items = b.tiles.filter(t => t.laneId === l.id);
+      items.forEach(t => seen.add(t.id));
+      if (items.length) groups.push({ id: l.id, name: l.name, tiles: items });
+    });
+    const rest = b.tiles.filter(t => !seen.has(t.id));
+    if (rest.length) groups.push({ id: '', name: 'Ungrouped', tiles: rest });
+    return groups;
+  };
+
   const draw = () => {
     const allShown = hidden.size === 0;
-    const rows = b.tiles.map(t => `
-      <label class="wsrow">
-        <input type="checkbox" data-ws="${escAttr(t.id)}"${hidden.has(t.id) ? '' : ' checked'}>
-        <span class="nm" title="${escAttr(t.name)}">${escText(t.name)}</span>
-        <span class="wstag${t.complete ? ' done' : ''}">${t.complete ? 'complete' : 'live'}</span>
-      </label>`).join('');
+    const groups = groupTiles();
+    const body = groups.map(g => {
+      const shownIn = g.tiles.filter(t => !hidden.has(t.id)).length;
+      // Three states, because two would lie about a partly-hidden lane.
+      const state = shownIn === g.tiles.length ? 'all' : (shownIn === 0 ? 'none' : 'some');
+      const rows = g.tiles.map(t => `
+        <label class="wsrow">
+          <input type="checkbox" data-ws="${escAttr(t.id)}"${hidden.has(t.id) ? '' : ' checked'}>
+          <span class="nm" title="${escAttr(t.name)}">${escText(t.name)}</span>
+          <span class="wstag${t.complete ? ' done' : ''}">${t.complete ? 'complete' : 'live'}</span>
+        </label>`).join('');
+      return `
+        <div class="wsgroup">
+          <label class="wslane">
+            <input type="checkbox" data-lane="${escAttr(g.id)}"${state === 'all' ? ' checked' : ''}${state === 'some' ? ' data-some="1"' : ''}>
+            <span class="nm">${escText(g.name)}</span>
+            <span class="wslane-n">${shownIn} of ${g.tiles.length}</span>
+          </label>
+          ${rows}
+        </div>`;
+    }).join('');
+
     openModal(`
       <h3>Workstreams</h3>
       <div class="fb-sub">${escText(b.name)}</div>
-      <div class="modal-scroll">${rows}</div>
+      <div class="modal-scroll">${body}</div>
       <div class="ws-note">Complete workstreams always fold into their own group — ticking one keeps it
       in that group rather than beside live work. This is only your view; it never changes the forecast.</div>
       <div class="modal-actions">
@@ -2970,12 +3014,28 @@ function openWorkstreamPicker(boardId) {
       </div>`, { persistent: true, wide: true, scroll: true });
 
     const root = document.getElementById('modal-content');
+    // Indeterminate cannot be set from markup — it is a property, not an attribute.
+    root.querySelectorAll('[data-lane][data-some]').forEach(cb => { cb.indeterminate = true; });
+
     root.querySelectorAll('[data-ws]').forEach(cb => {
       cb.onchange = () => {
         const id = cb.getAttribute('data-ws');
         if (cb.checked) hidden.delete(id); else hidden.add(id);
         saveBoardHidden(boardId, [...hidden]);
-        draw();                        // redraw so the count and the button stay truthful
+        draw();
+      };
+    });
+    // A lane toggle is a bulk action over its tiles, not a stored rule of its own.
+    // That keeps one source of truth — and means a workstream added to a hidden
+    // lane later still appears, rather than being invisible from birth.
+    root.querySelectorAll('[data-lane]').forEach(cb => {
+      cb.onchange = () => {
+        const g = groups.find(x => x.id === cb.getAttribute('data-lane'));
+        if (!g) return;
+        const anyShown = g.tiles.some(t => !hidden.has(t.id));
+        g.tiles.forEach(t => { if (anyShown) hidden.add(t.id); else hidden.delete(t.id); });
+        saveBoardHidden(boardId, [...hidden]);
+        draw();
       };
     });
     root.querySelector('[data-act="toggleall"]').onclick = () => {
@@ -4752,7 +4812,10 @@ function boardsForObjective(objId) {
         // because without a stable id hiding one would hide them all.
         id: t.id || t.name,
         name: t.name || t.id,
+        // Display name for the row; the id is what grouping and the lane toggle
+        // key on, since two lanes can share a name and names get renamed.
         lane: laneName[t.lane] || '',
+        laneId: t.lane || '',
         states,
         // Finished means it reached the terminal column. Deliberately not "every
         // dot is green": a tile that finished late carries amber and is still done.
@@ -4781,7 +4844,10 @@ function boardsForObjective(objId) {
         total: tiles.length
       };
     });
-    return { id: b.id, name: b.name || b.id, columns, tiles };
+    // Lane order comes from the board, not from the tiles, so the picker groups in
+    // the same order the board shows — and an empty lane still has a place.
+    const lanes = (b.swimlanes || []).map(l => ({ id: l.id, name: l.name || l.id }));
+    return { id: b.id, name: b.name || b.id, columns, tiles, lanes };
   });
 }
 
