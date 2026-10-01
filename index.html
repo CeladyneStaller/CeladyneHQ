@@ -4691,8 +4691,13 @@ function boardsForObjective(objId) {
       // Tiles in the final column are already counted for every EARLIER column by
       // the engine; only the final column itself misses them.
       const passed = (k === lastIdx) ? sm.passed + finalCol : sm.passed;
-      const state = (k === lastIdx && sm.total > 0 && passed >= sm.total)
+      let state = (k === lastIdx && sm.total > 0 && passed >= sm.total)
         ? 'passed' : (WORST[sm.worst] || 'pending');
+      // Same reasoning on the collapsed track: a column with tiles currently in
+      // it is in progress. Only upgrade from 'pending' — never mask an overdue.
+      if (state === 'pending' && bTiles.some(t => cols.findIndex(x => x.id === t.col) === k)) {
+        state = 'in-progress';
+      }
       return { name: c.name || c.id, passed, total: sm.total, state };
     });
     const tiles = (b.tiles || []).map(t => {
@@ -4708,9 +4713,18 @@ function boardsForObjective(objId) {
         const curIdx = cols.findIndex(c => c.id === t.col);
         const inFinalColumn = lastIdx >= 0 && curIdx === lastIdx;
         const states = cols.map((c, k) => {
-          if (inFinalColumn) return 'passed';          // terminal column: all cleared
           const st = RD.gateTileState(b, t, k, todayIso);
-          return st === 'passed-ontime' ? 'passed' : st;
+          // Terminal column: everything behind it is cleared. Late clears stay
+          // LATE though — flattening them to plain 'passed' would erase the fact
+          // that the work slipped, which is the whole point of the amber dot.
+          if (inFinalColumn) return st === 'passed-late' ? 'passed-late' : 'passed';
+          if (st === 'passed-ontime') return 'passed';
+          // The column the tile is SITTING IN is work in progress, not work not
+          // started. Without this it renders identically to every future column,
+          // so the dots never show where the tile actually is. Overdue wins —
+          // being late matters more than being current.
+          if (k === curIdx && st === 'pending') return 'in-progress';
+          return st;
         });
         return {
           // Needed to address a workstream in boardPrefs. Falls back to the name,
@@ -4719,9 +4733,13 @@ function boardsForObjective(objId) {
           name: t.name || t.id,
           lane: laneName[t.lane] || '',
           states,
-          // Complete means EVERY column passed — which now includes reaching the
-          // final column, the ordinary way kanban work finishes.
-          complete: states.length > 0 && states.every(x => x === 'passed')
+          // Complete means the work is finished, which for a kanban tile means it
+          // has reached the terminal column. Deliberately NOT "every dot is green":
+          // a tile that finished but cleared gates late carries amber dots, and it
+          // is still finished. Keeping the all-passed fallback covers board shapes
+          // where the current column cannot be resolved.
+          complete: inFinalColumn ||
+            (states.length > 0 && states.every(x => x === 'passed'))
         };
       });
       return { id: b.id, name: b.name || b.id, columns, tiles };
