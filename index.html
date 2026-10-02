@@ -424,7 +424,11 @@
     gap: 14px;
   }
   /* Tile widths standardized by TILE TYPE, not section:
-       Objective tiles (stage-gates / OKR / KPI subsections) → 3 per row.
+       Objective tiles (stage-gates / OKR / KPI subsections) → 2 per row.
+       At three they are narrow enough that a stage-gate track with several
+       gates, or a kanban header carrying a name, meta, the Workstreams button
+       and the glance bars, runs off the edge. These hold the densest content on
+       the page; link tiles still get four.
        Link tiles (meetings / gantts subsections, and the flat links /
        analysis / coding sections) → 4 per row.
      This holds even when both types appear in one section (e.g. Projects),
@@ -434,7 +438,7 @@
   .tile-subsection[data-subsection="stage-gates"] > .tile-grid,
   .tile-subsection[data-subsection="okr"] > .tile-grid,
   .tile-subsection[data-subsection="kpi"] > .tile-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .tile-subsection[data-subsection="meetings"] > .tile-grid,
   .tile-subsection[data-subsection="gantts"] > .tile-grid,
