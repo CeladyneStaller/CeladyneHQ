@@ -424,19 +424,22 @@
     gap: 14px;
   }
   /* Tile widths standardized by TILE TYPE, not section:
-       Objective tiles (stage-gates / OKR / KPI subsections) → 2 per row.
+       Objective tiles (objective / KPI subsections) → 2 per row.
+       NOTE the ids: 'stagegate' and 'okr' were merged into 'objective' when the
+       two views became one tile. Selectors naming the old ids match nothing and
+       fail silently — the grid just falls back to auto-fit.
        At three they are narrow enough that a stage-gate track with several
        gates, or a kanban header carrying a name, meta, the Workstreams button
        and the glance bars, runs off the edge. These hold the densest content on
        the page; link tiles still get four.
-       Link tiles (meetings / gantts subsections, and the flat links /
+       Link tiles (meetings subsection — 'gantts' no longer exists — and the
+       flat links /
        analysis / coding sections) → 4 per row.
      This holds even when both types appear in one section (e.g. Projects),
      because the rules target the subsection / section data-attributes.
      minmax(0, 1fr) lets columns shrink below content width so the count stays
      fixed. Mobile collapses both to a single column (below). */
-  .tile-subsection[data-subsection="stage-gates"] > .tile-grid,
-  .tile-subsection[data-subsection="okr"] > .tile-grid,
+  .tile-subsection[data-subsection="objective"] > .tile-grid,
   .tile-subsection[data-subsection="kpi"] > .tile-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -6894,7 +6897,7 @@ function renderTiles() {
     }
 
     // Sections that render as type-grouped subsections rather than a flat grid.
-    // Projects uses the full set (stage-gates/okr/kpi/meetings/gantts); Watching
+    // Projects uses the full set (objective/kpi/meetings); Watching
     // and Leadership use the objective-only set (stage-gates/okr/kpi).
     const subsectionDef =
       section.id === 'projects' ? PROJECTS_SUBSECTIONS :
