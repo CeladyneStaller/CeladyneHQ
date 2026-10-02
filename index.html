@@ -612,6 +612,7 @@
     text-transform: uppercase; padding: 1px 6px; border-radius: var(--radius-pill);
     background: var(--surface-alt); color: var(--text-subtle); white-space: nowrap; }
   .wstag.done { color: #3B6D11; }
+  .wstag.back { color: #0C447C; }
   .ws-note { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-subtle);
     line-height: 1.6; margin-top: 12px; }
   .ws-count { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-subtle);
@@ -2883,8 +2884,14 @@ const BOARD_BAR_ORDER = [
 ];
 
 function renderBoardBars(b) {
-  const total = (b.tiles || []).length;
-  if (!total || !(b.columns || []).length) return '';
+  // Active work only, matching the column counts. A board that is entirely
+  // backlog has no flow to show, so it says that rather than drawing empty bars.
+  const total = (b.tiles || []).filter(t => !t.backlog).length;
+  const backlogN = (b.tiles || []).length - total;
+  if (!total) {
+    return backlogN ? `<div class="ov-vt"><span class="ov-vnum">${backlogN} in backlog</span></div>` : '';
+  }
+  if (!(b.columns || []).length) return '';
   const bars = b.columns.map(c => {
     const segs = BOARD_BAR_ORDER.map(([k, cls]) => {
       const n = (c.counts && c.counts[k]) || 0;
@@ -2987,7 +2994,8 @@ function openWorkstreamPicker(boardId) {
         <label class="wsrow">
           <input type="checkbox" data-ws="${escAttr(t.id)}"${hidden.has(t.id) ? '' : ' checked'}>
           <span class="nm" title="${escAttr(t.name)}">${escText(t.name)}</span>
-          <span class="wstag${t.complete ? ' done' : ''}">${t.complete ? 'complete' : 'live'}</span>
+          <span class="wstag${t.complete ? ' done' : ''}${t.backlog ? ' back' : ''}">${
+            t.backlog ? 'backlog' : (t.complete ? 'complete' : 'live')}</span>
         </label>`).join('');
       return `
         <div class="wsgroup">
@@ -4796,7 +4804,13 @@ function boardsForObjective(objId) {
     const tiles = (b.tiles || []).map(t => {
       const curIdx = cols.findIndex(c => c.id === t.col);
       const inFinalColumn = lastIdx >= 0 && curIdx === lastIdx;
+      // A backlog tile is not in ANY board column. It has not entered the flow, so
+      // it is neither in progress nor behind on a column it has not reached — the
+      // engine would otherwise read a dated backlog item as overdue on every
+      // column, painting a healthy board solid red.
+      const backlog = curIdx < 0;
       const states = cols.map((c, k) => {
+        if (backlog) return 'pending';
         const st = RD.gateTileState(b, t, k, todayIso);
         // Terminal column: everything behind it is cleared. Late clears stay LATE
         // though — flattening them would erase that the work slipped.
@@ -4817,9 +4831,12 @@ function boardsForObjective(objId) {
         lane: laneName[t.lane] || '',
         laneId: t.lane || '',
         states,
+        backlog,
         // Finished means it reached the terminal column. Deliberately not "every
         // dot is green": a tile that finished late carries amber and is still done.
-        complete: inFinalColumn || (states.length > 0 && states.every(x => x === 'passed'))
+        // A backlog tile is never complete — all-pending must not read as all-passed.
+        complete: !backlog &&
+          (inFinalColumn || (states.length > 0 && states.every(x => x === 'passed')))
       };
     });
 
@@ -4827,9 +4844,14 @@ function boardsForObjective(objId) {
     // column. `passed` and `total` keep their existing meaning because
     // gatePooled and the projection popover read them — changing those would
     // silently move every board-tracked forecast.
+    // Backlog work is not committed scope, so it is excluded from the column
+    // counts entirely — numerator AND denominator. Counting it only in the
+    // denominator would drag every board-tracked projection down in proportion to
+    // how many ideas someone parked, which is the opposite of useful.
+    const activeTiles = tiles.filter(t => !t.backlog);
     const columns = cols.map((c, k) => {
       const counts = { passed: 0, late: 0, over: 0, prog: 0, pend: 0 };
-      tiles.forEach(t => {
+      activeTiles.forEach(t => {
         const st = t.states[k];
         if (st === 'passed') counts.passed++;
         else if (st === 'passed-late') counts.late++;
@@ -4841,7 +4863,7 @@ function boardsForObjective(objId) {
         name: c.name || c.id,
         counts,
         passed: counts.passed + counts.late,   // cleared, on time or not
-        total: tiles.length
+        total: activeTiles.length              // backlog excluded — see above
       };
     });
     // Lane order comes from the board, not from the tiles, so the picker groups in
@@ -6543,8 +6565,11 @@ function renderObjectiveBody(view) {
       // They never interact, so there is no precedence rule to explain.
       const hidden = boardHiddenSet(b.id);
       const visible = b.tiles.filter(t => !hidden.has(t.id));
-      const liveT = visible.filter(t => !t.complete);
+      const liveT = visible.filter(t => !t.complete && !t.backlog);
       const doneT = visible.filter(t => t.complete);
+      // Backlog folds away for the same reason complete work does: it is real but
+      // it is not what you open the tile to look at.
+      const backT = visible.filter(t => t.backlog);
       const row = t => {
         const track = renderGateDotsHtml(t.states.map((st, i) => ({ state: st, name: b.columns[i] ? b.columns[i].name : '' })));
         return `<div class="ov-btile">` +
@@ -6561,6 +6586,13 @@ function renderObjectiveBody(view) {
           `${doneT.length} complete</div>` +
           (isOpen ? `<div class="ov-bdone">${doneT.map(row).join('')}</div>` : '')
         : '';
+      const backOpen = _boardDoneOpen.has(b.id + '::backlog');
+      const backLine = backT.length
+        ? `<div class="ov-bmore" data-bfold="${escAttr(b.id)}::backlog">` +
+          `<i class="ti ti-chevron-${backOpen ? 'down' : 'right'}" aria-hidden="true"></i>` +
+          `${backT.length} in backlog</div>` +
+          (backOpen ? `<div class="ov-bdone">${backT.map(row).join('')}</div>` : '')
+        : '';
       const shown = visible.length, total = b.tiles.length;
       // The badge lights the moment anything is hidden, so a filtered board never
       // passes for a short one.
@@ -6576,7 +6608,7 @@ function renderObjectiveBody(view) {
           `<span class="ov-bmeta">KANBAN \u00b7 ${total} workstream${total === 1 ? '' : 's'}</span>` +
           ctl +
           `<div class="ov-bhtrack">${headDots}</div></div>` +
-        liveT.map(row).join('') + foldLine + emptyLine + `</div>`;
+        liveT.map(row).join('') + foldLine + backLine + emptyLine + `</div>`;
     }).join('');
     boardBlock = `<div class="ov-sec"><div class="ov-seclbl">Kanban boards \u00b7 ${boards.length}</div>${blocks}</div>`;
   }
