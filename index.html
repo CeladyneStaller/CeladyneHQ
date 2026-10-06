@@ -432,9 +432,12 @@
        gates, or a kanban header carrying a name, meta, the Workstreams button
        and the glance bars, runs off the edge. These hold the densest content on
        the page; link tiles still get four.
-       Link tiles (meetings subsection — 'gantts' no longer exists — and the
-       flat links /
-       analysis / coding sections) → 4 per row.
+       Link tiles (the flat meetings / links / analysis / training / coding
+       sections) → 4 per row. These are SECTION ids (data-section), not
+       subsection ids: a flat section's grid sits directly under .tile-section.
+       A new section of link tiles must be added to this list, or its grid
+       falls back to auto-fit and a short row stretches to fill the width
+       (three tiles come out wider than the four in Useful links).
      This holds even when both types appear in one section (e.g. Projects),
      because the rules target the subsection / section data-attributes.
      minmax(0, 1fr) lets columns shrink below content width so the count stays
@@ -443,10 +446,10 @@
   .tile-subsection[data-subsection="kpi"] > .tile-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .tile-subsection[data-subsection="meetings"] > .tile-grid,
-  .tile-subsection[data-subsection="gantts"] > .tile-grid,
+  .tile-section[data-section="meetings"] > .tile-grid,
   .tile-section[data-section="links"] > .tile-grid,
   .tile-section[data-section="analysis"] > .tile-grid,
+  .tile-section[data-section="training"] > .tile-grid,
   .tile-section[data-section="coding"] > .tile-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -2352,7 +2355,7 @@ const TOOLS = [
     }
   },
   {
-    id: 'cheminv',
+    id: 'chem-inventory-monitor',
     name: 'Chemical inventory',
     description: 'Celadyne chemical management',
     icon: 'map-pin-search',
@@ -2367,7 +2370,7 @@ const TOOLS = [
     id: 'safety-videos',
     name: 'Safety Videos',
     description: 'Celadyne training management',
-    icon: 'thinking-high',
+    icon: 'video',
     url: 'https://lms.safetyvideos.com/login/',
     section: 'training',
     fetchStatus: async () => {
