@@ -2295,7 +2295,7 @@ const TOOLS = [
     id: 'celadyne-confluence',
     name: 'Celadyne Confluence',
     description: 'Team wiki and project documentation',
-    icon: 'brand-confluence',
+    icon: 'users-group',
     url: 'https://celadyne.atlassian.net/wiki/',
     section: 'links',
     fetchStatus: async () => {
@@ -2313,6 +2313,90 @@ const TOOLS = [
     fetchStatus: async () => {
       // External site — no live status to fetch.
       return { text: 'Open OKR dashboard', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'carta',
+    name: 'Carta',
+    description: 'Stock option management platform',
+    icon: 'flame',
+    url: 'https://login.app.carta.com/credentials/login/',
+    section: 'links',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open Carta', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'cove',
+    name: 'Cove app',
+    description: 'Fulton tenant app',
+    icon: 'building',
+    url: 'https://manage.cove.is/login',
+    section: 'links',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open Cove app', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'cheminv',
+    name: 'ChemInv',
+    description: 'Chemical inventory management',
+    icon: 'bleach',
+    url: 'https://app.cheminventory.net/',
+    section: 'links',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open ChemInv', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'cheminv',
+    name: 'Chemical inventory',
+    description: 'Celadyne chemical management',
+    icon: 'map-pin-search',
+    url: 'https://chem-inventory-monitor.vercel.app/',
+    section: 'links',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open Celadyne chemical inventory', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'safety-videos',
+    name: 'Safety Videos',
+    description: 'Celadyne training management',
+    icon: 'thinking-high',
+    url: 'https://lms.safetyvideos.com/login/',
+    section: 'training',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open Safety Videos', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'h2-safety-form',
+    name: 'Hydrogen Safety Form',
+    description: 'Celadyne H2 safety training',
+    icon: 'gauge',
+    url: 'https://forms.office.com/g/Li4wmWyp6K',
+    section: 'training',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open Hydrogen Safety Form', severity: 'subtle' };
+    }
+  },
+  {
+    id: 'fulton-safety-form',
+    name: 'Fulton Safety Form',
+    description: 'Celadyne Fulton safety training',
+    icon: 'firetruck',
+    url: 'https://forms.office.com/g/RV1A5dyg44',
+    section: 'training',
+    fetchStatus: async () => {
+      // External site — no live status to fetch.
+      return { text: 'Open Fulton Safety Form', severity: 'subtle' };
     }
   },
   {
@@ -2535,7 +2619,7 @@ const TOOLS = [
   id: 'analysis-portal-resource',
   name: 'Analysis portal dashboards',
   description: 'Analysis portal railway and logs',
-  icon: 'folder-lock',
+  icon: 'folder',
   section: 'coding',
   isFolder: true,
   requiresOrgRole: 'cto',
@@ -6281,6 +6365,7 @@ const TILE_SECTIONS = [
   { id: 'watching',   label: 'Watching' },
   { id: 'analysis',   label: 'Analysis' },
   { id: 'links',      label: 'Useful links' },
+  { id: 'training',   label: 'Training resources' },
   { id: 'coding',     label: 'Coding resources' }
 ];
 
