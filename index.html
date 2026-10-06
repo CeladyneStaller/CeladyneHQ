@@ -671,6 +671,24 @@
     text-transform: uppercase; display: block; margin-bottom: 5px; }
   .fb-catrow select { width: 100%; }
   .cat-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .cat-scopes { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+  .cat-scopeln { display: flex; gap: 9px; font-size: 11px; line-height: 1.5;
+    color: var(--text-subtle); opacity: .48; }
+  .cat-scopeln.on { opacity: 1; color: var(--text-muted); }
+  .cat-scopeln .k { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .04em;
+    text-transform: uppercase; min-width: 80px; flex: none; padding-top: 2px; }
+  .cat-scopeln.on .k { color: var(--accent); }
+  /* The goal is rendered for every category but shown only for the selected one,
+     so switching chips never re-renders the block. */
+  .cat-goal { display: flex; align-items: flex-start; gap: 5px; margin-top: 3px;
+    font-size: 10.5px; line-height: 1.45; color: var(--accent-text);
+    background: var(--accent-bg); border-radius: var(--radius); padding: 4px 8px; }
+  .cat-goal i { font-size: 12px; flex: none; margin-top: 1px; color: var(--accent); }
+  .cat-scopeln:not(.on) .cat-goal { display: none; }
+  @media (max-width: 640px) {
+    .cat-scopeln { flex-direction: column; gap: 1px; }
+    .cat-scopeln .k { min-width: 0; }
+  }
   .cat-chip {
     font-family: var(--font-mono);
     font-size: 10px;
@@ -3422,6 +3440,36 @@ async function timeOffTileStatus() {
 //  channel loses trust the first time someone tests it.
 
 const FEEDBACK_CATEGORIES = ['Company', 'Meetings', 'OKR', 'Safety & Operations'];
+
+// What belongs in each category, and why the category exists. Keyed by the exact
+// category STRING because that string is also the stored value and is pinned by a
+// database CHECK constraint — renaming a category means a migration plus an update
+// to rows already submitted, not an edit here.
+//
+// `scope` says what belongs; `goal` says what the category is for, which is what
+// settles a borderline call. `short` is the label column, kept narrow.
+const FEEDBACK_CATEGORY_SCOPE = {
+  'Company': {
+    short: 'Company',
+    scope: 'Company culture, and leadership.',
+    goal: 'Working at Celadyne is fun, enjoyable and rewarding.'
+  },
+  'Meetings': {
+    short: 'Meetings',
+    scope: 'How all meetings are run — company, team, huddle — and the content of company meetings.',
+    goal: 'Celadyne meetings are meaningful and a good use of time.'
+  },
+  'OKR': {
+    short: 'OKR',
+    scope: 'How we use the OKR system, including OKR weeks and its use in planning and team meetings.',
+    goal: 'Celadyne work is focused by well-defined targets.'
+  },
+  'Safety & Operations': {
+    short: 'Safety & Ops',
+    scope: 'Employee safety and operational efficiency, including the safety huddle.',
+    goal: 'Celadyne is a safe place to work that lets the team solve problems quickly and thoroughly.'
+  }
+};
 const SWOT_FIELDS = [
   { key: 'strengths',     label: 'Strengths',     cls: 'sw-s', hint: 'What is working well? What should we keep doing?' },
   { key: 'weaknesses',    label: 'Weaknesses',    cls: 'sw-w', hint: 'What is not working? Where are we struggling?' },
@@ -3599,6 +3647,19 @@ function fbFormHtml(row) {
   const opts = FEEDBACK_CATEGORIES.map(c =>
     `<button type="button" class="cat-chip${c === cat ? ' on' : ''}" data-cat="${escAttr(c)}"` +
     ` aria-pressed="${c === cat}">${escText(c)}</button>`).join('');
+  // All four scopes stay visible so a category can be chosen by comparison rather
+  // than trial and error. Only the selected one shows its goal — four goals at
+  // once is a wall nobody reads twice — and CSS does that hiding, so switching
+  // chips is a class toggle with no re-render.
+  const scopes = FEEDBACK_CATEGORIES.map(c => {
+    const d = FEEDBACK_CATEGORY_SCOPE[c] || { short: c, scope: '', goal: '' };
+    return `<div class="cat-scopeln${c === cat ? ' on' : ''}" data-scope="${escAttr(c)}">` +
+      `<span class="k">${escText(d.short)}</span>` +
+      `<span><span>${escText(d.scope)}</span>` +
+      (d.goal ? `<span class="cat-goal"><i class="ti ti-target" aria-hidden="true"></i>` +
+                `<span>${escText(d.goal)}</span></span>` : '') +
+      `</span></div>`;
+  }).join('');
   const fields = SWOT_FIELDS.map(f => `
     <div class="swot-f">
       <label class="${f.cls}">${escText(f.label)}</label>
@@ -3615,6 +3676,7 @@ function fbFormHtml(row) {
     <div class="fb-catrow">
       <label id="fb-cat-label">Category</label>
       <div class="cat-chips" data-fb="category" role="radiogroup" aria-labelledby="fb-cat-label">${opts}</div>
+      <div class="cat-scopes">${scopes}</div>
     </div>
     <div class="swot-grid">${fields}</div>`;
 }
@@ -3741,6 +3803,11 @@ function openFeedbackForm(row) {
       });
       chip.classList.add('on');
       chip.setAttribute('aria-pressed', 'true');
+      // Light the matching scope line; CSS reveals that line's goal.
+      const picked = chip.getAttribute('data-cat');
+      root.querySelectorAll('[data-scope]').forEach(ln => {
+        ln.classList.toggle('on', ln.getAttribute('data-scope') === picked);
+      });
     };
   });
   const copy = root.querySelector('[data-copy-one]');
