@@ -713,9 +713,56 @@
   .swot-f label { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em;
     text-transform: uppercase; margin-bottom: 4px; }
   .swot-hint { font-size: 10.5px; color: var(--text-subtle); margin-bottom: 6px; line-height: 1.4; }
-  .swot-f textarea { width: 100%; min-height: 74px; padding: 8px 10px; font-size: 13px;
-    font-family: var(--font-sans); border: 1px solid var(--border); border-radius: var(--radius);
-    background: var(--surface); color: var(--text); resize: vertical; }
+  /* Rich-text answer box: a formatting strip above the text, one border around
+     both, so it reads as a single field. */
+  .rt { display: flex; flex-direction: column; border: 1px solid var(--border);
+    border-radius: var(--radius); background: var(--surface);
+    transition: border-color .12s, box-shadow .12s; }
+  .rt:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+  .rt-bar { display: flex; align-items: center; gap: 1px; padding: 3px 4px;
+    background: var(--surface-alt); border-bottom: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0; }
+  .rt-btn { width: 26px; height: 24px; display: inline-flex; align-items: center;
+    justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 5px;
+    background: none; color: var(--text-subtle); cursor: pointer; }
+  .rt-btn i { font-size: 15px; }
+  .rt-btn:hover { color: var(--text); background: var(--surface); border-color: var(--border); }
+  .rt-btn.on { color: var(--accent); background: var(--accent-bg); border-color: transparent; }
+  .rt-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .rt-sep { width: 1px; height: 14px; background: var(--border); margin: 0 4px; }
+  .rt-link { display: flex; align-items: center; gap: 5px; padding: 5px 6px;
+    border-bottom: 1px solid var(--border); }
+  .rt-link[hidden], .rt-lbtn[hidden] { display: none; }
+  .rt-url { flex: 1; min-width: 0; padding: 5px 8px; font-size: 12.5px; font-family: var(--font-sans);
+    border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text); }
+  .rt-url.bad { border-color: var(--danger); }
+  .rt-lbtn { display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: 9.5px;
+    letter-spacing: .04em; text-transform: uppercase; padding: 5px 8px; border: 1px solid var(--border);
+    border-radius: 5px; background: var(--surface); color: var(--text-muted); cursor: pointer;
+    white-space: nowrap; }
+  .rt-lbtn:hover { border-color: var(--accent); color: var(--accent); }
+  .rt-lx { padding: 4px 5px; }
+  .rt-lx i { font-size: 13px; }
+  .rt-ed { position: relative; min-height: 70px; max-height: 320px; overflow-y: auto;
+    padding: 8px 10px; font-size: 13px; line-height: 1.5; color: var(--text);
+    outline: none; overflow-wrap: anywhere; }
+  .rt-ed.is-empty::before { content: attr(data-ph); position: absolute; color: var(--text-subtle);
+    pointer-events: none; }
+  /* The same rules in the editor and wherever an answer is shown, so what you
+     type is what a reviewer sees. */
+  .rt-ed p, .rt-view p { margin: 0 0 6px; }
+  .rt-ed ul, .rt-ed ol, .rt-view ul, .rt-view ol { margin: 0 0 6px; padding-left: 20px; }
+  .rt-ed li, .rt-view li { margin: 1px 0; }
+  .rt-ed li > ul, .rt-ed li > ol, .rt-view li > ul, .rt-view li > ol { margin: 1px 0 0; }
+  .rt-ed > :last-child, .rt-view > :last-child { margin-bottom: 0; }
+  .rt-ed a, .rt-view a { color: var(--accent); text-decoration: underline; }
+  .rt-ed strong, .rt-ed b, .rt-view strong { font-weight: 600; color: var(--text); }
+  .rt-view { overflow-wrap: anywhere; }
+  .swot-f label[data-for-rt] { cursor: default; }
+  /* Discard / delete confirmations replace the action row in place. */
+  .modal-actions[hidden] { display: none; }
+  .fb-confirm { align-items: center; }
+  .fb-confirm-msg { flex: 1; font-size: 12.5px; line-height: 1.45; color: var(--text-muted); }
   .sw-s { color: #3B6D11; } .sw-w { color: #A32D2D; }
   .sw-o { color: #0C447C; } .sw-t { color: #854F0B; }
   .anon-note { display: flex; gap: 9px; align-items: flex-start; padding: 9px 12px;
@@ -808,7 +855,7 @@
   .qitem:first-of-type { border-top: none; }
   .qitem .meta { font-family: var(--font-mono); font-size: 9px; color: var(--text-subtle);
     min-width: 104px; line-height: 1.5; flex: none; }
-  .qitem .txt { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; }
+  .qitem .txt { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.55; }
   @media (max-width: 640px) {
     .swot-grid { grid-template-columns: 1fr; }
     .daterow { flex-direction: column; gap: 0; }
@@ -3615,15 +3662,20 @@ async function fbList(pass, from, to, category) {
 // ---- formatting -----------------------------------------------------------
 
 function fbShortDate(iso) {
-  const d = new Date(iso);
+  // A bare 'YYYY-MM-DD' (the quarter range, the custom From/To) is a calendar
+  // date, not an instant. new Date() would read it as UTC midnight, which is the
+  // previous evening anywhere west of Greenwich — so 2026Q4 displayed as
+  // "Sep 30 – Dec 30". Build it from its parts in local time instead.
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  const d = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(iso);
   if (isNaN(d)) return '';
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
-// Preview line for a list row: the first non-empty quadrant, so a submission is
-// recognisable without opening it.
+// Preview line for a list row: the first non-empty quadrant, flattened to one
+// line, so a submission is recognisable without opening it.
 function fbPreview(row) {
   for (const f of SWOT_FIELDS) {
-    const v = (row[f.key] || '').trim();
+    const v = fbOneLine(row[f.key]);
     if (v) return v;
   }
   return '(empty)';
@@ -3644,9 +3696,12 @@ function fbQuarterOf(iso) {
 let _fbHomeQuarter = 'all';
 
 function fbValuesFrom(scope) {
+  // The quadrants are rich-text editors. What leaves them is always sanitized,
+  // so the stored value is the same small tag set whatever the browser produced.
   const get = k => {
     const el = document.querySelector(`${scope} [data-fb="${k}"]`);
-    return el ? el.value.trim() : '';
+    if (!el) return '';
+    return el.classList.contains('rt-ed') ? fbSanitize(el.innerHTML) : String(el.value || '').trim();
   };
   // Category is a chip group, not an input — read the pressed chip.
   const catEl = document.querySelector(`${scope} [data-fb="category"] .cat-chip.on`);
@@ -3661,31 +3716,491 @@ function fbHasContent(v) {
   return !!(v.strengths || v.weaknesses || v.opportunities || v.threats);
 }
 
-// Clipboard text. Contributor labels are deliberately omitted: they earn their
-// place on screen, but pasted into a discussion page they become durable
-// pseudonymous identifiers in a document that outlives the context, and
-// correlating them over time is the deanonymisation route this design avoids.
-function fbCopySubmission(row) {
-  const lines = [`Feedback — ${row.category} — ${fbShortDate(row.created_at)}`, ''];
-  SWOT_FIELDS.forEach(f => {
-    const v = (row[f.key] || '').trim();
-    if (!v) return;
-    lines.push(f.label, `• ${v}`, '');
+// ---- rich text ------------------------------------------------------------
+//
+// Quadrant answers are stored as a deliberately small subset of HTML:
+//
+//     p  br  strong  em  ul  ol  li  a[href]        (href: http, https, mailto)
+//
+// That is the set Confluence maps one-to-one on paste — paragraph, bold, italic,
+// bullet list, numbered list, link — so nothing a contributor writes is lost or
+// mangled on its way into a discussion page, and nothing outside it (fonts,
+// colours, images, tables) can arrive in a paste only to be lost later.
+//
+// Answers written before rich text are plain strings. They are told apart by
+// shape: fbSanitize always emits a leading <p>, <ul> or <ol>, and a plain answer
+// that happens to begin with one of those tags is not a realistic case. So there
+// is no migration and the database is untouched; an old answer is converted when
+// it is shown, copied or opened for editing.
+
+// Dropped together with everything inside them.
+const FB_RT_SKIP = new Set(['script', 'style', 'head', 'title', 'meta', 'link', 'base',
+  'noscript', 'template', 'iframe', 'frame', 'frameset', 'noframes', 'object', 'embed',
+  'applet', 'img', 'picture', 'source', 'track', 'video', 'audio', 'canvas', 'map', 'area',
+  'input', 'textarea', 'select', 'option', 'optgroup', 'button', 'form', 'datalist',
+  'output', 'progress', 'meter', 'dialog', 'xmp', 'plaintext', 'noembed']);
+// Elements that end one line of text and start another.
+const FB_RT_BLOCK = new Set(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote',
+  'pre', 'section', 'article', 'header', 'footer', 'aside', 'nav', 'main', 'figure',
+  'figcaption', 'address', 'center', 'details', 'summary', 'fieldset', 'legend', 'dl', 'dt',
+  'dd', 'table', 'caption', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'hr', 'li']);
+const FB_RT_HTML_NS = 'http://www.w3.org/1999/xhtml';
+
+function fbEscHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function fbEscAttr(s) { return fbEscHtml(s).replace(/"/g, '&quot;'); }
+
+// Only absolute http(s) and mailto links survive. A relative link pasted from
+// another site means nothing here, and anything else (javascript:, data:) is
+// exactly what must not get through.
+function fbSafeHref(href) {
+  if (!href) return null;
+  try {
+    const u = new URL(String(href).trim());
+    return /^(https?|mailto):$/.test(u.protocol) ? u.href : null;
+  } catch (e) { return null; }
+}
+
+// Parse HTML into an inert document body. DOMParser documents run no scripts and
+// load nothing, so this is safe to call on hostile input.
+function fbRoot(html) {
+  return new DOMParser().parseFromString(String(html == null ? '' : html), 'text/html').body;
+}
+
+// The one gate between anything typed or pasted and what is stored or shown.
+// It REBUILDS its input rather than filtering it in place: only allowlisted
+// elements are ever created and the only attribute that can exist is a checked
+// href, so event handlers, styles, scripts and images have no route into the
+// output whatever the input looks like. It also normalises structure — inline
+// content always sits in a <p> or <li>, a nested list always hangs off an item —
+// so every stored answer has one shape to render and copy.
+function fbSanitize(input) {
+  const raw = String(input == null ? '' : input);
+  if (!raw.trim()) return '';
+  const src = fbRoot(raw);
+  const doc = src.ownerDocument;
+  const root = doc.createElement('div');
+  const isList = n => !!n && n.nodeType === 1 && (n.localName === 'ul' || n.localName === 'ol');
+  const hasText = el => /[^ \t\n\r\f ]/.test(el.textContent);
+
+  // A frame is where content is landing. At the top level, inline content goes
+  // into a <p> opened on demand; inside a list item it goes into the <li>, and a
+  // block boundary there becomes a line break.
+  const frame = (box, li) => ({ box, li, cur: null, gap: false, word: null });
+
+  // The last inline thing in an element, looking through bold/italic/link.
+  function lastLeaf(el) {
+    let n = el.lastChild;
+    while (n && n.nodeType === 1 && n.localName !== 'br' && !isList(n) && n.lastChild) n = n.lastChild;
+    return n;
+  }
+  // True at the start of a line: nothing yet, or a break, list or space last.
+  function soft(el) {
+    const n = lastLeaf(el);
+    if (!n || n.nodeType !== 3) return true;
+    return n.data === '' || /[ \t\n\r\f]$/.test(n.data);
+  }
+  function target(f) {
+    if (f.li) {
+      if (f.gap) {
+        f.gap = false;
+        const n = lastLeaf(f.box);
+        if (n && n.nodeType === 3) f.box.appendChild(doc.createElement('br'));
+      }
+      return f.box;
+    }
+    if (!f.cur) { f.cur = doc.createElement('p'); f.box.appendChild(f.cur); }
+    return f.cur;
+  }
+  function boundary(f) { if (f.li) f.gap = true; else f.cur = null; }
+
+  // Marks are carried as state, not copied as elements, so bold that spans two
+  // paragraphs comes out as bold in each rather than as a <strong> around blocks.
+  // Wrappers nest in one fixed order (a > strong > em) and adjacent runs with the
+  // same marks merge.
+  function appendText(t, s, m) {
+    let p = t;
+    for (const tag of [m.href && 'a', m.b && 'strong', m.i && 'em']) {
+      if (!tag) continue;
+      const last = p.lastChild;
+      if (last && last.nodeType === 1 && last.localName === tag &&
+          (tag !== 'a' || last.getAttribute('href') === m.href)) { p = last; continue; }
+      const el = doc.createElement(tag);
+      if (tag === 'a') el.setAttribute('href', m.href);
+      p.appendChild(el);
+      p = el;
+    }
+    const last = p.lastChild;
+    if (last && last.nodeType === 3) last.data += s;
+    else p.appendChild(doc.createTextNode(s));
+  }
+  function put(s, f, m, keep) {
+    const t = target(f);
+    if (!keep && soft(t)) s = s.replace(/^ +/, '');
+    if (s) appendText(t, s, m);
+  }
+  function text(s, f, m) {
+    if (m.pre) {
+      // Preformatted text keeps its line breaks; everywhere else they collapse.
+      s.replace(/\r\n?/g, '\n').split('\n').forEach((part, k) => {
+        if (k) br(f);
+        if (part) put(part, f, m, true);
+      });
+      return;
+    }
+    // Browsers type a non-breaking space wherever a plain one would collapse
+    // (after a bold word, at the end of a line). Stored HTML has no use for them,
+    // and they would ride along into Confluence, so they become ordinary spaces.
+    s = s.replace(/ /g, ' ').replace(/[ \t\n\r\f]+/g, ' ');
+    // Whitespace between tags is layout, not content.
+    if (s === ' ' && (f.li ? (f.gap || soft(f.box)) : (!f.cur || soft(f.cur)))) return;
+    put(s, f, m, false);
+  }
+  function br(f) {
+    if (f.li) {
+      if (f.gap) return;
+      const n = lastLeaf(f.box);
+      if (n && !isList(n)) f.box.appendChild(doc.createElement('br'));
+      return;
+    }
+    if (f.cur) f.cur.appendChild(doc.createElement('br'));
+  }
+  function marks(el, tag, m) {
+    const st = (el.getAttribute('style') || '').toLowerCase();
+    const r = { b: m.b, i: m.i, href: m.href, pre: m.pre || tag === 'pre' };
+    if (tag === 'b' || tag === 'strong' || /^h[1-6]$/.test(tag)) r.b = true;
+    if (tag === 'i' || tag === 'em' || tag === 'cite' || tag === 'dfn' || tag === 'var') r.i = true;
+    // Inline styles decide too: Google Docs marks bold with a styled <span>, and
+    // wraps a whole paste in <b style="font-weight:normal"> that must NOT bold it.
+    const fw = /(?:^|;)\s*font-weight\s*:\s*([a-z0-9]+)/.exec(st);
+    if (fw) r.b = fw[1] === 'bold' || fw[1] === 'bolder' || +fw[1] >= 600;
+    const fs = /(?:^|;)\s*font-style\s*:\s*([a-z]+)/.exec(st);
+    if (fs) r.i = fs[1] === 'italic' || fs[1] === 'oblique';
+    if (tag === 'a') { const h = fbSafeHref(el.getAttribute('href')); if (h) r.href = h; }
+    return r;
+  }
+  function one(n, f, m) {
+    if (n.nodeType === 3) { text(n.data, f, m); return; }
+    // Comments, and anything outside HTML proper (svg, math), go entirely.
+    if (n.nodeType !== 1 || n.namespaceURI !== FB_RT_HTML_NS) return;
+    const tag = n.localName;
+    if (FB_RT_SKIP.has(tag)) return;
+    const st = (n.getAttribute('style') || '').toLowerCase();
+    if (/mso-list\s*:\s*ignore/.test(st)) return;        // Word's typed-out bullet glyphs
+    if (tag === 'br') { br(f); return; }
+    if (tag === 'ul' || tag === 'ol') { list(n, f, m); return; }
+    const mm = marks(n, tag, m);
+    if (!f.li && tag === 'p' && /mso-list\s*:\s*l\d/.test(st)) { wordItem(n, f, mm); return; }
+    if (FB_RT_BLOCK.has(tag)) { boundary(f); each(n, f, mm); boundary(f); return; }
+    each(n, f, mm);                                       // span, font, u, mark…: unwrapped
+  }
+  function each(parent, f, m) {
+    for (let n = parent.firstChild; n; n = n.nextSibling) one(n, f, m);
+  }
+  function list(el, f, m) {
+    const L = doc.createElement(el.localName);
+    boundary(f);
+    f.box.appendChild(L);
+    let li = null, loose = null;
+    const item = () => { li = doc.createElement('li'); L.appendChild(li); return li; };
+    for (let n = el.firstChild; n; n = n.nextSibling) {
+      if (n.nodeType === 3 && !/[^ \t\n\r\f]/.test(n.data)) continue;   // indentation between items
+      if (n.nodeType === 1 && n.localName === 'li') {
+        loose = null;
+        each(n, frame(item(), true), marks(n, 'li', m));
+      } else if (n.nodeType === 1 && (n.localName === 'ul' || n.localName === 'ol')) {
+        // Chrome's indent puts a nested list directly inside its parent list
+        // rather than inside an item. Hang it off the item before it.
+        loose = null;
+        list(n, frame(li || item(), true), m);
+      } else {
+        // Anything else loose in a list becomes an item of its own.
+        if (!loose) loose = frame(item(), true);
+        one(n, loose, m);
+      }
+    }
+    boundary(f);
+  }
+  // Word and Outlook do not paste real lists: each item is a paragraph styled
+  // mso-list with its bullet or number typed out in a span. Gather consecutive
+  // ones into a list. Levels are flattened, which loses only the indentation.
+  function wordItem(p, f, m) {
+    const g = [...p.querySelectorAll('[style]')]
+      .find(x => /mso-list\s*:\s*ignore/i.test(x.getAttribute('style')));
+    const glyph = g ? g.textContent.replace(/\s+/g, '') : '';
+    const kind = /^[0-9a-z]{1,4}[.)]$/i.test(glyph) ? 'ol' : 'ul';
+    if (!(f.word && f.word.localName === kind && f.box.lastChild === f.word)) {
+      f.word = doc.createElement(kind);
+      f.box.appendChild(f.word);
+    }
+    f.cur = null;
+    const li = doc.createElement('li');
+    f.word.appendChild(li);
+    each(p, frame(li, true), m);
+    f.cur = null;
+  }
+
+  // Strip spaces and breaks from one end of an element's inline run, dropping
+  // wrappers that end up empty. Stops at a nested list.
+  function trimEnd(el, atStart) {
+    for (;;) {
+      const n = atStart ? el.firstChild : el.lastChild;
+      if (!n) return;
+      if (n.nodeType === 3) {
+        const v = atStart ? n.data.replace(/^[ \t\n\r\f]+/, '') : n.data.replace(/[ \t\n\r\f]+$/, '');
+        if (v) { n.data = v; return; }
+        n.remove();
+      } else if (n.localName === 'br') {
+        n.remove();
+      } else if (isList(n)) {
+        return;
+      } else {
+        trimEnd(n, atStart);
+        if (n.firstChild) return;
+        n.remove();
+      }
+    }
+  }
+  function tidyList(L) {
+    [...L.children].forEach(li => {
+      [...li.children].filter(isList).forEach(sub => { tidyList(sub); if (!sub.firstElementChild) sub.remove(); });
+      // The item's own words are the run before its first nested list.
+      const first = [...li.childNodes].find(isList);
+      if (first) {
+        const run = doc.createElement('span');
+        while (li.firstChild !== first) run.appendChild(li.firstChild);
+        trimEnd(run, true); trimEnd(run, false);
+        while (run.firstChild) li.insertBefore(run.firstChild, first);
+      } else {
+        trimEnd(li, true);
+      }
+      trimEnd(li, false);
+      if (!hasText(li)) li.remove();
+    });
+  }
+
+  each(src, frame(root, false), { b: false, i: false, href: null, pre: false });
+  [...root.children].forEach(b => {
+    if (b.localName === 'p') { trimEnd(b, true); trimEnd(b, false); } else tidyList(b);
+    if (!hasText(b)) b.remove();
   });
-  return lines.join('\n').trim();
+  return root.innerHTML;
+}
+
+// Plain text -> rich HTML, for answers written before rich text and for pastes
+// that carry no HTML. Lines starting "- ", "* " or "• " become a bulleted list and
+// "1. " a numbered one, since that is how people type lists into a plain box.
+// Blank lines separate paragraphs; single line breaks are kept.
+function fbPlainToHtml(text) {
+  const s = String(text == null ? '' : text).replace(/\r\n?/g, '\n');
+  if (!s.trim()) return '';
+  const out = [];
+  let para = null, items = null, kind = null;
+  s.split('\n').forEach(line => {
+    if (!line.trim()) { para = null; items = null; return; }
+    const b = /^\s*[-*•‣◦▪]\s+(.*)$/.exec(line);
+    const o = b ? null : /^\s*\d{1,3}[.)]\s+(.*)$/.exec(line);
+    if (b || o) {
+      const k = b ? 'ul' : 'ol';
+      if (!items || kind !== k) { items = []; kind = k; out.push({ k, items }); }
+      items.push((b || o)[1]);
+      para = null;
+      return;
+    }
+    // An indented line under a list item continues that item.
+    if (items && /^\s{2,}\S/.test(line)) { items[items.length - 1] += '\n' + line.trim(); return; }
+    items = null;
+    if (!para) { para = []; out.push({ k: 'p', lines: para }); }
+    para.push(line.trim());
+  });
+  const brs = t => t.split('\n').map(fbEscHtml).join('<br>');
+  return fbSanitize(out.map(x => x.k === 'p'
+    ? `<p>${brs(x.lines.join('\n'))}</p>`
+    : `<${x.k}>${x.items.map(t => `<li>${brs(t)}</li>`).join('')}</${x.k}>`).join(''));
+}
+
+function fbIsRich(s) { return /^\s*<(p|ul|ol)[\s>]/i.test(s); }
+
+// Any stored answer — rich, or from before rich text — as clean HTML; '' when
+// empty. Sanitized again on every read: the RPCs accept whatever a caller sends,
+// so stored HTML is never trusted just because this page normally writes it.
+const _fbRichCache = new Map();
+function fbRich(value) {
+  const s = String(value == null ? '' : value);
+  if (!s.trim()) return '';
+  let out = _fbRichCache.get(s);
+  if (out === undefined) {
+    out = fbIsRich(s) ? fbSanitize(s) : fbPlainToHtml(s);
+    if (_fbRichCache.size > 500) _fbRichCache.clear();
+    _fbRichCache.set(s, out);
+  }
+  return out;
+}
+function fbHasText(value) { return !!fbRich(value); }
+
+// An answer ready to drop into the page: clean, with links opening a new tab.
+function fbViewHtml(value) {
+  const html = fbRich(value);
+  if (html.indexOf('<a ') < 0) return html;
+  const body = fbRoot(html);
+  body.querySelectorAll('a').forEach(a => {
+    a.setAttribute('target', '_blank');
+    a.setAttribute('rel', 'noopener noreferrer');
+  });
+  return body.innerHTML;
+}
+
+// ---- plain text -----------------------------------------------------------
+// For the clipboard's text/plain flavour, the CSV and one-line previews. Bold and
+// italic have no plain form and drop away; a link keeps its address in brackets
+// when its words differ from it, since plain text has nowhere else to put it.
+
+function fbInlineText(nodes) {
+  let out = '';
+  nodes.forEach(n => {
+    if (n.nodeType === 3) { out += n.data.replace(/ /g, ' '); return; }
+    if (n.nodeType !== 1 || n.localName === 'ul' || n.localName === 'ol') return;
+    if (n.localName === 'br') { out += '\n'; return; }
+    const inner = fbInlineText([...n.childNodes]);
+    if (n.localName === 'a') {
+      const href = n.getAttribute('href') || '';
+      const bare = href.replace(/^mailto:/, '');
+      const words = inner.trim();
+      const same = s => s.replace(/\/$/, '') === bare.replace(/\/$/, '');
+      out += (!words || same(words) || words === href) ? (inner || bare) : `${inner} (${bare})`;
+      return;
+    }
+    out += inner;
+  });
+  return out;
+}
+// A list item split into its own words (everything before its first nested
+// list) and what hangs under it (nested lists, and any words after them).
+function fbSplitLi(li) {
+  const lead = [], rest = [];
+  let tail = null, seen = false;
+  [...li.childNodes].forEach(n => {
+    if (n.nodeType === 1 && (n.localName === 'ul' || n.localName === 'ol')) {
+      seen = true; tail = null; rest.push(n); return;
+    }
+    if (!seen) { lead.push(n); return; }
+    if (!tail) { tail = li.ownerDocument.createElement('p'); rest.push(tail); }
+    tail.appendChild(n.cloneNode(true));
+  });
+  return { lead, rest };
+}
+// One item as plain-text lines: the marker on the first line, continuation lines
+// aligned under its text, nested lists one level in.
+function fbItemLines(lead, rest, indent, marker) {
+  const pad = ' '.repeat(indent), cont = ' '.repeat(indent + marker.length + 1);
+  const first = fbInlineText(lead).split('\n');
+  const lines = [pad + marker + ' ' + first[0].trim()].concat(first.slice(1).map(t => cont + t.trim()));
+  rest.forEach(b => {
+    if (b.localName === 'p') fbInlineText([...b.childNodes]).split('\n').forEach(t => lines.push(cont + t.trim()));
+    else lines.push(...fbListLines(b, cont.length));
+  });
+  return lines;
+}
+function fbListLines(L, indent) {
+  const out = [];
+  [...L.children].forEach((li, k) => {
+    const { lead, rest } = fbSplitLi(li);
+    const marker = L.localName === 'ol' ? (k + 1) + '.' : (indent ? '◦' : '•');
+    out.push(...fbItemLines(lead, rest, indent, marker));
+  });
+  return out;
+}
+// A whole answer as plain text with its structure kept: paragraphs as lines,
+// list items with their bullets or numbers.
+function fbPlainText(value) {
+  const lines = [];
+  [...fbRoot(fbRich(value)).children].forEach(b => {
+    if (b.localName === 'p') fbInlineText([...b.childNodes]).split('\n').forEach(t => lines.push(t.trim()));
+    else lines.push(...fbListLines(b, 0));
+  });
+  return lines.join('\n');
+}
+function fbOneLine(value) {
+  return fbPlainText(value).split('\n')
+    .map(t => t.replace(/^\s*(?:[•◦]|\d+\.)\s+/, '').trim())
+    .filter(Boolean).join(' · ');
+}
+
+// ---- clipboard ------------------------------------------------------------
+//
+// Every copy carries two flavours. text/html is what Confluence reads: a real
+// bulleted list with bold, italic and links intact. text/plain is the same
+// content for anything that cannot take HTML, in the format these buttons have
+// always produced ("Threats", then "• …" lines).
+//
+// Contributor labels are deliberately omitted: they earn their place on screen,
+// but pasted into a discussion page they become durable pseudonymous identifiers
+// in a document that outlives the context, and correlating them over time is the
+// deanonymisation route this design avoids.
+
+// The bullets one answer contributes to a quadrant's list.
+//  - Leading lists are lifted: an answer written as three bullets contributes
+//    three bullets, not an empty bullet with three nested under it.
+//  - From the first paragraph on, the rest of the answer is ONE bullet. The
+//    paragraph leads, and later paragraphs and lists sit inside it, so a point
+//    and its supporting detail stay together.
+function fbBullets(value) {
+  const blocks = [...fbRoot(fbRich(value)).children];
+  const out = [];
+  let i = 0;
+  for (; i < blocks.length && blocks[i].localName !== 'p'; i++) {
+    [...blocks[i].children].forEach(li => out.push(fbSplitLi(li)));
+  }
+  if (i < blocks.length) out.push({ lead: [...blocks[i].childNodes], rest: blocks.slice(i + 1) });
+  return out;
+}
+function fbNodesHtml(nodes) {
+  if (!nodes.length) return '';
+  const box = nodes[0].ownerDocument.createElement('div');
+  nodes.forEach(n => box.appendChild(n.cloneNode(true)));
+  return box.innerHTML;
+}
+function fbBulletHtml(b) {
+  const lead = fbNodesHtml(b.lead);
+  // An item holding more than one paragraph needs its first one wrapped too, or
+  // the editor receiving the paste would run them together.
+  const wrap = b.rest.some(x => x.localName === 'p');
+  return '<li>' + (wrap ? `<p>${lead}</p>` : lead) + fbNodesHtml(b.rest) + '</li>';
+}
+function fbLabelHtml(s) { return `<p><strong>${fbEscHtml(s)}</strong></p>`; }
+
+// One quadrant: its label, then every answer's bullets. null when there are none.
+function fbQuadrantCopy(label, values) {
+  const bullets = [];
+  values.forEach(v => bullets.push(...fbBullets(v)));
+  if (!bullets.length) return null;
+  const text = [label];
+  bullets.forEach(b => text.push(...fbItemLines(b.lead, b.rest, 0, '•')));
+  return {
+    html: fbLabelHtml(label) + '<ul>' + bullets.map(fbBulletHtml).join('') + '</ul>',
+    text: text.join('\n')
+  };
+}
+function fbCopySubmission(row) {
+  const title = `Feedback — ${row.category} — ${fbShortDate(row.created_at)}`;
+  const parts = SWOT_FIELDS.map(f => fbQuadrantCopy(f.label, [row[f.key]])).filter(Boolean);
+  const lines = [title, ''];
+  parts.forEach(p => lines.push(p.text, ''));
+  return { html: fbLabelHtml(title) + parts.map(p => p.html).join(''), text: lines.join('\n').trim() };
 }
 // Just the quadrant name and the bullets. The date range and category are
 // already whatever the reader filtered to, and per-item attribution turns a
 // discussion page into a wall of metadata — so neither is carried across.
 function fbCopyQuadrant(field, rows) {
-  const items = rows.map(r => (r[field.key] || '').trim()).filter(Boolean);
-  return [field.label].concat(items.map(t => `• ${t}`)).join('\n');
+  return fbQuadrantCopy(field.label, rows.map(r => r[field.key])) || { html: '', text: field.label };
 }
 function fbCopyAllQuadrants(rows) {
-  return SWOT_FIELDS
-    .filter(f => rows.some(r => (r[f.key] || '').trim()))
-    .map(f => fbCopyQuadrant(f, rows))
-    .join('\n\n');
+  const parts = SWOT_FIELDS.map(f => fbQuadrantCopy(f.label, rows.map(r => r[f.key]))).filter(Boolean);
+  return { html: parts.map(p => p.html).join(''), text: parts.map(p => p.text).join('\n\n') };
+}
+function fbJoinCopies(list) {
+  return { html: list.map(c => c.html).join(''), text: list.map(c => c.text).join('\n\n') };
 }
 function fbScopeLabel(from, to, category) {
   const cat = category || 'All categories';
@@ -3696,23 +4211,26 @@ function fbScopeLabel(from, to, category) {
 }
 
 // Clipboard write with a visible confirmation on the button that triggered it.
-// execCommand fallback because the Hub is opened over http on some lab machines,
-// where navigator.clipboard is undefined.
-async function fbCopy(text, btn) {
-  let ok = false;
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text); ok = true;
-    }
-  } catch (e) { ok = false; }
-  if (!ok) {
+// Takes { html, text } or a bare string.
+//
+// The copy-event route goes first. It runs synchronously inside the click, so it
+// works over plain http (the Hub is opened that way on some lab machines, where
+// navigator.clipboard does not exist) and sets both flavours in every browser.
+// The async Clipboard API is the fallback.
+async function fbCopy(payload, btn) {
+  const p = typeof payload === 'string' ? { html: '', text: payload } : payload;
+  let ok = fbCopyViaEvent(p);
+  if (!ok && navigator.clipboard && window.isSecureContext) {
     try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      ok = document.execCommand('copy');
-      document.body.removeChild(ta);
+      if (p.html && window.ClipboardItem && navigator.clipboard.write) {
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([fbClipHtml(p.html)], { type: 'text/html' }),
+          'text/plain': new Blob([p.text], { type: 'text/plain' })
+        })]);
+      } else {
+        await navigator.clipboard.writeText(p.text);
+      }
+      ok = true;
     } catch (e) { ok = false; }
   }
   if (btn) {
@@ -3722,6 +4240,356 @@ async function fbCopy(text, btn) {
     setTimeout(() => { btn.innerHTML = prev; btn.classList.remove('done'); }, 1600);
   }
   if (!ok) toast('Could not copy to clipboard', 'error');
+}
+// The charset declaration keeps the em dash and bullets intact for clipboard
+// readers that do not assume UTF-8.
+function fbClipHtml(html) { return '<meta charset="utf-8">' + html; }
+function fbCopyViaEvent(p) {
+  let wrote = false;
+  const onCopy = e => {
+    if (!e.clipboardData) return;
+    e.clipboardData.setData('text/plain', p.text);
+    if (p.html) e.clipboardData.setData('text/html', fbClipHtml(p.html));
+    e.preventDefault();
+    wrote = true;
+  };
+  // Some browsers only fire 'copy' when something is selected, so select a
+  // throwaway node, and put the user's own selection back afterwards.
+  const sel = window.getSelection();
+  const saved = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+  const holder = document.createElement('span');
+  holder.textContent = p.text || ' ';
+  holder.setAttribute('aria-hidden', 'true');
+  holder.style.cssText = 'position:fixed;left:-9999px;top:0;white-space:pre;';
+  document.body.appendChild(holder);
+  document.addEventListener('copy', onCopy, true);
+  try {
+    if (sel) {
+      const r = document.createRange();
+      r.selectNodeContents(holder);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    document.execCommand('copy');
+  } catch (e) { wrote = false; }
+  document.removeEventListener('copy', onCopy, true);
+  holder.remove();
+  if (sel) { sel.removeAllRanges(); if (saved) sel.addRange(saved); }
+  return wrote;
+}
+
+// ---- rich-text editor -----------------------------------------------------
+//
+// contenteditable driven by the browser's own editing commands — no library. The
+// format set is five buttons, and the native commands bring undo, IME input,
+// spellcheck and mobile selection handles for free. Whatever the browser makes
+// (<b> rather than <strong>, a nested list placed directly inside its parent,
+// styled spans from a paste) passes through fbSanitize on the way out, so those
+// quirks never reach the database.
+
+const FB_RT_MOD = /Mac|iPhone|iPad|iPod/.test(navigator.platform || '') ? '⌘' : 'Ctrl+';
+const FB_RT_TOOLS = [
+  { cmd: 'bold', icon: 'bold', label: 'Bold', key: 'B' },
+  { cmd: 'italic', icon: 'italic', label: 'Italic', key: 'I' },
+  { sep: true },
+  { cmd: 'insertUnorderedList', icon: 'list', label: 'Bulleted list', hint: 'or type - and a space' },
+  { cmd: 'insertOrderedList', icon: 'list-numbers', label: 'Numbered list', hint: 'or type 1. and a space' },
+  { sep: true },
+  { cmd: 'link', icon: 'link', label: 'Link', key: 'K' }
+];
+
+// `html` must already be clean (fbRich output) — it goes in as markup.
+function fbEditorHtml(f, html) {
+  const tools = FB_RT_TOOLS.map(t => t.sep
+    ? '<span class="rt-sep" aria-hidden="true"></span>'
+    : `<button type="button" class="rt-btn" data-cmd="${t.cmd}" aria-label="${t.label}"` +
+      ` title="${t.label}${t.key ? ` (${FB_RT_MOD}${t.key})` : ''}${t.hint ? ` — ${t.hint}` : ''}"` +
+      `${t.cmd === 'link' ? '' : ' aria-pressed="false"'}><i class="ti ti-${t.icon}" aria-hidden="true"></i></button>`
+  ).join('');
+  return `
+      <div class="rt" data-rt>
+        <div class="rt-bar" role="toolbar" aria-label="${escAttr(f.label)} formatting">${tools}</div>
+        <div class="rt-link" hidden>
+          <input type="text" class="rt-url" placeholder="Paste a link, then Enter" aria-label="Link address"
+            spellcheck="false" autocomplete="off">
+          <button type="button" class="rt-lbtn" data-link="apply">Apply</button>
+          <button type="button" class="rt-lbtn" data-link="remove" hidden>Remove</button>
+          <button type="button" class="rt-lbtn rt-lx" data-link="cancel" aria-label="Cancel"><i class="ti ti-x" aria-hidden="true"></i></button>
+        </div>
+        <div class="rt-ed${html ? '' : ' is-empty'}" contenteditable="true" role="textbox" aria-multiline="true"
+          aria-labelledby="fb-lbl-${f.key}" data-fb="${f.key}" data-ph="Optional" spellcheck="true">${html}</div>
+      </div>`;
+}
+
+let _fbRtListening = false;
+function fbRtWire(root) {
+  if (!_fbRtListening) {
+    // One document-level listener serves every editor, keeping each box's
+    // toolbar state and remembered selection current.
+    _fbRtListening = true;
+    document.addEventListener('selectionchange', fbRtSync);
+  }
+  root.querySelectorAll('[data-rt]').forEach(box => {
+    const ed = box.querySelector('.rt-ed');
+    const url = box.querySelector('.rt-url');
+    box._rt = { ed, range: null, linkRange: null };
+
+    ed.addEventListener('focus', () => {
+      // New lines as <p> rather than <div>; bold and italic as tags, not styles.
+      try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (e) { /* older engine */ }
+      try { document.execCommand('styleWithCSS', false, false); } catch (e) { /* older engine */ }
+    });
+    ed.addEventListener('input', () => { fbRtEmpty(ed); fbRtSync(); });
+    ed.addEventListener('keydown', e => fbRtKeys(e, box));
+    // Ctrl+B / Ctrl+I change the typing style without moving the caret, so no
+    // selectionchange follows — refresh the buttons on key release as well.
+    ed.addEventListener('keyup', fbRtSync);
+    ed.addEventListener('paste', fbRtPaste);
+    // Dropped files (images) have no place in an answer.
+    ed.addEventListener('drop', e => {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) e.preventDefault();
+    });
+    // Leaving the box shows exactly what will be saved. Not when focus only moved
+    // to this box's own link field: rewriting the text then would invalidate the
+    // selection the link is about to be applied to.
+    ed.addEventListener('blur', e => {
+      if (e.relatedTarget && box.contains(e.relatedTarget)) return;
+      fbRtNormalize(ed);
+    });
+
+    const bar = box.querySelector('.rt-bar');
+    // A press on a toolbar button must not take focus from the text, or the
+    // command would have no selection to act on.
+    bar.addEventListener('mousedown', e => { if (e.target.closest('.rt-btn')) e.preventDefault(); });
+    bar.addEventListener('click', e => {
+      const b = e.target.closest('.rt-btn');
+      if (!b) return;
+      const cmd = b.getAttribute('data-cmd');
+      if (cmd === 'link') { fbRtLinkOpen(box); return; }
+      fbRtFocus(box);
+      document.execCommand(cmd, false, null);
+      fbRtEmpty(ed);
+      fbRtSync();
+    });
+
+    box.querySelector('[data-link="apply"]').addEventListener('click', () => fbRtLinkApply(box));
+    box.querySelector('[data-link="remove"]').addEventListener('click', () => fbRtLinkRemove(box));
+    box.querySelector('[data-link="cancel"]').addEventListener('click', () => fbRtLinkClose(box));
+    url.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); fbRtLinkApply(box); }
+      else if (e.key === 'Escape') { e.preventDefault(); fbRtLinkClose(box); }
+    });
+    url.addEventListener('input', () => url.classList.remove('bad'));
+  });
+}
+
+// Focus a box's text and put back the selection it last had — commands can
+// arrive from the keyboard-focused toolbar or from the link field.
+function fbRtFocus(box) {
+  const { ed } = box._rt;
+  const sel = window.getSelection();
+  if (document.activeElement === ed && sel.rangeCount &&
+      ed.contains(sel.getRangeAt(0).commonAncestorContainer)) return;
+  const r = box._rt.range;
+  ed.focus();
+  sel.removeAllRanges();
+  if (r && ed.contains(r.commonAncestorContainer)) sel.addRange(r);
+  else {
+    const end = document.createRange();
+    end.selectNodeContents(ed);
+    end.collapse(false);
+    sel.addRange(end);
+  }
+}
+function fbRtSync() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const n = sel.anchorNode;
+  const el = n && (n.nodeType === 1 ? n : n.parentElement);
+  const ed = el && el.closest('.rt-ed');
+  const box = ed && ed.closest('[data-rt]');
+  if (!box || !box._rt) return;
+  box._rt.range = sel.getRangeAt(0).cloneRange();
+  box.querySelectorAll('.rt-btn').forEach(b => {
+    const cmd = b.getAttribute('data-cmd');
+    let on = false;
+    if (cmd === 'link') on = !!fbRtLinkAt(box._rt.range, ed);
+    else { try { on = document.queryCommandState(cmd); } catch (e) { on = false; } }
+    b.classList.toggle('on', on);
+    if (cmd !== 'link') b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+// The placeholder shows only when there is truly nothing — an empty bullet
+// waiting for its first word is not empty.
+function fbRtEmpty(ed) {
+  ed.classList.toggle('is-empty', !/\S/.test(ed.textContent) && !ed.querySelector('li'));
+}
+function fbRtNormalize(ed) {
+  const clean = fbSanitize(ed.innerHTML);
+  if (clean !== ed.innerHTML) ed.innerHTML = clean;
+  fbRtEmpty(ed);
+}
+function fbRtKeys(e, box) {
+  const ed = box._rt.ed;
+  const mod = (e.metaKey || e.ctrlKey) && !e.altKey;
+  const k = (e.key || '').toLowerCase();
+  if (mod && k === 'k') { e.preventDefault(); fbRtLinkOpen(box); return; }
+  // Underline is not in the stored set. It would vanish on save, so it never starts.
+  if (mod && k === 'u') { e.preventDefault(); return; }
+  // In a list, Tab nests the item and Shift+Tab lifts it back out. Anywhere
+  // else Tab keeps its usual job of moving to the next field.
+  if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && fbRtInItem(ed)) {
+    e.preventDefault();
+    document.execCommand(e.shiftKey ? 'outdent' : 'indent', false, null);
+    return;
+  }
+  if (e.key === ' ' && !mod && !e.isComposing && fbRtAutoList(ed)) e.preventDefault();
+}
+function fbRtInItem(ed) {
+  const sel = window.getSelection();
+  const n = sel && sel.rangeCount ? sel.anchorNode : null;
+  const el = n && (n.nodeType === 1 ? n : n.parentElement);
+  const li = el && el.closest('li');
+  return !!li && ed.contains(li);
+}
+// "- " (or "* ") typed at the start of a line starts a bulleted list and "1. " a
+// numbered one — the same shortcut Confluence and Slack use.
+function fbRtAutoList(ed) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return false;
+  const node = sel.anchorNode;
+  if (!node || !ed.contains(node)) return false;
+  const el = node.nodeType === 1 ? node : node.parentElement;
+  if (el.closest('li')) return false;
+  const r = document.createRange();
+  const block = el.closest('p, div, h1, h2, h3, h4, h5, h6, blockquote');
+  if (block && block !== ed && ed.contains(block)) r.setStart(block, 0);
+  else if (node === ed) r.setStart(ed, 0);
+  else {
+    // A bare first line, which Chrome leaves directly in the editor: the line
+    // starts after the nearest block or break before the caret.
+    let top = node;
+    while (top.parentNode !== ed) top = top.parentNode;
+    let start = top;
+    while (start.previousSibling &&
+           !/^(P|DIV|UL|OL|BR|H[1-6]|BLOCKQUOTE)$/.test(start.previousSibling.nodeName)) {
+      start = start.previousSibling;
+    }
+    r.setStartBefore(start);
+  }
+  r.setEnd(sel.anchorNode, sel.anchorOffset);
+  const before = r.toString();
+  const cmd = /^[-*•]$/.test(before) ? 'insertUnorderedList'
+            : /^1[.)]$/.test(before) ? 'insertOrderedList' : null;
+  if (!cmd) return false;
+  sel.removeAllRanges();
+  sel.addRange(r);
+  document.execCommand('delete', false, null);
+  document.execCommand(cmd, false, null);
+  fbRtEmpty(ed);
+  return true;
+}
+// A paste keeps the formatting that survives saving and nothing else. HTML from
+// Confluence, Google Docs, Word or a web page goes through the sanitizer; plain
+// text with "- " or "1. " lines becomes a real list.
+function fbRtPaste(e) {
+  const dt = e.clipboardData;
+  if (!dt) return;                       // the browser pastes; blur sanitizes it
+  const ed = e.currentTarget;
+  e.preventDefault();
+  const html = dt.getData('text/html');
+  const text = dt.getData('text/plain');
+  let clean = html ? fbSanitize(html) : '';
+  if (!clean && text && (/\n\s*\S/.test(text.trim()) || /^\s*(?:[-*•]|\d{1,3}[.)])\s/.test(text))) {
+    clean = fbPlainToHtml(text);
+  }
+  if (!clean) {
+    if (text) document.execCommand('insertText', false, text);
+    fbRtEmpty(ed);
+    return;
+  }
+  // A single paragraph goes in as inline content, so pasting a phrase into the
+  // middle of a sentence does not split the sentence in two. The sanitizer trims
+  // a paragraph's edges, so the spaces a copied phrase began or ended with are
+  // put back from the plain-text flavour.
+  const body = fbRoot(clean);
+  let x = clean;
+  if (body.children.length === 1 && body.firstElementChild.localName === 'p') {
+    x = (/^[ \t ]/.test(text) ? ' ' : '') + body.firstElementChild.innerHTML +
+        (/[ \t ]$/.test(text) ? ' ' : '');
+  }
+  document.execCommand('insertHTML', false, x);
+  fbRtEmpty(ed);
+}
+
+function fbRtLinkAt(range, ed) {
+  if (!range) return null;
+  const n = range.commonAncestorContainer;
+  const el = n.nodeType === 1 ? n : n.parentElement;
+  const a = el && el.closest('a');
+  return a && ed.contains(a) ? a : null;
+}
+function fbRtLinkOpen(box) {
+  fbRtFocus(box);
+  const sel = window.getSelection();
+  box._rt.linkRange = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+  const a = fbRtLinkAt(box._rt.linkRange, box._rt.ed);
+  const url = box.querySelector('.rt-url');
+  url.value = a ? a.getAttribute('href') : '';
+  url.classList.remove('bad');
+  box.querySelector('[data-link="remove"]').hidden = !a;
+  box.querySelector('.rt-link').hidden = false;
+  url.focus();
+  url.select();
+}
+// Back to the text, with the selection the link field was opened on.
+function fbRtLinkReturn(box) {
+  box.querySelector('.rt-link').hidden = true;
+  if (box._rt.linkRange) box._rt.range = box._rt.linkRange;
+  fbRtFocus(box);
+}
+function fbRtLinkClose(box) { fbRtLinkReturn(box); }
+// With the caret inside a link and nothing selected, act on the whole link.
+function fbRtSelectLink(box) {
+  const sel = window.getSelection();
+  const a = fbRtLinkAt(sel.rangeCount ? sel.getRangeAt(0) : null, box._rt.ed);
+  if (a && sel.isCollapsed) {
+    const r = document.createRange();
+    r.selectNodeContents(a);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+  return a;
+}
+// A bare address is completed — example.com becomes https://example.com and an
+// email address becomes mailto: — and must then pass fbSafeHref like any other.
+function fbRtHref(v) {
+  const s = String(v || '').trim();
+  if (!s) return null;
+  if (/^[^\s@/:]+@[^\s@/]+\.[^\s@/]+$/.test(s)) return fbSafeHref('mailto:' + s);
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return fbSafeHref(s);
+  return fbSafeHref('https://' + s.replace(/^\/+/, ''));
+}
+function fbRtLinkApply(box) {
+  const url = box.querySelector('.rt-url');
+  const href = fbRtHref(url.value);
+  if (!href) { url.classList.add('bad'); url.focus(); return; }
+  fbRtLinkReturn(box);
+  const a = fbRtSelectLink(box);
+  if (window.getSelection().isCollapsed && !a) {
+    // Nothing selected: the address itself becomes the link's words.
+    document.execCommand('insertHTML', false,
+      `<a href="${fbEscAttr(href)}">${fbEscHtml(href.replace(/^mailto:/, ''))}</a>`);
+  } else {
+    document.execCommand('createLink', false, href);
+  }
+  fbRtEmpty(box._rt.ed);
+  fbRtSync();
+}
+function fbRtLinkRemove(box) {
+  fbRtLinkReturn(box);
+  if (fbRtSelectLink(box) || !window.getSelection().isCollapsed) document.execCommand('unlink', false, null);
+  fbRtSync();
 }
 
 // ---- shared form ----------------------------------------------------------
@@ -3747,11 +4615,13 @@ function fbFormHtml(row) {
                 `<span>${escText(d.goal)}</span></span>` : '') +
       `</span></div>`;
   }).join('');
+  // Each quadrant is a rich-text box. An answer from before rich text is
+  // converted on the way in (fbRich), so editing it saves it in the new form.
   const fields = SWOT_FIELDS.map(f => `
     <div class="swot-f">
-      <label class="${f.cls}">${escText(f.label)}</label>
+      <label class="${f.cls}" id="fb-lbl-${f.key}" data-for-rt="${f.key}">${escText(f.label)}</label>
       <div class="swot-hint">${escText(f.hint)}</div>
-      <textarea data-fb="${f.key}" placeholder="Optional">${escText((row && row[f.key]) || '')}</textarea>
+      ${fbEditorHtml(f, row ? fbRich(row[f.key]) : '')}
     </div>`).join('');
   return `
     <div class="anon-note">
@@ -3854,7 +4724,7 @@ async function openFeedbackHome() {
     b.onclick = () => { _fbHomeQuarter = b.getAttribute('data-hq'); openFeedbackHome(); };
   });
   const all = root.querySelector('[data-copy-all]');
-  if (all) all.onclick = () => fbCopy(shown.map(fbCopySubmission).join('\n\n'), all);
+  if (all) all.onclick = () => fbCopy(fbJoinCopies(shown.map(fbCopySubmission)), all);
   root.querySelectorAll('[data-open]').forEach(b => {
     b.onclick = () => openFeedbackForm(rows.find(r => r.id === b.getAttribute('data-open')));
   });
@@ -3873,14 +4743,24 @@ function openFeedbackForm(row) {
     ${editing ? `<div class="fb-sub">Submitted ${escText(fbShortDate(row.created_at))}${
       row.updated_at > row.created_at ? ' · edited ' + escText(fbShortDate(row.updated_at)) : ''}</div>` : ''}
     ${fbFormHtml(row)}
-    <div class="modal-actions">
+    <div class="modal-actions" data-row="main">
       ${editing ? '<button class="btn btn-danger btn-sm" data-act="delete">Delete</button>' : ''}
       <span style="flex:1"></span>
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">${editing ? 'Save changes' : 'Submit feedback'}</button>
+    </div>
+    <div class="modal-actions fb-confirm" data-row="confirm" hidden>
+      <span class="fb-confirm-msg"></span>
+      <button class="btn" data-act="keep">Keep editing</button>
+      <button class="btn btn-danger" data-act="yes"></button>
     </div>`, { persistent: true, wide: true });
 
   const root = document.getElementById('modal-content');
+  fbRtWire(root);
+  // The quadrant names act as labels for their boxes.
+  root.querySelectorAll('[data-for-rt]').forEach(l => {
+    l.onclick = () => fbRtFocus(root.querySelector(`[data-fb="${l.getAttribute('data-for-rt')}"]`).closest('[data-rt]'));
+  });
   // Chip group behaves as a single-select: exactly one pressed at a time.
   root.querySelectorAll('.cat-chips .cat-chip').forEach(chip => {
     chip.onclick = () => {
@@ -3900,20 +4780,34 @@ function openFeedbackForm(row) {
   const copy = root.querySelector('[data-copy-one]');
   if (copy) copy.onclick = () => fbCopy(fbCopySubmission(row), copy);
 
+  // Confirmations happen in place, in the action row. A separate confirm dialog
+  // replaces this one — and everything typed in it — so backing out of
+  // "Discard?" used to lose the very draft it was there to protect.
+  const mainRow = root.querySelector('[data-row="main"]');
+  const askRow = root.querySelector('[data-row="confirm"]');
+  const ask = (msg, yesText, onYes) => {
+    askRow.querySelector('.fb-confirm-msg').textContent = msg;
+    const yes = askRow.querySelector('[data-act="yes"]');
+    yes.textContent = yesText;
+    yes.disabled = false;
+    yes.onclick = onYes;
+    mainRow.hidden = true;
+    askRow.hidden = false;
+    yes.focus();
+  };
+  askRow.querySelector('[data-act="keep"]').onclick = () => { askRow.hidden = true; mainRow.hidden = false; };
+
   // Confirm only when something has actually been typed — a confirm on an
-  // untouched form trains people to dismiss it.
+  // untouched form trains people to dismiss it. Both sides are compared in their
+  // sanitized form, so an untouched answer always reads as unchanged.
   root.querySelector('[data-act="cancel"]').onclick = () => {
     const v = fbValuesFrom('#modal-content');
     const dirty = editing
-      ? SWOT_FIELDS.some(f => (v[f.key] || '') !== ((row[f.key] || '').trim())) || v.category !== row.category
+      ? SWOT_FIELDS.some(f => v[f.key] !== fbRich(row[f.key])) || v.category !== row.category
       : fbHasContent(v);
     if (!dirty) { openFeedbackHome(); return; }
-    confirmModal({
-      title: editing ? 'Discard changes?' : 'Discard this feedback?',
-      body: 'What you have written will not be saved.',
-      confirmText: 'Discard', danger: true,
-      onConfirm: () => openFeedbackHome()
-    });
+    ask(editing ? 'Discard your changes? They will not be saved.' : 'Discard this feedback? It will not be saved.',
+        'Discard', () => openFeedbackHome());
   };
 
   root.querySelector('[data-act="save"]').onclick = async () => {
@@ -3942,21 +4836,21 @@ function openFeedbackForm(row) {
   };
 
   const del = root.querySelector('[data-act="delete"]');
-  if (del) del.onclick = () => confirmModal({
-    title: 'Delete this feedback?',
-    body: 'This removes it permanently. Because submissions are not attributed, it cannot be ' +
-          'restored — not by you and not by an admin.',
-    confirmText: 'Delete', danger: true,
-    onConfirm: async () => {
+  if (del) del.onclick = () => ask(
+    'Delete this feedback permanently? Submissions are not attributed, so it cannot be ' +
+    'restored — not by you and not by an admin.',
+    'Delete',
+    async () => {
+      const yes = askRow.querySelector('[data-act="yes"]');
+      yes.disabled = true;
       try {
         const ok = await fbDelete(row.id);
         if (!ok) throw new Error('That submission could not be deleted');
         toast('Feedback deleted', 'success');
         await openFeedbackHome();
         renderTiles();
-      } catch (err) { toast(err.message, 'error'); }
-    }
-  });
+      } catch (err) { toast(err.message, 'error'); yes.disabled = false; }
+    });
 }
 
 // ---- admin review ---------------------------------------------------------
@@ -4130,8 +5024,10 @@ async function openFeedbackResults(filters) {
       <h4>No feedback in this range</h4>
       <p>Nothing matches ${escText(scope)}. Try widening the dates or choosing all categories.</p></div>`;
   } else if (_fbView === 'quadrant') {
+    // Answers are shown as formatted (fbViewHtml re-sanitizes every one), so a
+    // reviewer sees the same bullets and emphasis the copy will carry.
     inner = SWOT_FIELDS.map(fld => {
-      const items = rows.filter(r => (r[fld.key] || '').trim());
+      const items = rows.filter(r => fbHasText(r[fld.key]));
       if (!items.length) return '';
       return `<div class="quad">
         <h5 class="${fld.cls}">${escText(fld.label)} <span class="n">${items.length}</span>
@@ -4139,7 +5035,7 @@ async function openFeedbackResults(filters) {
         </h5>
         ${items.map(r => `<div class="qitem">
           <div class="meta">${escText(fbShortDate(r.created_at))}<br>${escText(r.category)}</div>
-          <div class="txt">${escText((r[fld.key] || '').trim())}</div></div>`).join('')}
+          <div class="txt rt-view">${fbViewHtml(r[fld.key])}</div></div>`).join('')}
       </div>`;
     }).join('');
   } else {
@@ -4150,9 +5046,9 @@ async function openFeedbackResults(filters) {
         <span class="adm-tok">${escText(r.contributor)}${r.edited ? ' · edited' : ''}</span>
         <button class="btn-copy" data-copy-sub="${escAttr(r.id)}"><i class="ti ti-copy"></i>Copy</button>
       </div>
-      ${SWOT_FIELDS.map(fld => (r[fld.key] || '').trim()
+      ${SWOT_FIELDS.map(fld => fbHasText(r[fld.key])
         ? `<div class="adm-q"><div class="k ${fld.cls}">${escText(fld.label)}</div>
-           <div class="v">${escText((r[fld.key] || '').trim())}</div></div>` : '').join('')}
+           <div class="v rt-view">${fbViewHtml(r[fld.key])}</div></div>` : '').join('')}
     </div>`).join('');
   }
 
@@ -4215,7 +5111,7 @@ async function openFeedbackResults(filters) {
   });
   const all = root.querySelector('[data-copy-all]');
   all.onclick = () => fbCopy(
-    _fbView === 'quadrant' ? fbCopyAllQuadrants(rows) : rows.map(fbCopySubmission).join('\n\n'), all);
+    _fbView === 'quadrant' ? fbCopyAllQuadrants(rows) : fbJoinCopies(rows.map(fbCopySubmission)), all);
   root.querySelectorAll('[data-copy-quad]').forEach(b => {
     const fld = SWOT_FIELDS.find(x => x.key === b.getAttribute('data-copy-quad'));
     b.onclick = () => fbCopy(fbCopyQuadrant(fld, rows), b);
@@ -4226,12 +5122,15 @@ async function openFeedbackResults(filters) {
   root.querySelector('[data-act="csv"]').onclick = () => fbExportCsv(rows, scope);
 }
 
+// Spreadsheets get plain text, not markup: each answer keeps its paragraphs and
+// "•" / "1." list lines inside its cell.
 function fbExportCsv(rows, scope) {
   const esc = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
   const head = ['Date', 'Category', 'Contributor', 'Edited', 'Strengths', 'Weaknesses', 'Opportunities', 'Threats'];
   const body = rows.map(r => [
     new Date(r.created_at).toISOString().slice(0, 10), r.category, r.contributor,
-    r.edited ? 'yes' : 'no', r.strengths, r.weaknesses, r.opportunities, r.threats
+    r.edited ? 'yes' : 'no', fbPlainText(r.strengths), fbPlainText(r.weaknesses),
+    fbPlainText(r.opportunities), fbPlainText(r.threats)
   ].map(esc).join(','));
   const csv = [head.map(esc).join(',')].concat(body).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
