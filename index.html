@@ -3604,11 +3604,19 @@ const FEEDBACK_CATEGORY_SCOPE = {
     goal: 'Celadyne is a safe place to work that lets the team solve problems quickly and thoroughly.'
   }
 };
+// `questions` are the guiding questions from the team's Confluence SWOT
+// template. Every copy repeats them under each quadrant's name, so pasted
+// feedback lands in the same shape as the discussion page it goes into.
 const SWOT_FIELDS = [
-  { key: 'strengths',     label: 'Strengths',     cls: 'sw-s', hint: 'What is working well? What should we keep doing?' },
-  { key: 'weaknesses',    label: 'Weaknesses',    cls: 'sw-w', hint: 'What is not working? Where are we struggling?' },
-  { key: 'opportunities', label: 'Opportunities', cls: 'sw-o', hint: 'What could we do better? What is untapped?' },
-  { key: 'threats',       label: 'Threats',       cls: 'sw-t', hint: 'What risks or blockers worry you?' }
+  { key: 'strengths',     label: 'Strengths',     cls: 'sw-s', hint: 'What is working well? What should we keep doing?',
+    questions: ['What do we do well?', 'What would others be impressed by?'] },
+  { key: 'weaknesses',    label: 'Weaknesses',    cls: 'sw-w', hint: 'What is not working? Where are we struggling?',
+    questions: ['What needs improvement?', 'What do our competitors do better?', 'What resources do we lack?'] },
+  { key: 'opportunities', label: 'Opportunities', cls: 'sw-o', hint: 'What could we do better? What is untapped?',
+    questions: ['How can we better leverage our strengths?', 'How can we improve our weaknesses?',
+                'What new avenues should we explore?'] },
+  { key: 'threats',       label: 'Threats',       cls: 'sw-t', hint: 'What risks or blockers worry you?',
+    questions: ['What situations might expose new weaknesses?', 'How might our weaknesses harm us?'] }
 ];
 
 function fbEmail() { return (STATE.session && STATE.session.email) || ''; }
@@ -4129,10 +4137,19 @@ function fbOneLine(value) {
 
 // ---- clipboard ------------------------------------------------------------
 //
-// Every copy carries two flavours. text/html is what Confluence reads: a real
-// bulleted list with bold, italic and links intact. text/plain is the same
-// content for anything that cannot take HTML, in the format these buttons have
-// always produced ("Threats", then "• …" lines).
+// Copies follow the team's Confluence SWOT template, one section per quadrant:
+//
+//     Strengths                               <- underlined
+//         What do we do well?                 <- guiding questions, indented
+//         What would others be impressed by?
+//     • an answer                             <- the feedback, as bullets
+//     • another answer
+//                                             <- blank line, then the next section
+//
+// Every copy carries two flavours. text/html is what Confluence reads: real
+// bullets with bold, italic and links intact. text/plain is the same layout for
+// anything that cannot take HTML — the quadrant name, the questions indented
+// with spaces, then "• …" lines.
 //
 // Contributor labels are deliberately omitted: they earn their place on screen,
 // but pasted into a discussion page they become durable pseudonymous identifiers
@@ -4170,37 +4187,61 @@ function fbBulletHtml(b) {
 }
 function fbLabelHtml(s) { return `<p><strong>${fbEscHtml(s)}</strong></p>`; }
 
-// One quadrant: its label, then every answer's bullets. null when there are none.
-function fbQuadrantCopy(label, values) {
+// The indent is written exactly as Confluence's own editor writes an indented
+// paragraph to the clipboard (div.fabric-editor-indentation-mark, data-level),
+// which is what its paste recognises as a real indent rather than as spaces.
+// The inline margin is only for other readers of the HTML, such as Word or email.
+const FB_INDENT_OPEN = '<div class="fabric-editor-block-mark fabric-editor-indentation-mark" ' +
+                       'data-level="1" style="margin-left:30px">';
+// The empty line between sections. A non-breaking space, because an empty
+// paragraph can be dropped on paste and the sections would run together.
+const FB_GAP_HTML = '<p>&nbsp;</p>';
+
+// One quadrant as a template section: underlined name, indented questions, then
+// every answer's bullets. With no answers it is either skipped (null) or, when
+// keepEmpty, kept with a single empty bullet — the template's own placeholder,
+// left ready to fill in during the discussion.
+function fbSection(field, values, keepEmpty) {
   const bullets = [];
   values.forEach(v => bullets.push(...fbBullets(v)));
-  if (!bullets.length) return null;
-  const text = [label];
-  bullets.forEach(b => text.push(...fbItemLines(b.lead, b.rest, 0, '•')));
-  return {
-    html: fbLabelHtml(label) + '<ul>' + bullets.map(fbBulletHtml).join('') + '</ul>',
-    text: text.join('\n')
-  };
+  if (!bullets.length && !keepEmpty) return null;
+  const qs = field.questions || [];
+  const html = `<p><u>${fbEscHtml(field.label)}</u></p>` +
+    (qs.length ? `${FB_INDENT_OPEN}<p>${qs.map(fbEscHtml).join('<br>')}</p></div>` : '') +
+    '<ul>' + (bullets.length ? bullets.map(fbBulletHtml).join('') : '<li></li>') + '</ul>';
+  const text = [field.label].concat(qs.map(q => '    ' + q));
+  if (qs.length) text.push('');
+  if (bullets.length) bullets.forEach(b => text.push(...fbItemLines(b.lead, b.rest, 0, '•')));
+  else text.push('•');
+  return { html, text: text.join('\n') };
 }
+function fbJoinSections(parts) {
+  return { html: parts.map(p => p.html).join(FB_GAP_HTML), text: parts.map(p => p.text).join('\n\n') };
+}
+// One submission: a bold title line, then a section for each quadrant it
+// answered. Unanswered quadrants are left out — they are one person's blanks,
+// not gaps in the discussion.
 function fbCopySubmission(row) {
   const title = `Feedback — ${row.category} — ${fbShortDate(row.created_at)}`;
-  const parts = SWOT_FIELDS.map(f => fbQuadrantCopy(f.label, [row[f.key]])).filter(Boolean);
-  const lines = [title, ''];
-  parts.forEach(p => lines.push(p.text, ''));
-  return { html: fbLabelHtml(title) + parts.map(p => p.html).join(''), text: lines.join('\n').trim() };
+  const body = fbJoinSections(SWOT_FIELDS.map(f => fbSection(f, [row[f.key]], false)).filter(Boolean));
+  return {
+    html: fbLabelHtml(title) + body.html,
+    text: body.text ? title + '\n\n' + body.text : title
+  };
 }
-// Just the quadrant name and the bullets. The date range and category are
-// already whatever the reader filtered to, and per-item attribution turns a
-// discussion page into a wall of metadata — so neither is carried across.
+// One quadrant's section. The date range and category are already whatever the
+// reader filtered to, and per-item attribution turns a discussion page into a
+// wall of metadata — so neither is carried across.
 function fbCopyQuadrant(field, rows) {
-  return fbQuadrantCopy(field.label, rows.map(r => r[field.key])) || { html: '', text: field.label };
+  return fbSection(field, rows.map(r => r[field.key]), true);
 }
+// All four sections, always — a quadrant nobody answered still gets its name,
+// questions and an empty bullet, so the paste is the complete template.
 function fbCopyAllQuadrants(rows) {
-  const parts = SWOT_FIELDS.map(f => fbQuadrantCopy(f.label, rows.map(r => r[f.key]))).filter(Boolean);
-  return { html: parts.map(p => p.html).join(''), text: parts.map(p => p.text).join('\n\n') };
+  return fbJoinSections(SWOT_FIELDS.map(f => fbSection(f, rows.map(r => r[f.key]), true)));
 }
 function fbJoinCopies(list) {
-  return { html: list.map(c => c.html).join(''), text: list.map(c => c.text).join('\n\n') };
+  return { html: list.map(c => c.html).join(FB_GAP_HTML), text: list.map(c => c.text).join('\n\n') };
 }
 function fbScopeLabel(from, to, category) {
   const cat = category || 'All categories';
