@@ -573,6 +573,8 @@
   .o3-seg.passed-late { background: var(--late); }
   .o3-seg.overdue { background: var(--bad); }
   .o3-seg.in-progress { background: var(--prog); }
+  /* at risk: amber, striped so it reads apart from a column cleared late */
+  .o3-seg.at-risk, .o3-glance .g-risk { background: repeating-linear-gradient(135deg, var(--late) 0 3px, #E3C384 3px 6px); }
   .o3-glance { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--pend); gap: 1px; }
   .o3-glance span { display: block; height: 100%; }
   .o3-glance .g-passed { background: var(--ok); } .o3-glance .g-late { background: var(--late); }
@@ -2301,11 +2303,11 @@ function renderQuarterBanner() {
 // above it, and not-yet-reached is the grey remainder on top. Order matters: a
 // red segment buried under grey would be easy to miss.
 const BOARD_BAR_ORDER = [
-  ['passed', 'vs-passed'], ['late', 'vs-late'], ['over', 'vs-over'],
+  ['passed', 'vs-passed'], ['late', 'vs-late'], ['over', 'vs-over'], ['risk', 'vs-risk'],
   ['prog', 'vs-prog'], ['pend', 'vs-pend']
 ];
 
-const BOARD_BAR_LABEL = { passed: 'cleared', late: 'cleared late', over: 'overdue',
+const BOARD_BAR_LABEL = { passed: 'cleared', late: 'cleared late', over: 'overdue', risk: 'at risk',
                           prog: 'here now', pend: 'not reached' };
 
 // ---- board workstream visibility -------------------------------------------
@@ -5134,7 +5136,14 @@ function objectiveUrl(o, editable) {
 // startOfTodayMs() would compare ~1.78e12 against ~2400 and mark every gate on
 // record overdue — silently, and plausibly, which is the worst kind of wrong.
 const RD_EPOCH = Date.UTC(2020, 0, 1);
-function rdToday() { return Math.round((Date.now() - RD_EPOCH) / 86400000); }
+// Today is the CALENDAR date where the viewer is, computed exactly as the
+// execution and planning apps do (todayDay). Rounding a fractional day count
+// rolled to tomorrow at 12:00 UTC (6 AM Mountain), so every lateness check ran a
+// day ahead for most of the working day.
+function rdToday() {
+  const n = new Date();
+  return Math.round((Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) - RD_EPOCH) / 86400000);
+}
 // Mirrors execution_app's CATCHUP_SLIP_THRESHOLD exactly: "objective slip (days)
 // that trips the schedule alarm". Same value, deliberately — a Hub that glowed at
 // 7d while the execution app stayed calm would make one of the two a liar.
@@ -5171,8 +5180,8 @@ function boardsForObjective(objId) {
   const WORST = { green: 'passed', orange: 'passed-late', red: 'overdue', none: 'pending' };
   return boards.map(b => {
     const cols = b.columns || [];
-    const laneName = {};
-    (b.swimlanes || []).forEach(l => { laneName[l.id] = l.name || l.id; });
+    const laneName = {}, laneById = {};
+    (b.swimlanes || []).forEach(l => { laneName[l.id] = l.name || l.id; laneById[l.id] = l; });
     const lastIdx = cols.length - 1;
     // Tiles first: the column summaries are now derived FROM the per-tile states,
     // so the terminal-column and in-progress corrections apply in one place
@@ -5180,22 +5189,27 @@ function boardsForObjective(objId) {
     const tiles = (b.tiles || []).map(t => {
       const curIdx = cols.findIndex(c => c.id === t.col);
       const inFinalColumn = lastIdx >= 0 && curIdx === lastIdx;
-      // A backlog tile is not in ANY board column. It has not entered the flow, so
-      // it is neither in progress nor behind on a column it has not reached — the
-      // engine would otherwise read a dated backlog item as overdue on every
-      // column, painting a healthy board solid red.
-      const backlog = curIdx < 0;
+      // A backlog tile has not entered the flow, so it is neither in progress nor
+      // behind on a column it has not reached. Backlog is the execution app's rule
+      // (tileInBacklog): no column, OR no swimlane — the day limit lives on the
+      // lane, so a lane-less tile in a column is timed against nothing and the app
+      // parks it rather than drawing it on the board.
+      const backlog = curIdx < 0 || t.lane == null || t.lane === '';
+      // The column a tile sits in is coloured the way the execution app's board
+      // colours the tile (RD.tileHealth: days in this column against the lane's
+      // limit, and the lane's deadline): breached reads overdue, then at risk,
+      // otherwise in progress. Columns it has cleared keep their on-time / late
+      // record; columns it has not reached are pending, since no clock runs there.
+      const health = (!backlog && !inFinalColumn) ? RD.tileHealth(t, laneById[t.lane], todayIso) : null;
       const states = cols.map((c, k) => {
         if (backlog) return 'pending';
-        const st = RD.gateTileState(b, t, k, todayIso);
-        // Terminal column: everything behind it is cleared. Late clears stay LATE
-        // though — flattening them would erase that the work slipped.
-        if (inFinalColumn) return st === 'passed-late' ? 'passed-late' : 'passed';
-        if (st === 'passed-ontime') return 'passed';
-        // The column a tile is SITTING IN is work in progress, not work not
-        // started. Overdue wins — being late matters more than being current.
-        if (k === curIdx && st === 'pending') return 'in-progress';
-        return st;
+        if (inFinalColumn || k < curIdx) {
+          // Cleared (everything behind the terminal column is). Late clears stay
+          // LATE — flattening them would erase that the work slipped.
+          return RD.gateTileState(b, t, k, todayIso) === 'passed-late' ? 'passed-late' : 'passed';
+        }
+        if (k > curIdx) return 'pending';
+        return health.status === 'breached' ? 'overdue' : health.status === 'at-risk' ? 'at-risk' : 'in-progress';
       });
       return {
         // Needed to address a workstream in boardPrefs. Falls back to the name,
@@ -5226,12 +5240,13 @@ function boardsForObjective(objId) {
     // how many ideas someone parked, which is the opposite of useful.
     const activeTiles = tiles.filter(t => !t.backlog);
     const columns = cols.map((c, k) => {
-      const counts = { passed: 0, late: 0, over: 0, prog: 0, pend: 0 };
+      const counts = { passed: 0, late: 0, over: 0, risk: 0, prog: 0, pend: 0 };
       activeTiles.forEach(t => {
         const st = t.states[k];
         if (st === 'passed') counts.passed++;
         else if (st === 'passed-late') counts.late++;
         else if (st === 'overdue') counts.over++;
+        else if (st === 'at-risk') counts.risk++;
         else if (st === 'in-progress') counts.prog++;
         else counts.pend++;
       });
@@ -7089,10 +7104,7 @@ function o3Day(d, weekday) {
 // Today as the person sees it (their calendar date), as an RD day count. Used
 // for wording only — "3 days ago", "Due today". Gate states and slip stay with
 // the engine's own clock (rdToday), exactly as the apps compute them.
-function o3LocalToday() {
-  const n = new Date();
-  return Math.round((Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) - RD_EPOCH) / 86400000);
-}
+function o3LocalToday() { return rdToday(); }   // rdToday is the calendar date now
 function o3Quarter(q) { return (q && QUARTER_RE.test(q)) ? q.slice(0, 4) + ' Q' + q.slice(5) : String(q || ''); }
 function o3Num(n) {
   return ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'][n] || String(n);
@@ -7309,7 +7321,7 @@ function o3MiniTrackHtml(view) {
 }
 
 // ---- kanban boards ----------------------------------------------------------
-const O3_SEG_WORD = { 'passed': 'cleared', 'passed-late': 'cleared late', 'overdue': 'overdue',
+const O3_SEG_WORD = { 'passed': 'cleared', 'passed-late': 'cleared late', 'overdue': 'overdue', 'at-risk': 'at risk',
                       'in-progress': 'here now', 'pending': 'not reached' };
 function o3BoardHtml(b) {
   const hidden = boardHiddenSet(b.id);
@@ -7334,7 +7346,7 @@ function o3BoardHtml(b) {
     const seg = (k, cls) => n[k] ? `<span class="${cls}" style="flex:${n[k]}"></span>` : '';
     const parts = BOARD_BAR_ORDER.filter(([k]) => n[k]).map(([k]) => `${n[k]} ${BOARD_BAR_LABEL[k]}`).join(', ');
     return `<span class="o3-glance" title="${escAttr(c.name + (parts ? ' — ' + parts : ''))}">` +
-      seg('passed', 'g-passed') + seg('late', 'g-late') + seg('over', 'g-over') + seg('prog', 'g-prog') + seg('pend', 'g-pend') + `</span>`;
+      seg('passed', 'g-passed') + seg('late', 'g-late') + seg('over', 'g-over') + seg('risk', 'g-risk') + seg('prog', 'g-prog') + seg('pend', 'g-pend') + `</span>`;
   }).join('') : '';
   const head = `<span></span>` + b.columns.map(c => `<span class="o3-bcol" title="${escAttr(c.name)}">${escText(c.name)}</span>`).join('');
   const isOpen = _boardDoneOpen.has(b.id), backOpen = _boardDoneOpen.has(b.id + '::backlog');
