@@ -1005,6 +1005,10 @@
   .daterow .seg { max-width: 100%; }
   .fld > .seg { align-self: flex-start; height: 40px; }
   [data-pane][hidden] { display: none; }
+  /* partial day: the end of the day that is not picked (a morning's start, an afternoon's end) */
+  .to-fixed { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border-radius: 10px; background: var(--pill); color: var(--ink); font-size: 14px; }
+  .to-fixed-sub { color: var(--ink3); }
+  .daterow.to-times { align-items: flex-end; }   /* fields line up even when one label wraps */
 
   /* ---- feedback (SWOT) ------------------------------------------------ */
   .fb-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
@@ -1184,6 +1188,10 @@
     .modal.modal-scrollable > .modal-scroll { margin: 0 -18px; padding: 2px 18px 4px; }
     .swot-grid { grid-template-columns: 1fr; }
     .daterow { flex-direction: column; gap: 0; }
+    /* start and end times are short, so they stay side by side; the three parts share the width */
+    .daterow.to-times { flex-direction: row; gap: 12px; }
+    .fld > .seg.to-partseg { align-self: stretch; }
+    .to-partseg button { flex: 1 1 auto; padding: 0 6px; }
     .addtile-filters { grid-template-columns: 1fr; }
     .drawer-section { padding: 18px 16px; }
     .qitem { flex-direction: column; gap: 2px; }
@@ -2523,16 +2531,39 @@ function centralISO(yyyymmdd, hour, minute) {
   const mm = String(minute || 0).padStart(2, '0');
   return `${yyyymmdd}T${hh}:${mm}:00${tz}`;
 }
+// YYYY-MM-DD on the Central calendar, assembled from parts. Formatting the whole
+// date in en-CA with a numeric day stopped zero-padding in current browsers
+// ("2026-11-5"), which a date field rejects: on the 1st to the 9th of a month the
+// form's dates came up blank and an edit could not be saved.
 function dateOnlyCT(iso) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: TIME_OFF_TZ, year: 'numeric', month: '2-digit', day: 'numeric'
-  }).format(new Date(iso));
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_OFF_TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date(iso));
+  const part = t => (parts.find(p => p.type === t) || {}).value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
 }
-function hourInCT(iso) {
-  const h = Number(new Intl.DateTimeFormat('en-US', {
-    timeZone: TIME_OFF_TZ, hour: 'numeric', hour12: false
-  }).format(new Date(iso)));
-  return h === 24 ? 0 : h;
+// Partial days carry exact times, held as minutes after midnight on the Central
+// wall clock. The safety app and the notify-pto function use the same rules and
+// the same label ("Thu, Oct 22 · 9:00–11:30 AM CT"), so all three agree.
+const TO_DAY_START = 9 * 60;    // 9:00 AM Central: full days and mornings start here
+const TO_DAY_END = 18 * 60;     // 6:00 PM Central: full days and afternoons end here
+const TO_STEP = 15;             // minutes between choices in the time menus
+function toMinutesCT(iso) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_OFF_TZ, hour: 'numeric', minute: 'numeric', hour12: false
+  }).formatToParts(new Date(iso));
+  const num = t => Number((parts.find(p => p.type === t) || {}).value || 0);
+  return (num('hour') % 24) * 60 + num('minute');   // some engines say 24 at midnight
+}
+function toClock(min) {
+  const h = Math.floor(min / 60), m = min % 60;
+  return `${(h + 11) % 12 + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+// "9:00–11:30 AM" when both ends share AM or PM, else "10:30 AM–1:00 PM".
+function toClockRange(a, b) {
+  return (a < 720) === (b < 720)
+    ? `${toClock(a).slice(0, -3)}–${toClock(b)}`
+    : `${toClock(a)}–${toClock(b)}`;
 }
 function todayCT() { return dateOnlyCT(new Date().toISOString()); }
 
@@ -2551,9 +2582,9 @@ function toFormatRange(row) {
   const a = dateOnlyCT(row.starts_at), b = dateOnlyCT(row.ends_at);
   if (a === b) {
     if (row.all_day) return toFmtDate(a);
-    return `${toFmtDate(a)} \u00b7 ${hourInCT(row.starts_at) < 12 ? 'AM' : 'PM'} half-day`;
+    return `${toFmtDate(a)} · ${toClockRange(toMinutesCT(row.starts_at), toMinutesCT(row.ends_at))} CT`;
   }
-  return `${toFmtDate(a)} \u2192 ${toFmtDate(b)}`;
+  return `${toFmtDate(a)} → ${toFmtDate(b)}`;
 }
 function toTypeEmoji(t) { return t === 'sick' ? '\u{1F912}' : '\u{1F4C5}'; }
 function toTypeLabel(t) { return t === 'sick' ? 'Sick' : 'PTO'; }
@@ -2587,9 +2618,23 @@ async function toMine() {
   return data || [];
 }
 
-// Same field mapping the PWA uses: full days are 9am–6pm Central, half days are
-// 9–12 or 12–6. Keeping these constants identical is what makes rows from the
-// two clients indistinguishable.
+// Same field mapping the safety app uses. Full days run 9:00 AM to 6:00 PM
+// Central. A partial day is one date with exact times: a morning runs from 9:00
+// AM to the chosen end, an afternoon from the chosen start to 6:00 PM, and an
+// intermittent block between the two chosen times. Keeping these rules
+// identical is what makes rows from the two clients indistinguishable.
+function toPartSpan(part, start, end) {
+  if (part === 'am') return [TO_DAY_START, end];
+  if (part === 'pm') return [start, TO_DAY_END];
+  return [start, end];
+}
+// Which part a saved partial day is. Old half days (9–12 and 12–6) read as a
+// morning ending at noon and an afternoon starting at noon.
+function toPartOf(start, end) {
+  if (start === TO_DAY_START && end < TO_DAY_END) return 'am';
+  if (end === TO_DAY_END && start > TO_DAY_START) return 'pm';
+  return 'mid';
+}
 function toPayload(v, personId) {
   let starts_at, ends_at, all_day;
   if (v.mode === 'full') {
@@ -2597,8 +2642,9 @@ function toPayload(v, personId) {
     ends_at   = centralISO(v.endDate, 18, 0);
     all_day   = true;
   } else {
-    starts_at = centralISO(v.halfDate, v.halfPeriod === 'am' ? 9 : 12, 0);
-    ends_at   = centralISO(v.halfDate, v.halfPeriod === 'am' ? 12 : 18, 0);
+    const [s, e] = toPartSpan(v.part, v.start, v.end);
+    starts_at = centralISO(v.partDate, Math.floor(s / 60), s % 60);
+    ends_at   = centralISO(v.partDate, Math.floor(e / 60), e % 60);
     all_day   = false;
   }
   return { person_id: personId, type: v.type, starts_at, ends_at, all_day,
@@ -2710,11 +2756,54 @@ function openTimeOffForm(existing) {
   const today = todayCT();
   const isEdit = !!existing;
   const type = isEdit ? existing.type : 'pto';
-  const mode = isEdit ? (existing.all_day ? 'full' : 'half') : 'full';
+  const partial = isEdit && !existing.all_day;
+  const mode = partial ? 'partial' : 'full';
   const sDate = (isEdit && existing.all_day) ? dateOnlyCT(existing.starts_at) : today;
   const eDate = (isEdit && existing.all_day) ? dateOnlyCT(existing.ends_at) : today;
-  const hDate = (isEdit && !existing.all_day) ? dateOnlyCT(existing.starts_at) : today;
-  const hPer  = (isEdit && !existing.all_day && hourInCT(existing.starts_at) >= 12) ? 'pm' : 'am';
+  const pDate = partial ? dateOnlyCT(existing.starts_at) : today;
+  // Partial-day times in minutes after midnight Central. A saved entry keeps its
+  // exact times: its own part keeps them on offer even off the 15-minute grid,
+  // so opening and saving never moves it. A new one starts at noon, where the
+  // old half days split.
+  const orig = partial ? { start: toMinutesCT(existing.starts_at), end: toMinutesCT(existing.ends_at) } : null;
+  if (orig) orig.part = toPartOf(orig.start, orig.end);
+  const times = orig ? { start: orig.start, end: orig.end } : { start: 12 * 60, end: 12 * 60 };
+  let part = orig ? orig.part : 'am';
+
+  const grid = (lo, hi) => { const out = []; for (let m = lo; m <= hi; m += TO_STEP) out.push(m); return out; };
+  // What each time menu offers. A morning ends, and an afternoon starts, strictly
+  // inside the workday; an intermittent block may run from 9:00 to 6:00 and
+  // always ends after it starts.
+  const choices = slot => {
+    let list = slot === 'start'
+      ? grid(part === 'pm' ? TO_DAY_START + TO_STEP : TO_DAY_START, TO_DAY_END - TO_STEP)
+      : grid(TO_DAY_START + TO_STEP, part === 'am' ? TO_DAY_END - TO_STEP : TO_DAY_END);
+    if (orig && orig.part === part && !list.includes(orig[slot])) list = list.concat(orig[slot]).sort((a, b) => a - b);
+    if (slot === 'end' && part === 'mid') list = list.filter(m => m > times.start);
+    return list;
+  };
+  // Keep each picked time on offer for the current part. One that is not moves
+  // to noon, or for an intermittent end, to an hour after the start.
+  const nearest = (list, want) => { const hit = list.find(m => m >= want); return hit != null ? hit : list[list.length - 1]; };
+  const settle = () => {
+    if (part !== 'am') { const l = choices('start'); if (!l.includes(times.start)) times.start = nearest(l, 12 * 60); }
+    if (part !== 'pm') { const l = choices('end'); if (!l.includes(times.end)) times.end = nearest(l, part === 'mid' ? times.start + 60 : 12 * 60); }
+  };
+  // A morning asks only when it ends and an afternoon only when it starts; the
+  // other end shows as text, so the two slots never move when the part changes.
+  const slotHtml = slot => {
+    const id = 'to-' + slot;
+    const label = `<label for="${id}">${slot === 'start' ? 'Start time' : 'End time'} <span class="opt">(Central)</span></label>`;
+    if (slot === 'start' && part === 'am') {
+      return label + `<output id="${id}" class="to-fixed"><span>${toClock(TO_DAY_START)}</span><span class="to-fixed-sub">Start of day</span></output>`;
+    }
+    if (slot === 'end' && part === 'pm') {
+      return label + `<output id="${id}" class="to-fixed"><span>${toClock(TO_DAY_END)}</span><span class="to-fixed-sub">End of day</span></output>`;
+    }
+    return label + `<select id="${id}" data-time="${slot}">` +
+      choices(slot).map(m => `<option value="${m}"${m === times[slot] ? ' selected' : ''}>${toClock(m)}</option>`).join('') +
+      `</select>`;
+  };
 
   openModal(`
     <h3>${isEdit ? 'Edit time off' : 'Schedule time off'}</h3>
@@ -2727,7 +2816,7 @@ function openTimeOffForm(existing) {
       <div class="seg-field"><span>Length</span>
         <div class="seg" data-seg="mode">
           <button data-v="full"${mode === 'full' ? ' class="on"' : ''}>Full day(s)</button>
-          <button data-v="half"${mode === 'half' ? ' class="on"' : ''}>Half day</button>
+          <button data-v="partial"${mode === 'partial' ? ' class="on"' : ''}>Partial day</button>
         </div></div>
     </div>
     <div data-pane="full" ${mode === 'full' ? '' : 'hidden'}>
@@ -2736,25 +2825,42 @@ function openTimeOffForm(existing) {
         <div class="fld"><label>To</label><input type="date" data-to="endDate" value="${escAttr(eDate)}"></div>
       </div>
     </div>
-    <div data-pane="half" ${mode === 'half' ? '' : 'hidden'}>
+    <div data-pane="partial" ${mode === 'partial' ? '' : 'hidden'}>
       <div class="daterow">
-        <div class="fld"><label>Date</label><input type="date" data-to="halfDate" value="${escAttr(hDate)}"></div>
-        <div class="fld"><label>Which half</label>
-          <div class="seg" data-seg="halfPeriod">
-            <button data-v="am"${hPer === 'am' ? ' class="on"' : ''} title="9:00 to 12:00 Central">Morning</button>
-            <button data-v="pm"${hPer === 'pm' ? ' class="on"' : ''} title="12:00 to 18:00 Central">Afternoon</button>
+        <div class="fld"><label>Date</label><input type="date" data-to="partDate" value="${escAttr(pDate)}"></div>
+        <div class="fld"><label>Which part</label>
+          <div class="seg to-partseg" data-seg="part">
+            <button data-v="am"${part === 'am' ? ' class="on"' : ''}>Morning</button>
+            <button data-v="pm"${part === 'pm' ? ' class="on"' : ''}>Afternoon</button>
+            <button data-v="mid"${part === 'mid' ? ' class="on"' : ''}>Intermittent</button>
           </div></div>
+      </div>
+      <div class="daterow to-times">
+        <div class="fld" data-slot="start"></div>
+        <div class="fld" data-slot="end"></div>
       </div>
     </div>
     <div class="fld"><label>Note <span class="opt">(optional)</span></label>
       <input type="text" data-to="note" placeholder="Visible to the team" value="${escAttr((existing && existing.note) || '')}"></div>
-    <div class="to-hint">Posts to Slack and adds an Outlook calendar event automatically. Times are Central: full days 9:00 to 18:00, mornings 9:00 to 12:00, afternoons 12:00 to 18:00.</div>
+    <div class="to-hint">Posts to Slack and adds an Outlook calendar event automatically. Times are Central; the workday runs 9:00 AM to 6:00 PM.</div>
     <div class="modal-actions">
       <button class="btn" data-act="cancel">Cancel</button>
       <button class="btn btn-primary" data-act="save">${isEdit ? 'Save changes' : 'Schedule'}</button>
     </div>`, { persistent: true, wide: true });
 
   const root = document.getElementById('modal-content');
+  const drawSlot = slot => {
+    const box = root.querySelector(`[data-slot="${slot}"]`);
+    box.innerHTML = slotHtml(slot);
+    const sel = box.querySelector('select');
+    if (sel) sel.onchange = () => {
+      times[slot] = Number(sel.value);
+      // An intermittent end has to follow its start.
+      if (slot === 'start' && part === 'mid') { settle(); drawSlot('end'); }
+    };
+  };
+  const drawTimes = () => { settle(); drawSlot('start'); drawSlot('end'); };
+  drawTimes();
   const seg = {};
   root.querySelectorAll('[data-seg]').forEach(g => {
     const name = g.getAttribute('data-seg');
@@ -2767,14 +2873,22 @@ function openTimeOffForm(existing) {
         seg[name] = b.getAttribute('data-v');
         if (name === 'mode') {
           root.querySelector('[data-pane="full"]').hidden = seg.mode !== 'full';
-          root.querySelector('[data-pane="half"]').hidden = seg.mode !== 'half';
+          root.querySelector('[data-pane="partial"]').hidden = seg.mode !== 'partial';
+        }
+        if (name === 'part' && seg.part !== prev) {
+          // Intermittent picks up the times that were on show: a morning's 9:00
+          // start, an afternoon's 6:00 end.
+          if (seg.part === 'mid' && prev === 'am') times.start = TO_DAY_START;
+          if (seg.part === 'mid' && prev === 'pm') times.end = TO_DAY_END;
+          part = seg.part;
+          drawTimes();
         }
         // A sick day is essentially always today. Switching to Sick snaps the
         // dates back rather than leaving behind whatever future range was there
         // for PTO. Only fires on an actual change TO sick.
         if (name === 'type' && seg.type === 'sick' && prev !== 'sick') {
           const t = todayCT();
-          ['startDate', 'endDate', 'halfDate'].forEach(k => {
+          ['startDate', 'endDate', 'partDate'].forEach(k => {
             const el = root.querySelector(`[data-to="${k}"]`);
             if (el) el.value = t;
           });
@@ -2787,16 +2901,20 @@ function openTimeOffForm(existing) {
   root.querySelector('[data-act="cancel"]').onclick = () => openTimeOffHome();
   root.querySelector('[data-act="save"]').onclick = async () => {
     const v = {
-      type: seg.type, mode: seg.mode, halfPeriod: seg.halfPeriod || 'am',
+      type: seg.type, mode: seg.mode, part, start: times.start, end: times.end,
       startDate: val('startDate'), endDate: val('endDate'),
-      halfDate: val('halfDate'), note: val('note')
+      partDate: val('partDate'), note: val('note')
     };
-    // Same validation the PWA applies, so one client cannot create a row the
-    // other would consider invalid.
+    // Same validation the safety app applies, so one client cannot create a row
+    // the other would consider invalid.
     if (v.mode === 'full') {
       if (!v.startDate || !v.endDate) { toast('Pick a start and end date', 'error'); return; }
       if (v.endDate < v.startDate) { toast('End date must be on or after the start date', 'error'); return; }
-    } else if (!v.halfDate) { toast('Pick a date', 'error'); return; }
+    } else {
+      if (!v.partDate) { toast('Pick a date', 'error'); return; }
+      const [s, e] = toPartSpan(v.part, v.start, v.end);
+      if (!(e > s)) { toast('End time must be after the start time', 'error'); return; }
+    }
 
     const btn = root.querySelector('[data-act="save"]');
     btn.disabled = true; btn.textContent = 'Saving…';
